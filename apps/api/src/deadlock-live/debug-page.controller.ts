@@ -119,6 +119,36 @@ export class DebugPageController {
         50% { opacity: 1; }
       }
 
+      .tabs-bar {
+        background-color: var(--bg-card);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 1rem;
+        padding: 0 2rem;
+      }
+
+      .tab-btn {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        padding: 1rem 0.5rem;
+        transition: all 0.2s ease;
+      }
+
+      .tab-btn:hover {
+        color: var(--text-primary);
+      }
+
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+
       main {
         flex: 1;
         padding: 2rem;
@@ -128,11 +158,12 @@ export class DebugPageController {
         display: grid;
         grid-template-columns: 1fr 400px;
         gap: 2rem;
+        transition: grid-template-columns 0.3s ease;
       }
 
       @media (max-width: 1200px) {
         main {
-          grid-template-columns: 1fr;
+          grid-template-columns: 1fr !important;
         }
       }
 
@@ -323,9 +354,9 @@ export class DebugPageController {
       .recent-events-panel {
         display: flex;
         flex-direction: column;
-        max-height: calc(100vh - 120px);
+        max-height: calc(100vh - 180px);
         position: sticky;
-        top: 6.5rem;
+        top: 10rem;
       }
 
       .events-list {
@@ -400,6 +431,174 @@ export class DebugPageController {
         color: var(--border);
       }
 
+      /* Builds view CSS */
+      .builds-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1rem;
+      }
+
+      .build-card {
+        background-color: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        transition: border-color 0.2s ease;
+      }
+
+      .build-card:hover {
+        border-color: rgba(255, 107, 74, 0.3);
+      }
+
+      .build-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.75rem;
+      }
+
+      .build-name {
+        font-size: 1.125rem;
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+
+      .build-desc {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+        line-height: 1.4;
+      }
+
+      .build-stats {
+        font-size: 0.8rem;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--success);
+        font-weight: 600;
+      }
+
+      .phase-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .phase-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        letter-spacing: 0.05em;
+      }
+
+      .phase-items {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+      }
+
+      .phase-item-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border);
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+      }
+
+      .phase-item-row.weapon {
+        border-left: 3px solid #f59e0b;
+      }
+
+      .phase-item-row.vitality {
+        border-left: 3px solid #10b981;
+      }
+
+      .phase-item-row.spirit {
+        border-left: 3px solid #a855f7;
+      }
+
+      .item-pop-badge {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.125rem 0.375rem;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.05);
+        color: var(--text-secondary);
+      }
+
+      .crawler-panel {
+        background-color: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1.5rem;
+      }
+
+      .btn-primary {
+        background-color: var(--accent);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 0.625rem 1.25rem;
+        font-family: inherit;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+
+      .btn-primary:hover {
+        background-color: #ff542b;
+      }
+
+      .btn-primary:disabled {
+        background-color: var(--border);
+        color: var(--text-secondary);
+        cursor: not-allowed;
+      }
+
+      .crawler-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        flex: 1;
+      }
+
+      .crawler-status {
+        font-size: 0.85rem;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      .progress-bar-container {
+        width: 100%;
+        height: 6px;
+        background-color: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 0.5rem;
+      }
+
+      .progress-bar-fill {
+        height: 100%;
+        background-color: var(--accent);
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+
       /* Scrollbar Styling */
       ::-webkit-scrollbar {
         width: 6px;
@@ -429,29 +628,192 @@ export class DebugPageController {
       </div>
     </header>
 
-    <main>
-      <section>
-        <div class="section-title">Match States</div>
-        <div id="matches-container">
-          <div class="card empty-state">
-            <div class="empty-state-icon">📡</div>
-            <div>Waiting for live telemetry events...</div>
-            <div style="font-size: 0.85rem">Start the Overwolf client and launch a Deadlock match.</div>
-          </div>
-        </div>
-      </section>
+    <div class="tabs-bar">
+      <button class="tab-btn active" id="tab-live-btn" onclick="switchTab('live')">Live Ingest</button>
+      <button class="tab-btn" id="tab-builds-btn" onclick="switchTab('builds')">Dynamo Builds Analysis</button>
+    </div>
 
-      <section class="recent-events-panel">
-        <div class="section-title">Raw Event Log (Recent 100)</div>
-        <div class="events-list" id="events-container">
-          <div class="empty-state" style="padding: 2rem 1rem">
-            <div>No events captured yet.</div>
+    <main id="main-content">
+      <!-- Live Tab Content (Matches and Raw Event Log) -->
+      <div id="live-tab-content" style="display: contents;">
+        <section>
+          <div class="section-title">Match States</div>
+          <div id="matches-container">
+            <div class="card empty-state">
+              <div class="empty-state-icon">📡</div>
+              <div>Waiting for live telemetry events...</div>
+              <div style="font-size: 0.85rem">Start the Overwolf client and launch a Deadlock match.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="recent-events-panel">
+          <div class="section-title">Raw Event Log (Recent 100)</div>
+          <div class="events-list" id="events-container">
+            <div class="empty-state" style="padding: 2rem 1rem">
+              <div>No events captured yet.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Builds Tab Content (Dynamo builds & crawler) -->
+      <div id="builds-tab-content" style="display: none; grid-column: span 2; width: 100%;">
+        <div class="crawler-panel">
+          <div class="crawler-info">
+            <span class="crawler-status" id="crawl-status">Idle</span>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="crawl-progress-fill"></div>
+            </div>
+            <span id="crawl-count" style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">0 / 200 matches crawled</span>
+          </div>
+          <button class="btn-primary" id="crawl-btn" onclick="triggerCrawl()">Start Match Crawler</button>
+        </div>
+
+        <div class="section-title">Dynamo Builds from High Rank Matches</div>
+        <div class="builds-grid" id="builds-container">
+          <div class="card empty-state" style="grid-column: span 2">
+            <div>No builds calculated yet.</div>
+            <div style="font-size: 0.85rem">Use the crawler above to search and analyze high-rank Dynamo matches.</div>
           </div>
         </div>
-      </section>
+      </div>
     </main>
 
     <script>
+      let activeTab = 'live';
+      let isCrawlPolling = false;
+
+      function switchTab(tab) {
+        activeTab = tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const main = document.getElementById('main-content');
+        
+        if (tab === 'live') {
+          document.getElementById('tab-live-btn').classList.add('active');
+          document.getElementById('live-tab-content').style.display = 'contents';
+          document.getElementById('builds-tab-content').style.display = 'none';
+          main.style.gridTemplateColumns = '1fr 400px';
+        } else {
+          document.getElementById('tab-builds-btn').classList.add('active');
+          document.getElementById('live-tab-content').style.display = 'none';
+          document.getElementById('builds-tab-content').style.display = 'block';
+          main.style.gridTemplateColumns = '1fr';
+          loadBuilds();
+          checkCrawlProgress();
+        }
+      }
+
+      async function triggerCrawl() {
+        try {
+          const res = await fetch('/deadlock/analysis/dynamo/crawl', { method: 'POST' }).then(r => r.json());
+          if (res.success) {
+            checkCrawlProgress();
+          }
+        } catch (err) {
+          console.error('Failed to trigger crawl:', err);
+        }
+      }
+
+      async function checkCrawlProgress() {
+        if (isCrawlPolling) return;
+        isCrawlPolling = true;
+
+        const poll = async () => {
+          try {
+            const progress = await fetch('/deadlock/analysis/dynamo/progress').then(r => r.json());
+            const btn = document.getElementById('crawl-btn');
+            const statusText = document.getElementById('crawl-status');
+            const fill = document.getElementById('crawl-progress-fill');
+            const countText = document.getElementById('crawl-count');
+
+            statusText.textContent = progress.status;
+            countText.textContent = \`\${progress.current} / \${progress.target} matches crawled\`;
+
+            const pct = Math.min(100, Math.round((progress.current / progress.target) * 100));
+            fill.style.width = \`\${pct}%\`;
+
+            if (progress.isCrawling) {
+              btn.disabled = true;
+              btn.textContent = 'Crawling...';
+              setTimeout(poll, 1000);
+            } else {
+              btn.disabled = false;
+              btn.textContent = progress.current >= progress.target ? 'Re-run Crawler' : 'Start Match Crawler';
+              isCrawlPolling = false;
+              loadBuilds();
+            }
+          } catch (err) {
+            console.error('Progress polling error:', err);
+            isCrawlPolling = false;
+          }
+        };
+
+        poll();
+      }
+
+      async function loadBuilds() {
+        try {
+          const data = await fetch('/deadlock/analysis/dynamo').then(r => r.json());
+          const container = document.getElementById('builds-container');
+
+          if (!data || !data.builds || data.builds.length === 0 || data.totalMatches === 0) {
+            container.innerHTML = \`
+              <div class="card empty-state" style="grid-column: 1 / -1">
+                <div>No builds calculated yet.</div>
+                <div style="font-size: 0.85rem">Use the crawler above to search and analyze high-rank Dynamo matches.</div>
+              </div>\`;
+            return;
+          }
+
+          container.innerHTML = data.builds.map(build => {
+            const renderPhaseItems = (items) => {
+              if (!items || items.length === 0) {
+                return '<span style="color: var(--text-secondary); font-style: italic; font-size: 0.8rem;">No items recorded</span>';
+              }
+              return items.map(i => \`
+                <div class="phase-item-row \${i.slotType}">
+                  <strong>\${i.name}</strong>
+                  <span class="item-pop-badge">\${i.popularity}%</span>
+                </div>
+              \`).join('');
+            };
+
+            return \`
+              <div class="build-card">
+                <div class="build-header">
+                  <div>
+                    <h3 class="build-name">\${build.name}</h3>
+                    <p class="build-desc">\${build.description}</p>
+                  </div>
+                  <div style="text-align: right">
+                    <span class="build-stats">Win Rate: \${build.winRate}%</span>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.125rem;">\${build.matchesCount} matches</div>
+                  </div>
+                </div>
+
+                <div class="phase-section">
+                  <span class="phase-title">Early Game (0-10m)</span>
+                  <div class="phase-items">\${renderPhaseItems(build.earlyGame)}</div>
+                </div>
+
+                <div class="phase-section">
+                  <span class="phase-title">Mid Game (10-20m)</span>
+                  <div class="phase-items">\${renderPhaseItems(build.midGame)}</div>
+                </div>
+
+                <div class="phase-section">
+                  <span class="phase-title">Late Game (20m+)</span>
+                  <div class="phase-items">\${renderPhaseItems(build.lateGame)}</div>
+                </div>
+              </div>
+            \`;
+          }).join('');
+        } catch (err) {
+          console.error('Failed to load builds:', err);
+        }
+      }
+
       function formatTime(seconds) {
         if (seconds === undefined || seconds === null) return '--:--';
         const h = Math.floor(seconds / 3600);
@@ -465,6 +827,7 @@ export class DebugPageController {
       }
 
       async function refresh() {
+        if (activeTab !== 'live') return;
         try {
           const states = await fetch('/deadlock/live/states').then((res) => res.json());
           const events = await fetch('/deadlock/live/events/recent').then((res) => res.json());
