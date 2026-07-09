@@ -434,7 +434,7 @@ export class DebugPageController {
       /* Builds view CSS */
       .builds-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(580px, 1fr));
         gap: 1.5rem;
         margin-top: 1rem;
       }
@@ -533,6 +533,112 @@ export class DebugPageController {
         border-radius: 4px;
         background-color: rgba(255, 255, 255, 0.05);
         color: var(--text-secondary);
+      }
+
+      /* Skill Grid CSS */
+      .skill-grid-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        background-color: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.875rem;
+        margin-top: 0.5rem;
+      }
+
+      .skill-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .skill-label {
+        width: 150px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .skill-cells {
+        display: flex;
+        gap: 3px;
+        flex: 1;
+      }
+
+      .skill-cell {
+        flex: 1;
+        aspect-ratio: 1;
+        max-width: 20px;
+        min-width: 14px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.6rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.1);
+        background-color: rgba(0, 0, 0, 0.15);
+      }
+
+      .skill-cell.active-1 {
+        background-color: rgba(245, 158, 11, 0.2);
+        border-color: #f59e0b;
+        color: #f59e0b;
+        box-shadow: 0 0 5px rgba(245, 158, 11, 0.15);
+      }
+
+      .skill-cell.active-2 {
+        background-color: rgba(16, 185, 129, 0.2);
+        border-color: #10b981;
+        color: #10b981;
+        box-shadow: 0 0 5px rgba(16, 185, 129, 0.15);
+      }
+
+      .skill-cell.active-3 {
+        background-color: rgba(59, 130, 246, 0.2);
+        border-color: #3b82f6;
+        color: #3b82f6;
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.15);
+      }
+
+      .skill-cell.active-4 {
+        background-color: rgba(168, 85, 247, 0.2);
+        border-color: #a855f7;
+        color: #a855f7;
+        box-shadow: 0 0 5px rgba(168, 85, 247, 0.15);
+      }
+
+      .skill-grid-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .skill-header-label {
+        width: 150px;
+      }
+
+      .skill-header-cells {
+        display: flex;
+        gap: 3px;
+        flex: 1;
+      }
+
+      .skill-header-cell {
+        flex: 1;
+        max-width: 20px;
+        min-width: 14px;
+        text-align: center;
+        font-size: 0.6rem;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-secondary);
+        font-weight: 500;
       }
 
       .crawler-panel {
@@ -634,7 +740,7 @@ export class DebugPageController {
     </div>
 
     <main id="main-content">
-      <!-- Live Tab Content (Matches and Raw Event Log) -->
+      <!-- Live Tab Content -->
       <div id="live-tab-content" style="display: contents;">
         <section>
           <div class="section-title">Match States</div>
@@ -657,7 +763,7 @@ export class DebugPageController {
         </section>
       </div>
 
-      <!-- Builds Tab Content (Dynamo builds & crawler) -->
+      <!-- Builds Tab Content -->
       <div id="builds-tab-content" style="display: none; grid-column: span 2; width: 100%;">
         <div class="crawler-panel">
           <div class="crawler-info">
@@ -779,6 +885,53 @@ export class DebugPageController {
               \`).join('');
             };
 
+            const renderSkillGrid = (skillsOrder) => {
+              if (!skillsOrder || skillsOrder.length === 0) {
+                return '<span style="color: var(--text-secondary); font-style: italic; font-size: 0.8rem;">No skill order recorded</span>';
+              }
+
+              const skills = [
+                { num: 1, name: 'Kinetic Pulse (1)', activeClass: 'active-1' },
+                { num: 2, name: 'Rejuvenating Aurora (2)', activeClass: 'active-2' },
+                { num: 3, name: 'Quantum Entanglement (3)', activeClass: 'active-3' },
+                { num: 4, name: 'Singularity (Ult)', activeClass: 'active-4' }
+              ];
+
+              let headerCellsHtml = '';
+              for (let col = 1; col <= 16; col++) {
+                headerCellsHtml += \`<div class="skill-header-cell">\${col}</div>\`;
+              }
+              
+              const gridHeaderHtml = \`
+                <div class="skill-grid-header">
+                  <div class="skill-header-label"></div>
+                  <div class="skill-header-cells">\${headerCellsHtml}</div>
+                </div>
+              \`;
+
+              const rowsHtml = skills.map(skill => {
+                let cellsHtml = '';
+                for (let step = 0; step < 16; step++) {
+                  const isActive = skillsOrder[step] === skill.num;
+                  cellsHtml += \`<div class="skill-cell \${isActive ? skill.activeClass : ''}">\${isActive ? step + 1 : ''}</div>\`;
+                }
+                return \`
+                  <div class="skill-row">
+                    <span class="skill-label">\${skill.name}</span>
+                    <div class="skill-cells">\${cellsHtml}</div>
+                  </div>
+                \`;
+              }).join('');
+
+              return \`
+                <div class="skill-grid-container">
+                  <span class="phase-title" style="margin-bottom: 0.5rem;">Recommended Skill Build Path</span>
+                  \${gridHeaderHtml}
+                  \${rowsHtml}
+                </div>
+              \`;
+            };
+
             return \`
               <div class="build-card">
                 <div class="build-header">
@@ -806,6 +959,8 @@ export class DebugPageController {
                   <span class="phase-title">Late Game (20m+)</span>
                   <div class="phase-items">\${renderPhaseItems(build.lateGame)}</div>
                 </div>
+
+                \${renderSkillGrid(build.skillsOrder)}
               </div>
             \`;
           }).join('');

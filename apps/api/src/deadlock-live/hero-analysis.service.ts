@@ -19,14 +19,15 @@ export interface DynamoMatchData {
     cost: number;
     buyTimeS: number;
   }[];
+  skillsOrder: number[];
 }
 
 @Injectable()
 export class HeroAnalysisService implements OnModuleInit {
   private readonly logger = new Logger(HeroAnalysisService.name);
-  private readonly storageDir = path.resolve(__dirname, '../../../../storage/deadlock-live');
+  private readonly storageDir = path.resolve(process.cwd(), 'storage/deadlock-live');
   private readonly cachePath = path.join(this.storageDir, 'dynamo-matches.json');
-  private readonly itemsMapPath = path.resolve(__dirname, './items-map.json');
+  private readonly itemsMapPath = path.resolve(process.cwd(), 'src/deadlock-live/items-map.json');
 
   private itemsMap: Record<string, { name: string; class_name: string; item_slot_type: string; cost: number; item_tier: number }> = {};
   private cachedMatches: Record<number, DynamoMatchData> = {};
@@ -140,14 +141,24 @@ export class HeroAnalysisService implements OnModuleInit {
       const lateCounts: Record<string, { id: number; name: string; slotType: string; cost: number; count: number }> = {};
 
       group.forEach(m => {
+        const seenInMatch = new Set<string>();
         m.items.forEach(item => {
           // Categorize by timing
           let dest = lateCounts;
+          let phase = 'late';
           if (item.buyTimeS <= 600) {
             dest = earlyCounts;
+            phase = 'early';
           } else if (item.buyTimeS <= 1200) {
             dest = midCounts;
+            phase = 'mid';
           }
+
+          const seenKey = `${item.className}_${phase}`;
+          if (seenInMatch.has(seenKey)) {
+            return;
+          }
+          seenInMatch.add(seenKey);
 
           if (!dest[item.className]) {
             dest[item.className] = {
@@ -175,6 +186,27 @@ export class HeroAnalysisService implements OnModuleInit {
           .slice(0, 6); // Top 6 items per phase
       };
 
+      // Compute consensus skill leveling order (mode for each step from 0 to 15)
+      const skillsOrder: number[] = [];
+      for (let step = 0; step < 16; step++) {
+        const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+        group.forEach(m => {
+          const val = m.skillsOrder?.[step];
+          if (val === 1 || val === 2 || val === 3 || val === 4) {
+            counts[val]++;
+          }
+        });
+        let bestVal = 1;
+        let maxCount = -1;
+        for (const [k, v] of Object.entries(counts)) {
+          if (v > maxCount) {
+            maxCount = v;
+            bestVal = parseInt(k, 10);
+          }
+        }
+        skillsOrder.push(maxCount > 0 ? bestVal : (skillsOrder[step - 1] || 1));
+      }
+
       return {
         name,
         description,
@@ -183,6 +215,7 @@ export class HeroAnalysisService implements OnModuleInit {
         earlyGame: compilePhase(earlyCounts),
         midGame: compilePhase(midCounts),
         lateGame: compilePhase(lateCounts),
+        skillsOrder,
       };
     };
 
@@ -232,12 +265,12 @@ export class HeroAnalysisService implements OnModuleInit {
         }
 
         const match = highRankMatches[i];
-        if (this.processedMatchIds.has(match.matchId)) {
+        if (this.processedMatchIds.has(match.match_id)) {
           continue;
         }
 
-        this.crawlProgress.status = `Inspecting match metadata (${i + 1}/${highRankMatches.length}): Match ID ${match.matchId}`;
-        await this.processMatchId(match.matchId, match.average_badge_team0 || 60);
+        this.crawlProgress.status = `Inspecting match metadata (${i + 1}/${highRankMatches.length}): Match ID ${match.match_id}`;
+        await this.processMatchId(match.match_id, match.average_badge_team0 || 60);
         // Sleep brief 100ms to be kind to the api
         await new Promise(r => setTimeout(r, 100));
       }
@@ -292,7 +325,7 @@ export class HeroAnalysisService implements OnModuleInit {
               await new Promise(r => setTimeout(r, 100)); // sleep 100ms
             }
           } catch (err) {
-            this.logger.warn(`Failed to fetch history for player ${accountId}: ${err.message}`);
+            this.logger.warn(`Failed to fetch history for player ${accountId}: ${(err as any).message}`);
           }
         }
       }
@@ -300,7 +333,7 @@ export class HeroAnalysisService implements OnModuleInit {
       this.crawlProgress.status = 'Crawl finished successfully!';
     } catch (err) {
       this.logger.error('Error crawling matches:', err);
-      this.crawlProgress.status = `Crawl aborted: ${err.message}`;
+      this.crawlProgress.status = `Crawl aborted: ${(err as any).message}`;
     } finally {
       this.isCrawling = false;
       this.crawlProgress.current = Object.keys(this.cachedMatches).length;
@@ -335,18 +368,32 @@ export class HeroAnalysisService implements OnModuleInit {
 
       // Extract items and map their properties using items-map.json
       const itemsList: any[] = dynamoPlayer.items || [];
-      const mappedItems = itemsList
-        .filter(item => item.sold_time_s === 0) // exclude sold items
-        .map(item => {
-          const mapped = this.itemsMap[item.item_id];
-          return {
+      const mappedItems: any[] = [];
+      itemsList.forEach(item => {
+        if (item.sold_time_s !== 0) return;
+        const mapped = this.itemsMap[item.item_id];
+        if (mapped) {
+          mappedItems.push({
             id: item.item_id,
-            name: mapped ? mapped.name : `Item ${item.item_id}`,
-            className: mapped ? mapped.class_name : `upgrade_unknown_${item.item_id}`,
-            slotType: mapped ? mapped.item_slot_type : 'spirit',
-            cost: mapped ? mapped.cost : 0,
+            name: mapped.name,
+            className: mapped.class_name,
+            slotType: mapped.item_slot_type,
+            cost: mapped.cost,
             buyTimeS: item.game_time_s || 0,
-          };
+          });
+        }
+      });
+
+      // Extract abilities level-up path (chronological order)
+      const dynamoAbilities = [3760705623, 492030745, 2031714424, 249410288];
+      const skillPath = itemsList
+        .filter(item => dynamoAbilities.includes(item.item_id))
+        .sort((a, b) => (a.game_time_s || 0) - (b.game_time_s || 0))
+        .map(item => {
+          if (item.item_id === 3760705623) return 1; // Kinetic Pulse
+          if (item.item_id === 492030745) return 2;  // Rejuvenating Aurora
+          if (item.item_id === 2031714424) return 3; // Quantum Entanglement
+          return 4; // Singularity
         });
 
       const matchData: DynamoMatchData = {
@@ -358,6 +405,7 @@ export class HeroAnalysisService implements OnModuleInit {
         assists: dynamoPlayer.assists || 0,
         netWorth: dynamoPlayer.net_worth || 0,
         items: mappedItems,
+        skillsOrder: skillPath,
       };
 
       this.cachedMatches[matchId] = matchData;
@@ -371,7 +419,7 @@ export class HeroAnalysisService implements OnModuleInit {
       this.logger.log(`Logged Dynamo match: ${matchId} | Badge: ${badge} | Win: ${win}`);
       return true;
     } catch (err) {
-      this.logger.warn(`Failed to process match ${matchId}: ${err.message}`);
+      this.logger.warn(`Failed to process match ${matchId}: ${(err as any).message}`);
       return false;
     }
   }

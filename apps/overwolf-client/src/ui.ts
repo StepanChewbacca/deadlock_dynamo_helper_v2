@@ -107,6 +107,58 @@ function renderActiveBuild(idx: number): void {
   if (earlyEl) earlyEl.innerHTML = renderPhaseItems(build.earlyGame);
   if (midEl) midEl.innerHTML = renderPhaseItems(build.midGame);
   if (lateEl) lateEl.innerHTML = renderPhaseItems(build.lateGame);
+
+  const skillsEl = document.getElementById('guide-skills');
+  if (skillsEl) {
+    skillsEl.innerHTML = renderSkillGrid(build.skillsOrder);
+  }
+}
+
+function renderSkillGrid(skillsOrder: number[]): string {
+  if (!skillsOrder || skillsOrder.length === 0) {
+    return '<span style="color: var(--text-secondary); font-style: italic; font-size: 0.75rem;">No skill order recorded</span>';
+  }
+
+  const skills = [
+    { num: 1, name: 'Kinetic Pulse (1)', activeClass: 'active-1' },
+    { num: 2, name: 'Rejuvenating Aurora (2)', activeClass: 'active-2' },
+    { num: 3, name: 'Quantum Entanglement (3)', activeClass: 'active-3' },
+    { num: 4, name: 'Singularity (Ult)', activeClass: 'active-4' }
+  ];
+
+  let headerCellsHtml = '';
+  for (let col = 1; col <= 16; col++) {
+    headerCellsHtml += `<div class="skill-header-cell">${col}</div>`;
+  }
+  
+  const gridHeaderHtml = `
+    <div class="skill-grid-header">
+      <div class="skill-header-label"></div>
+      <div class="skill-header-cells">${headerCellsHtml}</div>
+    </div>
+  `;
+
+  const rowsHtml = skills.map(skill => {
+    let cellsHtml = '';
+    for (let step = 0; step < 16; step++) {
+      const isActive = skillsOrder[step] === skill.num;
+      cellsHtml += `<div class="skill-cell ${isActive ? skill.activeClass : ''}">${isActive ? step + 1 : ''}</div>`;
+    }
+    return `
+      <div class="skill-row">
+        <span class="skill-label">${skill.name}</span>
+        <div class="skill-cells">${cellsHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="skill-grid-container">
+      <span class="phase-col-title" style="margin-bottom: 0.5rem; display: block;">Recommended Skill Build Path</span>
+      ${gridHeaderHtml}
+      ${rowsHtml}
+    </div>
+  `;
 }
 
 // Bind to window for HTML element access

@@ -29,6 +29,7 @@ describe('HeroAnalysisService', () => {
           { id: 102, name: 'Restorative Locket', className: 'upgrade_restorative_locket', slotType: 'vitality', cost: 1600, buyTimeS: 500 },
           { id: 103, name: 'Rescue Beam', className: 'upgrade_rescue_beam', slotType: 'vitality', cost: 3200, buyTimeS: 1100 },
         ],
+        skillsOrder: [1, 1, 2, 2, 3],
       },
       2: {
         matchId: 2,
@@ -42,6 +43,7 @@ describe('HeroAnalysisService', () => {
           { id: 201, name: 'Kinetic Dash', className: 'upgrade_kinetic_dash', slotType: 'weapon', cost: 800, buyTimeS: 150 },
           { id: 202, name: 'Lucky Shot', className: 'upgrade_lucky_shot', slotType: 'weapon', cost: 6200, buyTimeS: 1300 },
         ],
+        skillsOrder: [1, 2],
       },
       3: {
         matchId: 3,
@@ -56,6 +58,7 @@ describe('HeroAnalysisService', () => {
           { id: 302, name: 'Improved Reach', className: 'upgrade_improved_reach', slotType: 'spirit', cost: 1600, buyTimeS: 900 },
           { id: 303, name: 'Refresher', className: 'upgrade_curtis_cooldown', slotType: 'spirit', cost: 6200, buyTimeS: 1500 },
         ],
+        skillsOrder: [3, 3, 3],
       },
     };
 
@@ -72,6 +75,8 @@ describe('HeroAnalysisService', () => {
     expect(support?.winRate).toBe(100);
     expect(support?.earlyGame).toHaveLength(2); // Healing Rite & Restorative Locket bought <= 10m
     expect(support?.midGame).toHaveLength(1); // Rescue Beam bought <= 20m
+    expect(support?.skillsOrder).toHaveLength(16);
+    expect(support?.skillsOrder?.slice(0, 5)).toEqual([1, 1, 2, 2, 3]);
 
     // Weapon build (match 2 has 2 weapon items, 0 spirit items -> weaponCount > spiritCount)
     const weapon = result.builds.find(b => b.name.includes('Weapon'));

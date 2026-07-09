@@ -248,6 +248,7 @@
         gap: 1rem;
         flex: 1;
         overflow: hidden;
+        min-height: 240px;
       }
 
       .phase-col {
@@ -300,6 +301,111 @@
         font-size: 0.65rem;
         font-weight: 600;
         color: var(--text-secondary);
+      }
+
+      /* Skill Grid Layout */
+      .skill-grid-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        background-color: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.875rem;
+      }
+
+      .skill-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .skill-label {
+        width: 150px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .skill-cells {
+        display: flex;
+        gap: 3px;
+        flex: 1;
+      }
+
+      .skill-cell {
+        flex: 1;
+        aspect-ratio: 1;
+        max-width: 20px;
+        min-width: 14px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.6rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.05);
+        background-color: rgba(0, 0, 0, 0.15);
+      }
+
+      .skill-cell.active-1 {
+        background-color: rgba(245, 158, 11, 0.25);
+        border-color: #f59e0b;
+        color: #f59e0b;
+        box-shadow: 0 0 5px rgba(245, 158, 11, 0.15);
+      }
+
+      .skill-cell.active-2 {
+        background-color: rgba(16, 185, 129, 0.25);
+        border-color: #10b981;
+        color: #10b981;
+        box-shadow: 0 0 5px rgba(16, 185, 129, 0.15);
+      }
+
+      .skill-cell.active-3 {
+        background-color: rgba(59, 130, 246, 0.25);
+        border-color: #3b82f6;
+        color: #3b82f6;
+        box-shadow: 0 0 5px rgba(59, 130, 246, 0.15);
+      }
+
+      .skill-cell.active-4 {
+        background-color: rgba(168, 85, 247, 0.25);
+        border-color: #a855f7;
+        color: #a855f7;
+        box-shadow: 0 0 5px rgba(168, 85, 247, 0.15);
+      }
+
+      .skill-grid-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .skill-header-label {
+        width: 150px;
+      }
+
+      .skill-header-cells {
+        display: flex;
+        gap: 3px;
+        flex: 1;
+      }
+
+      .skill-header-cell {
+        flex: 1;
+        max-width: 20px;
+        min-width: 14px;
+        text-align: center;
+        font-size: 0.6rem;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-secondary);
+        font-weight: 500;
       }
 
       /* Scrollbars */
@@ -387,6 +493,9 @@
               <div class="phase-items" id="phase-late"></div>
             </div>
           </div>
+
+          <!-- Skill Level-up Path -->
+          <div id="guide-skills"></div>
         </div>
       </div>
     </div>
