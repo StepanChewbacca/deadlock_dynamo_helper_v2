@@ -16,7 +16,6 @@
         "file": "desktop.html",
         "transparent": false,
         "resizable": true,
-        "use_in_game_coordinate_system": true,
         "size": {
           "width": 600,
           "height": 400
@@ -27,9 +26,6 @@
         }
       }
     },
-    "game_events": {
-      "game_ids": [24482],
-      "required_features": ["game_info", "match_info"]
-    }
+    "game_events": [24482]
   }
 }
