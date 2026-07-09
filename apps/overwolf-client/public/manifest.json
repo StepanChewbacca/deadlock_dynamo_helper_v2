@@ -1,0 +1,36 @@
+{
+  "manifest-version": 1,
+  "type": "webapp",
+  "meta": {
+    "name": "Deadlock Live Probe",
+    "version": "0.0.1",
+    "minimum-overwolf-version": "0.197.0",
+    "author": "Antigravity",
+    "description": "Telemetry probe for Deadlock GEP data",
+    "icon": "icon.png"
+  },
+  "data": {
+    "start_window": "desktop",
+    "windows": {
+      "desktop": {
+        "file": "desktop.html",
+        "transparent": false,
+        "resizable": true,
+        "use_in_game_coordinate_system": true,
+        "size": {
+          "width": 600,
+          "height": 400
+        },
+        "min_size": {
+          "width": 400,
+          "height": 300
+        }
+      }
+    },
+    "game_events": {
+      "game_ids": [24482],
+      "required_features": ["game_info", "match_info"]
+    },
+    "extra-objects": {}
+  }
+}
