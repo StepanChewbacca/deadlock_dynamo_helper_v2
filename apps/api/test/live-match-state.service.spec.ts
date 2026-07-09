@@ -81,6 +81,72 @@ describe('LiveMatchStateService', () => {
     ]);
   });
 
+  it('keeps later batches without match id on the last resolved match for a client', () => {
+    const service = new LiveMatchStateService();
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        { receivedAt: 1, source: 'onInfoUpdates2', key: 'match_id', payload: '42' },
+        {
+          receivedAt: 2,
+          source: 'onInfoUpdates2',
+          key: 'roster_0',
+          payload: { steam_id: 's1', player_name: 'P1', hero_name: 'Warden' },
+        },
+      ],
+    });
+
+    const state = service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        {
+          receivedAt: 3,
+          source: 'onInfoUpdates2',
+          key: 'roster_0',
+          payload: { steam_id: 's1', kills: 2 },
+        },
+      ],
+    });
+
+    expect(state?.matchId).toBe('42');
+    expect(service.getState('42')?.playersBySteamId.s1.kills).toBe(2);
+  });
+
+  it('migrates pre-id client state from unknown once a real match id arrives', () => {
+    const service = new LiveMatchStateService();
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        { receivedAt: 1, source: 'onInfoUpdates2', key: 'match_clock', payload: '00:45' },
+        {
+          receivedAt: 2,
+          source: 'onInfoUpdates2',
+          key: 'roster_0',
+          payload: { steam_id: 's1', player_name: 'P1', hero_name: 'Warden', souls: 500 },
+        },
+      ],
+    });
+
+    const state = service.applyBatch({
+      clientId: 'test-client',
+      events: [{ receivedAt: 3, source: 'onInfoUpdates2', key: 'match_id', payload: '42' }],
+    });
+
+    expect(state).toMatchObject({
+      matchId: '42',
+      gameTimeSec: 45,
+      playersBySteamId: {
+        s1: {
+          steamId: 's1',
+          playerName: 'P1',
+          heroName: 'Warden',
+          souls: 500,
+        },
+      },
+    });
+    expect(service.getState('unknown')).toBeUndefined();
+  });
+
   it('ignores malformed payloads without throwing', () => {
     const service = new LiveMatchStateService();
 

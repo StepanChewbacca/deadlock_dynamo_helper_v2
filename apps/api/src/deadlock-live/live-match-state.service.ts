@@ -13,14 +13,10 @@ export class LiveMatchStateService {
   private readonly clientMatchIds = new Map<string, string>();
 
   applyBatch(batch: OverwolfLiveBatchDto): MinimalMatchState | undefined {
-    const currentMatchId =
-      this.extractMatchId(batch.events) ?? this.clientMatchIds.get(batch.clientId) ?? 'unknown';
-    const state =
-      this.states.get(currentMatchId) ?? {
-        matchId: currentMatchId,
-        playersBySteamId: {},
-        lastUpdatedAt: new Date().toISOString(),
-      };
+    const extractedMatchId = this.extractMatchId(batch.events);
+    const previousMatchId = this.clientMatchIds.get(batch.clientId);
+    const currentMatchId = extractedMatchId ?? previousMatchId ?? 'unknown';
+    const state = this.getOrCreateState(currentMatchId, previousMatchId, extractedMatchId);
 
     this.clientMatchIds.set(batch.clientId, currentMatchId);
 
@@ -40,6 +36,75 @@ export class LiveMatchStateService {
 
   getAllStates(): MinimalMatchState[] {
     return [...this.states.values()];
+  }
+
+  private getOrCreateState(
+    currentMatchId: string,
+    previousMatchId: string | undefined,
+    extractedMatchId: string | undefined,
+  ): MinimalMatchState {
+    if (previousMatchId === 'unknown' && extractedMatchId && extractedMatchId !== 'unknown') {
+      return this.migrateUnknownState(extractedMatchId);
+    }
+
+    return (
+      this.states.get(currentMatchId) ?? {
+        matchId: currentMatchId,
+        playersBySteamId: {},
+        lastUpdatedAt: new Date().toISOString(),
+      }
+    );
+  }
+
+  private migrateUnknownState(matchId: string): MinimalMatchState {
+    const unknownState = this.states.get('unknown');
+    const existingState = this.states.get(matchId);
+
+    if (!unknownState) {
+      return (
+        existingState ?? {
+          matchId,
+          playersBySteamId: {},
+          lastUpdatedAt: new Date().toISOString(),
+        }
+      );
+    }
+
+    if (!existingState) {
+      this.states.delete('unknown');
+      return {
+        ...unknownState,
+        matchId,
+      };
+    }
+
+    this.states.delete('unknown');
+
+    return {
+      ...unknownState,
+      ...existingState,
+      matchId,
+      playersBySteamId: this.mergePlayersBySteamId(
+        unknownState.playersBySteamId,
+        existingState.playersBySteamId,
+      ),
+    };
+  }
+
+  private mergePlayersBySteamId(
+    basePlayers: Record<string, MinimalPlayerState>,
+    nextPlayers: Record<string, MinimalPlayerState>,
+  ): Record<string, MinimalPlayerState> {
+    const mergedPlayers: Record<string, MinimalPlayerState> = { ...basePlayers };
+
+    for (const [steamId, nextPlayer] of Object.entries(nextPlayers)) {
+      mergedPlayers[steamId] = {
+        ...(mergedPlayers[steamId] ?? {}),
+        ...nextPlayer,
+      };
+    }
+
+    return mergedPlayers;
   }
 
   private applyEvent(state: MinimalMatchState, event: OverwolfLiveEventDto): void {
