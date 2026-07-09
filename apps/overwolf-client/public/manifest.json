@@ -17,12 +17,12 @@
         "transparent": false,
         "resizable": true,
         "size": {
-          "width": 600,
-          "height": 400
+          "width": 900,
+          "height": 600
         },
         "min_size": {
-          "width": 400,
-          "height": 300
+          "width": 600,
+          "height": 400
         }
       }
     },

@@ -29,6 +29,8 @@ const customFetch = async (url: string, init?: RequestInit): Promise<Response> =
 
 const buffer = new LiveEventBuffer(clientId, apiBaseUrl, customFetch, 1000);
 
+let guideLoaded = false;
+
 async function start() {
   try {
     ui.updateStatus('REGISTERING...', 'init');
@@ -41,6 +43,38 @@ async function start() {
       const eventDetails = `Source: ${event.source} | Key: ${event.key || 'n/a'} | Cat: ${event.category || 'n/a'}`;
       ui.updateLastEvent(eventDetails);
       ui.logConsole(`GEP Event: ${JSON.stringify(event)}`);
+
+      // Intercept roster updates to display/hide Dynamo build guide
+      if (event.category === 'roster' || (event.key && event.key.startsWith('roster_'))) {
+        const payload: any = event.payload || {};
+        if (payload.is_local === true) {
+          const heroName = payload.hero_name || '';
+          const heroId = payload.hero_id;
+          const isDynamo = heroName.toLowerCase().includes('dynamo') || heroId === 11;
+
+          if (isDynamo) {
+            if (!guideLoaded) {
+              ui.logConsole('Local Dynamo player detected in match! Querying builds from API...');
+              fetch(`${apiBaseUrl}/deadlock/analysis/dynamo`)
+                .then((r) => r.json())
+                .then((data) => {
+                  ui.showDynamoGuide(data);
+                  guideLoaded = true;
+                  ui.logConsole('Dynamo builds successfully loaded in guide panel.');
+                })
+                .catch((err) => {
+                  ui.logConsole(`Failed to fetch Dynamo builds: ${err.message || err}`);
+                });
+            }
+          } else {
+            if (guideLoaded) {
+              ui.hideDynamoGuide();
+              guideLoaded = false;
+              ui.logConsole('Different hero selected. Cleared Dynamo guide.');
+            }
+          }
+        }
+      }
 
       // Push to buffering queue
       buffer.push(event);
