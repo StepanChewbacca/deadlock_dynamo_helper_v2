@@ -4,7 +4,8 @@
     "outDir": "dist",
     "rootDir": ".",
     "emitDecoratorMetadata": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "paths": {}
   },
   "include": [
     "src/**/*.ts",

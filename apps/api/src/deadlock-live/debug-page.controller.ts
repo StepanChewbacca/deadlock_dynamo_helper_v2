@@ -459,9 +459,9 @@ export class DebugPageController {
         const s = seconds % 60;
         const pad = (n) => String(n).padStart(2, '0');
         if (h > 0) {
-          return `\${pad(h)}:\${pad(m)}:\${pad(s)}`;
+          return \`\${pad(h)}:\${pad(m)}:\${pad(s)}\`;
         }
-        return `\${pad(m)}:\${pad(s)}`;
+        return \`\${pad(m)}:\${pad(s)}\`;
       }
 
       async function refresh() {
@@ -479,12 +479,12 @@ export class DebugPageController {
       function renderStates(states) {
         const container = document.getElementById('matches-container');
         if (!states || states.length === 0) {
-          container.innerHTML = `
+          container.innerHTML = \`
             <div class="card empty-state">
               <div class="empty-state-icon">📡</div>
               <div>Waiting for live telemetry events...</div>
               <div style="font-size: 0.85rem">Start the Overwolf client and launch a Deadlock match.</div>
-            </div>`;
+            </div>\`;
           return;
         }
 
@@ -493,7 +493,7 @@ export class DebugPageController {
           
           let playersHtml = '';
           if (players.length === 0) {
-            playersHtml = `<tr><td colspan="7" class="empty-state" style="padding: 1.5rem">No players registered in roster yet.</td></tr>`;
+            playersHtml = \`<tr><td colspan="7" class="empty-state" style="padding: 1.5rem">No players registered in roster yet.</td></tr>\`;
           } else {
             playersHtml = players.map(p => {
               const itemsHtml = (p.items || []).map(item => \`
@@ -532,21 +532,21 @@ export class DebugPageController {
             }).join('');
           }
 
-          return `
+          return \`
             <div class="card">
               <div class="match-header">
                 <div class="match-info-meta">
                   <div class="meta-item">
                     <span class="meta-label">Match ID</span>
-                    <span class="meta-value" style="font-family: 'JetBrains Mono', monospace; color: var(--text-primary)">${match.matchId}</span>
+                    <span class="meta-value" style="font-family: 'JetBrains Mono', monospace; color: var(--text-primary)">\${match.matchId}</span>
                   </div>
                   <div class="meta-item">
                     <span class="meta-label">Last Updated</span>
-                    <span class="meta-value" style="font-size: 0.875rem; font-weight: normal; margin-top: 0.25rem">${new Date(match.lastUpdatedAt).toLocaleTimeString()}</span>
+                    <span class="meta-value" style="font-size: 0.875rem; font-weight: normal; margin-top: 0.25rem">\${new Date(match.lastUpdatedAt).toLocaleTimeString()}</span>
                   </div>
                 </div>
                 <div class="match-clock-container">
-                  ${formatTime(match.gameTimeSec)}
+                  \${formatTime(match.gameTimeSec)}
                 </div>
               </div>
               <div class="table-wrapper">
@@ -567,17 +567,17 @@ export class DebugPageController {
                   </tbody>
                 </table>
               </div>
-            </div>`;
+            </div>\`;
         }).join('');
       }
 
       function renderEvents(events) {
         const container = document.getElementById('events-container');
         if (!events || events.length === 0) {
-          container.innerHTML = `
+          container.innerHTML = \`
             <div class="empty-state" style="padding: 2rem 1rem">
               <div>No events captured yet.</div>
-            </div>`;
+            </div>\`;
           return;
         }
 
@@ -589,20 +589,20 @@ export class DebugPageController {
             payloadStr = String(e.payload);
           }
 
-          return `
+          return \`
             <div class="event-item">
               <div class="event-header">
-                <span class="event-source">${e.source}</span>
-                <span>${new Date(e.receivedAt).toLocaleTimeString()}</span>
+                <span class="event-source">\${e.source}</span>
+                <span>\${new Date(e.receivedAt).toLocaleTimeString()}</span>
               </div>
               <div class="event-meta">
-                ${e.feature ? `<span>feature: <strong style="color: #cbd5e1">${e.feature}</strong></span>` : ''}
-                ${e.category ? `<span>category: <strong style="color: #cbd5e1">${e.category}</strong></span>` : ''}
-                ${e.key ? `<span>key: <strong class="event-key">${e.key}</strong></span>` : ''}
-                ${e.matchId ? `<span>match: <strong style="color: #cbd5e1">${e.matchId}</strong></span>` : ''}
+                \${e.feature ? \`<span>feature: <strong style="color: #cbd5e1">\${e.feature}</strong></span>\` : ''}
+                \${e.category ? \`<span>category: <strong style="color: #cbd5e1">\${e.category}</strong></span>\` : ''}
+                \${e.key ? \`<span>key: <strong class="event-key">\${e.key}</strong></span>\` : ''}
+                \${e.matchId ? \`<span>match: <strong style="color: #cbd5e1">\${e.matchId}</strong></span>\` : ''}
               </div>
-              <pre class="event-payload">${payloadStr}</pre>
-            </div>`;
+              <pre class="event-payload">\${payloadStr}</pre>
+            </div>\`;
         }).join('');
       }
 
