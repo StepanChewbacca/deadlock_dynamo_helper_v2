@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "type": "webapp",
+  "type": "WebApp",
   "meta": {
     "name": "Deadlock Live Probe",
     "version": "0.0.1",
@@ -30,7 +30,6 @@
     "game_events": {
       "game_ids": [24482],
       "required_features": ["game_info", "match_info"]
-    },
-    "extra-objects": {}
+    }
   }
 }
