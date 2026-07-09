@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { LiveMatchStateService } from './live-match-state.service';
 
-@Module({})
+@Module({
+  providers: [LiveMatchStateService],
+  exports: [LiveMatchStateService],
+})
 export class DeadlockLiveModule {}

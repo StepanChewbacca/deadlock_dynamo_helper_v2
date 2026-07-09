@@ -9,6 +9,17 @@
     "test": "jest --runInBand",
     "lint": "echo \"api: no lint\""
   },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "preset": "ts-jest",
+    "rootDir": ".",
+    "testEnvironment": "node",
+    "testRegex": "test/.*\\.spec\\.ts$"
+  },
   "dependencies": {
     "@deadlock-live-probe/shared": "0.0.1",
     "@nestjs/common": "^11.1.6",
