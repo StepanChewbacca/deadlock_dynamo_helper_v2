@@ -5,6 +5,8 @@ import { LiveMatchStateService } from './live-match-state.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
+import { RecentMatchesWindowController } from './recent-matches-window.controller';
+import { RecentMatchesWindowService } from './recent-matches-window.service';
 import { LiveIngestController } from './live-ingest.controller';
 import { DebugPageController } from './debug-page.controller';
 import { HeroAnalysisService } from './hero-analysis.service';
@@ -67,6 +69,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     DebugPageController,
     HeroAnalysisController,
     AllHeroesAnalysisController,
+    RecentMatchesWindowController,
     ReferenceDataController,
     IngestStatusController,
   ],
@@ -75,6 +78,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryShadowReplayService,
     RawEventLogService,
     RecentLiveEventsService,
+    RecentMatchesWindowService,
     HeroAnalysisService,
     RulesetResolverService,
     RulesetResolutionRefreshService,
@@ -97,6 +101,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryShadowReplayService,
     RawEventLogService,
     RecentLiveEventsService,
+    RecentMatchesWindowService,
     HeroAnalysisService,
     RulesetResolverService,
     RulesetResolutionRefreshService,
