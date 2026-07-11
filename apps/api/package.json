@@ -21,6 +21,7 @@
     "testRegex": "test/.*\\.spec\\.ts$"
   },
   "dependencies": {
+    "@deadlock-live-probe/build-domain": "0.0.1",
     "@deadlock-live-probe/shared": "0.0.1",
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
