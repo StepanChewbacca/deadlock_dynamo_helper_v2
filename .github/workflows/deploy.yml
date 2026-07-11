@@ -1,0 +1,30 @@
+name: Deploy API
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy files to deployment directory
+        run: |
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude 'storage' \
+            ./ /home/opc/deadlock/
+
+      - name: Rebuild and restart API
+        run: |
+          cd /home/opc/deadlock
+          sudo docker compose build api
+          # Run migrations
+          sudo docker compose run --rm api node run-migrations.js
+          # Start api
+          sudo docker compose up -d api
