@@ -1,0 +1,11 @@
+node_modules
+dist
+apps/api/dist
+packages/shared/dist
+apps/overwolf-client
+storage
+.git
+.gitignore
+deploy.sh
+README.md
+docs

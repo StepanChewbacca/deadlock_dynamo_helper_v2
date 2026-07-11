@@ -26,6 +26,7 @@ export type MinimalItemState = {
 export type MinimalPlayerState = {
   steamId: string;
   playerName: string;
+  isLocal?: boolean;
   heroId?: number;
   heroName?: string;
   teamId?: number;
@@ -48,4 +49,28 @@ export type MinimalMatchState = {
   gameTimeSec?: number;
   playersBySteamId: Record<string, MinimalPlayerState>;
   lastUpdatedAt: string;
+};
+
+export type MinimalPlayerSnapshot = Pick<
+  MinimalPlayerState,
+  | 'steamId'
+  | 'heroId'
+  | 'teamId'
+  | 'level'
+  | 'souls'
+  | 'kills'
+  | 'deaths'
+  | 'assists'
+  | 'heroDamage'
+  | 'objectDamage'
+  | 'healing'
+> & {
+  itemIds: number[];
+};
+
+export type MinimalMatchSnapshot = {
+  matchId: string;
+  gameTimeSec?: number;
+  capturedAt: string;
+  playersBySteamId: Record<string, MinimalPlayerSnapshot>;
 };

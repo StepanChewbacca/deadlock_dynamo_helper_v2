@@ -3,3 +3,8 @@ dist
 .yarn
 coverage
 storage
+.env
+.env.*
+!.env.example
+.idea
+.qwen

@@ -6,7 +6,7 @@
     "version": "0.0.1",
     "minimum-overwolf-version": "0.197.0",
     "author": "Antigravity",
-    "description": "Telemetry probe for Deadlock GEP data",
+    "description": "Telemetry probe and dynamic build overlay for Deadlock",
     "icon": "icon.png"
   },
   "data": {
@@ -17,13 +17,56 @@
         "transparent": false,
         "resizable": true,
         "size": {
-          "width": 900,
+          "width": 600,
           "height": 600
         },
         "min_size": {
           "width": 600,
           "height": 400
         }
+      },
+      "in_game": {
+        "file": "in_game.html",
+        "transparent": true,
+        "resizable": true,
+        "clickthrough": false,
+        "use_in_game_coordinate_system": true,
+        "size": {
+          "width": 340,
+          "height": 700
+        },
+        "min_size": {
+          "width": 340,
+          "height": 400
+        },
+        "default_position": {
+          "x": 20,
+          "y": 80
+        },
+        "in_game_only": true
+      },
+      "dynamo_warning": {
+        "file": "dynamo_warning.html",
+        "transparent": true,
+        "resizable": true,
+        "clickthrough": false,
+        "use_in_game_coordinate_system": true,
+        "size": {
+          "width": 400,
+          "height": 150
+        },
+        "default_position": {
+          "x": 800,
+          "y": 180
+        },
+        "in_game_only": true
+      }
+    },
+    "hotkeys": {
+      "toggle_overlay": {
+        "title": "Toggle In-Game Build Overlay",
+        "action-name": "toggle_overlay",
+        "default": "Ctrl+Tab"
       }
     },
     "game_events": [24482]

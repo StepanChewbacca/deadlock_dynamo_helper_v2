@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    volumes:
+      - deadlock-storage:/app/apps/api/storage
+    environment:
+      - DB_HOST=aboba-telegramovich-postgres-1
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=deadlock_builds
+      - DEADLOCK_API_KEY=${DEADLOCK_API_KEY}
+    restart: always
+    networks:
+      - default
+      - aboba-telegramovich_default
+
+volumes:
+  deadlock-storage:
+
+networks:
+  aboba-telegramovich_default:
+    external: true

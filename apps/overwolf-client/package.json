@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "webpack --mode production && node scripts/sync-public-to-windows.js",
     "dev": "webpack --mode development",
     "test": "jest --runInBand",
     "lint": "echo \"overwolf: no lint\""

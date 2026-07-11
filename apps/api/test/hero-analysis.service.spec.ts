@@ -1,16 +1,10 @@
-import { Test } from '@nestjs/testing';
 import { HeroAnalysisService, DynamoMatchData } from '../src/deadlock-live/hero-analysis.service';
-import * as fs from 'fs';
 
 describe('HeroAnalysisService', () => {
   let service: HeroAnalysisService;
 
-  beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
-      providers: [HeroAnalysisService],
-    }).compile();
-
-    service = moduleRef.get(HeroAnalysisService);
+  beforeEach(() => {
+    service = new HeroAnalysisService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
   });
 
   it('correctly aggregates and clusters builds', () => {

@@ -157,4 +157,44 @@ describe('LiveMatchStateService', () => {
       }),
     ).not.toThrow();
   });
+
+  it('captures rolling snapshots on interval and item changes', () => {
+    const service = new LiveMatchStateService();
+
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        { receivedAt: 1, source: 'onInfoUpdates2', key: 'match_id', payload: '42' },
+        { receivedAt: 2, source: 'onInfoUpdates2', key: 'match_clock', payload: '01:00' },
+        {
+          receivedAt: 3,
+          source: 'onInfoUpdates2',
+          key: 'roster_0',
+          payload: { steam_id: 's1', hero_id: 13, team: 0, souls: 1000 },
+        },
+      ],
+    });
+
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        { receivedAt: 4, source: 'onInfoUpdates2', key: 'match_clock', payload: '01:10' },
+        {
+          receivedAt: 5,
+          source: 'onInfoUpdates2',
+          key: 'items_0',
+          payload: { steam_id: 's1', items: [{ id: 1, name: 'Boots', class_name: 'boots', enhanced: false }] },
+        },
+      ],
+    });
+
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [{ receivedAt: 6, source: 'onInfoUpdates2', key: 'match_clock', payload: '01:40' }],
+    });
+
+    const snapshots = service.getSnapshots('42');
+    expect(snapshots.length).toBeGreaterThanOrEqual(3);
+    expect(snapshots[snapshots.length - 1]?.playersBySteamId.s1.itemIds).toEqual([1]);
+  });
 });

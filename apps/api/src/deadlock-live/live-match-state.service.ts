@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   MinimalItemState,
   MinimalMatchState,
+  MinimalMatchSnapshot,
   MinimalPlayerState,
   OverwolfLiveBatchDto,
   OverwolfLiveEventDto,
@@ -9,8 +10,11 @@ import {
 
 @Injectable()
 export class LiveMatchStateService {
+  private readonly snapshotIntervalSec = 30;
+  private readonly maxSnapshotsPerMatch = 120;
   private readonly states = new Map<string, MinimalMatchState>();
   private readonly clientMatchIds = new Map<string, string>();
+  private readonly snapshots = new Map<string, MinimalMatchSnapshot[]>();
 
   applyBatch(batch: OverwolfLiveBatchDto): MinimalMatchState | undefined {
     const extractedMatchId = this.extractMatchId(batch.events);
@@ -20,12 +24,14 @@ export class LiveMatchStateService {
 
     this.clientMatchIds.set(batch.clientId, currentMatchId);
 
+    let shouldSnapshot = false;
     for (const event of batch.events) {
-      this.applyEvent(state, event);
+      shouldSnapshot = this.applyEvent(state, event) || shouldSnapshot;
     }
 
     state.lastUpdatedAt = new Date().toISOString();
     this.states.set(currentMatchId, state);
+    this.captureSnapshotIfNeeded(state, shouldSnapshot);
 
     return state;
   }
@@ -36,6 +42,10 @@ export class LiveMatchStateService {
 
   getAllStates(): MinimalMatchState[] {
     return [...this.states.values()];
+  }
+
+  getSnapshots(matchId: string): MinimalMatchSnapshot[] {
+    return [...(this.snapshots.get(matchId) ?? [])];
   }
 
   private getOrCreateState(
@@ -107,23 +117,25 @@ export class LiveMatchStateService {
     return mergedPlayers;
   }
 
-  private applyEvent(state: MinimalMatchState, event: OverwolfLiveEventDto): void {
+  private applyEvent(state: MinimalMatchState, event: OverwolfLiveEventDto): boolean {
     if (event.key === 'match_clock') {
       const seconds = this.parseClockSeconds(event.payload);
       if (seconds !== undefined) {
         state.gameTimeSec = seconds;
       }
-      return;
+      return false;
     }
 
     if (event.key?.startsWith('roster')) {
       this.applyRosterPayload(state, event.payload);
-      return;
+      return false;
     }
 
     if (event.key?.startsWith('items')) {
-      this.applyItemsPayload(state, event.payload);
+      return this.applyItemsPayload(state, event.payload);
     }
+
+    return false;
   }
 
   private extractMatchId(events: OverwolfLiveEventDto[]): string | undefined {
@@ -196,6 +208,9 @@ export class LiveMatchStateService {
     if (playerName !== undefined) {
       player.playerName = playerName;
     }
+    if ('is_local' in payload || 'isLocal' in payload) {
+      player.isLocal = this.getBooleanValue(payload, 'is_local') || this.getBooleanValue(payload, 'isLocal');
+    }
     if (heroName !== undefined) {
       player.heroName = heroName;
     }
@@ -240,19 +255,19 @@ export class LiveMatchStateService {
     }
   }
 
-  private applyItemsPayload(state: MinimalMatchState, payload: unknown): void {
+  private applyItemsPayload(state: MinimalMatchState, payload: unknown): boolean {
     if (!this.isRecord(payload)) {
-      return;
+      return false;
     }
 
     const steamId = this.getStringValue(payload, 'steam_id');
     if (!steamId) {
-      return;
+      return false;
     }
 
     const itemsValue = payload.items;
     if (!Array.isArray(itemsValue)) {
-      return;
+      return false;
     }
 
     const player = this.getOrCreatePlayer(state, steamId);
@@ -279,7 +294,63 @@ export class LiveMatchStateService {
       });
     }
 
+    const previousKey = this.itemIdentityKey(player.items);
+    const nextKey = this.itemIdentityKey(nextItems);
     player.items = nextItems;
+    return previousKey !== nextKey;
+  }
+
+  private captureSnapshotIfNeeded(state: MinimalMatchState, force: boolean): void {
+    if (!state.matchId || state.matchId === 'unknown') {
+      return;
+    }
+
+    const existing = this.snapshots.get(state.matchId) ?? [];
+    const latest = existing[existing.length - 1];
+    const gameTimeSec = state.gameTimeSec;
+    const intervalElapsed =
+      gameTimeSec !== undefined &&
+      (latest?.gameTimeSec === undefined || gameTimeSec - latest.gameTimeSec >= this.snapshotIntervalSec);
+
+    if (!force && !intervalElapsed && existing.length > 0) {
+      return;
+    }
+
+    const snapshot: MinimalMatchSnapshot = {
+      matchId: state.matchId,
+      gameTimeSec,
+      capturedAt: new Date().toISOString(),
+      playersBySteamId: Object.entries(state.playersBySteamId).reduce<Record<string, MinimalMatchSnapshot['playersBySteamId'][string]>>(
+        (acc, [steamId, player]) => {
+          acc[steamId] = {
+            steamId,
+            heroId: player.heroId,
+            teamId: player.teamId,
+            level: player.level,
+            souls: player.souls,
+            kills: player.kills,
+            deaths: player.deaths,
+            assists: player.assists,
+            heroDamage: player.heroDamage,
+            objectDamage: player.objectDamage,
+            healing: player.healing,
+            itemIds: player.items.map((item) => item.id),
+          };
+          return acc;
+        },
+        {},
+      ),
+    };
+
+    const nextSnapshots = [...existing, snapshot].slice(-this.maxSnapshotsPerMatch);
+    this.snapshots.set(state.matchId, nextSnapshots);
+  }
+
+  private itemIdentityKey(items: MinimalItemState[]): string {
+    return items
+      .map((item) => item.id)
+      .sort((a, b) => a - b)
+      .join(',');
   }
 
   private getOrCreatePlayer(state: MinimalMatchState, steamId: string): MinimalPlayerState {
