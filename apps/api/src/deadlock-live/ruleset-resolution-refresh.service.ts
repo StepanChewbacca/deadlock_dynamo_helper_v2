@@ -24,7 +24,11 @@ export class RulesetResolutionRefreshService {
       throw new Error(`No raw metadata found for match ${matchId}`);
     }
 
-    Object.assign(rawMetadata, {
+    return this.resolveRawMetadata(rawMetadata);
+  }
+
+  async resolveRawMetadata(rawMetadata: RawMatchMetadata): Promise<RulesetResolutionResult> {
+    const reset = {
       clientVersion: null,
       rulesetResolutionMethod: 'UNKNOWN',
       rulesetResolutionConfidence: 0,
@@ -32,11 +36,14 @@ export class RulesetResolutionRefreshService {
       resolvedRulesetId: null,
       resolvedCatalogVersionId: null,
       resolvedAt: null,
-    });
+    };
+    await this.rawMetadataRepository.update(rawMetadata.id, reset as any);
+    Object.assign(rawMetadata, reset);
 
     const result = await this.rulesetResolverService.resolveAndPersist(rawMetadata);
     if (result.clientVersion === undefined) {
       await this.rawMetadataRepository.update(rawMetadata.id, { clientVersion: null } as any);
+      Object.assign(rawMetadata, { clientVersion: null });
     }
 
     return result;

@@ -1,6 +1,14 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import { AllHeroesAnalysisService, RecommendBuildDto } from './all-heroes-analysis.service';
 import {
+  HistoricalMatchReplayService,
+  ReplayHistoricalMatchesDto,
+} from './historical-match-replay.service';
+import {
+  NormalizeRawMatchMetadataDto,
+  RawMatchMetadataNormalizerService,
+} from './raw-match-metadata-normalizer.service';
+import {
   ResolvePendingRulesetsDto,
   RulesetResolverService,
 } from './ruleset-resolver.service';
@@ -16,6 +24,8 @@ export class AllHeroesAnalysisController {
     private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
     private readonly rulesetResolverService: RulesetResolverService,
     private readonly rulesetResolutionRefreshService: RulesetResolutionRefreshService,
+    private readonly rawMatchMetadataNormalizerService: RawMatchMetadataNormalizerService,
+    private readonly historicalMatchReplayService: HistoricalMatchReplayService,
   ) {}
 
   @Get('heroes')
@@ -39,6 +49,21 @@ export class AllHeroesAnalysisController {
     return { success: true, message: 'Background crawl initiated.' };
   }
 
+  @Get('raw-matches/replay/status')
+  async getHistoricalReplayStatus() {
+    return this.historicalMatchReplayService.getStatus();
+  }
+
+  @Post('raw-matches/metadata/normalize-pending')
+  async normalizePendingRawMetadata(@Body() dto: NormalizeRawMatchMetadataDto) {
+    return this.rawMatchMetadataNormalizerService.normalizePending(dto ?? {});
+  }
+
+  @Post('raw-matches/replay-pending')
+  async replayHistoricalMatches(@Body() dto: ReplayHistoricalMatchesDto) {
+    return this.historicalMatchReplayService.replayPending(dto ?? {});
+  }
+
   @Post('raw-matches/rulesets/resolve-pending')
   async resolvePendingRulesets(@Body() dto: ResolvePendingRulesetsDto) {
     return this.rulesetResolverService.resolvePending(dto ?? {});
@@ -52,6 +77,11 @@ export class AllHeroesAnalysisController {
   @Post('raw-matches/:matchId/ruleset/resolve')
   async resolveStoredMatchRuleset(@Param('matchId', ParseIntPipe) matchId: number) {
     return this.rulesetResolutionRefreshService.resolveLatestForMatch(matchId);
+  }
+
+  @Post('raw-matches/:matchId/normalize')
+  async normalizeStoredMatchMetadata(@Param('matchId', ParseIntPipe) matchId: number) {
+    return this.rawMatchMetadataNormalizerService.normalizeLatestForMatch(matchId);
   }
 
   @Post('raw-matches/:matchId/reprocess')

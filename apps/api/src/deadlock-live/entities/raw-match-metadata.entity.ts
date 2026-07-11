@@ -26,6 +26,8 @@ export type RulesetResolutionMethod = (typeof RULESET_RESOLUTION_METHODS)[number
 @Index('idx_raw_match_metadata_client_version', ['clientVersion'])
 @Index('idx_raw_match_metadata_resolved_ruleset_id', ['resolvedRulesetId'])
 @Index('idx_raw_match_metadata_resolved_catalog_version_id', ['resolvedCatalogVersionId'])
+@Index('idx_raw_match_metadata_normalization_version', ['normalizationVersion'])
+@Index('idx_raw_match_metadata_processing_version', ['processingVersion'])
 export class RawMatchMetadata {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -82,6 +84,15 @@ export class RawMatchMetadata {
 
   @Column({ type: 'timestamptz', nullable: true })
   resolvedAt!: Date;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  normalizationVersion!: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  normalizationDetails!: Record<string, unknown>;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  normalizedAt!: Date;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   processingVersion!: string;
