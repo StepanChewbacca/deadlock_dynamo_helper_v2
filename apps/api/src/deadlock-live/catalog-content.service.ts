@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { GameRuleset } from './entities/game-ruleset.entity';
 import { ItemCatalogItem } from './entities/item-catalog-item.entity';
 import { ItemCatalogRecipe } from './entities/item-catalog-recipe.entity';
@@ -53,17 +53,14 @@ export class CatalogContentService {
         throw new Error(`No item catalog exists with id ${catalogVersionId}`);
       }
 
-      const duplicate = catalog.payloadHash
+      const canonical = catalog.payloadHash
         ? await versionRepository.findOne({
-            where: {
-              payloadHash: catalog.payloadHash,
-              id: Not(catalog.id),
-            },
+            where: { payloadHash: catalog.payloadHash },
             order: { id: 'ASC' },
           })
         : undefined;
 
-      if (!duplicate) {
+      if (!canonical || canonical.id === catalog.id) {
         if (catalog.contentCatalogVersionId) {
           catalog.contentCatalogVersionId = null as unknown as number;
           await versionRepository.save(catalog);
@@ -81,7 +78,7 @@ export class CatalogContentService {
         };
       }
 
-      const contentCatalogVersionId = getCatalogContentVersionId(duplicate);
+      const contentCatalogVersionId = getCatalogContentVersionId(canonical);
       catalog.contentCatalogVersionId = contentCatalogVersionId;
       await versionRepository.save(catalog);
       await recipeRepository.delete({ catalogVersionId: catalog.id });
