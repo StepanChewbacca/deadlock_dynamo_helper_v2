@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LiveMatchStateService } from './live-match-state.service';
+import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
 import { LiveIngestController } from './live-ingest.controller';
@@ -48,6 +49,7 @@ import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
   ],
   providers: [
     LiveMatchStateService,
+    InventoryShadowReplayService,
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
@@ -58,6 +60,7 @@ import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
   ],
   exports: [
     LiveMatchStateService,
+    InventoryShadowReplayService,
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
