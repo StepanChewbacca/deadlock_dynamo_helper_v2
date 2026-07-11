@@ -1,7 +1,10 @@
 import { OverwolfLiveEventDto } from '@deadlock-live-probe/shared';
+import { DiagnosticCapture } from '../diagnostics/diagnostic-capture';
 import { parseJsonSafely } from './parse-json-safely';
 
 export type EventCallback = (event: OverwolfLiveEventDto) => void;
+
+let diagnosticCapture: DiagnosticCapture | undefined;
 
 export function listenOverwolfEvents(onEvent: EventCallback): void {
   if (typeof overwolf === 'undefined' || !overwolf.games || !overwolf.games.events) {
@@ -9,7 +12,11 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
     return;
   }
 
-  overwolf.games.events.onInfoUpdates2.addListener((infoUpdate) => {
+  diagnosticCapture ??= new DiagnosticCapture(`capture-${Math.random().toString(36).slice(2, 10)}`);
+  const capture = diagnosticCapture;
+  capture.initialize(overwolf);
+
+  overwolf.games.events.onInfoUpdates2.addListener((infoUpdate: any) => {
     try {
       const { info, feature } = infoUpdate;
       if (!info || typeof info !== 'object') {
@@ -24,10 +31,19 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
 
         // Iterate through key-values inside category
         for (const [key, rawValue] of Object.entries(categoryData)) {
+          const receivedAt = Date.now();
+          capture.captureRaw({
+            receivedAt,
+            source: 'onInfoUpdates2',
+            feature,
+            category,
+            key,
+            rawPayload: rawValue,
+          });
           const parsedValue = parseJsonSafely(rawValue);
-          
+
           onEvent({
-            receivedAt: Date.now(),
+            receivedAt,
             source: 'onInfoUpdates2',
             feature,
             category,
@@ -41,7 +57,7 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
     }
   });
 
-  overwolf.games.events.onNewEvents.addListener((eventsEvent) => {
+  overwolf.games.events.onNewEvents.addListener((eventsEvent: any) => {
     try {
       const { events, feature } = eventsEvent;
       if (!Array.isArray(events)) {
@@ -53,10 +69,18 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
           continue;
         }
 
+        const receivedAt = Date.now();
+        capture.captureRaw({
+          receivedAt,
+          source: 'onNewEvents',
+          feature,
+          key: e.name,
+          rawPayload: e.data,
+        });
         const parsedData = parseJsonSafely(e.data);
 
         onEvent({
-          receivedAt: Date.now(),
+          receivedAt,
           source: 'onNewEvents',
           feature,
           key: e.name,
