@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import {
+  CatalogContentDeduplicationResult,
+  CatalogContentService,
+} from './catalog-content.service';
 import { ItemCatalogVersion } from './entities/item-catalog-version.entity';
 import {
   CatalogImportVersionResult,
@@ -30,12 +34,16 @@ export interface HistoricalCatalogBackfillPlan {
   hasMore: boolean;
 }
 
+export type HistoricalCatalogImportResult = CatalogImportVersionResult &
+  CatalogContentDeduplicationResult;
+
 @Injectable()
 export class HistoricalCatalogBackfillService {
   constructor(
     @InjectRepository(ItemCatalogVersion)
     private readonly catalogVersionRepository: Repository<ItemCatalogVersion>,
     private readonly itemCatalogImportService: ItemCatalogImportService,
+    private readonly catalogContentService: CatalogContentService,
   ) {}
 
   async getStatus() {
@@ -46,10 +54,15 @@ export class HistoricalCatalogBackfillService {
     const importedVersions = catalogs.map((catalog) => Number(catalog.clientVersion));
     const importedSet = new Set(importedVersions);
     const missingVersions = availableVersions.filter((version) => !importedSet.has(version));
+    const distinctPayloadHashes = new Set(
+      catalogs.map((catalog) => catalog.payloadHash).filter((hash) => Boolean(hash)),
+    );
 
     return {
       availableVersionCount: availableVersions.length,
       importedVersionCount: importedVersions.length,
+      distinctPayloadCount: distinctPayloadHashes.size,
+      deduplicatedVersionCount: catalogs.filter((catalog) => catalog.contentCatalogVersionId).length,
       missingVersionCount: missingVersions.length,
       latestAvailableClientVersion: availableVersions[availableVersions.length - 1],
       newestMissingClientVersion: missingVersions[missingVersions.length - 1],
@@ -74,7 +87,7 @@ export class HistoricalCatalogBackfillService {
       dto.beforeClientVersion,
       limit,
     );
-    const imported: CatalogImportVersionResult[] = [];
+    const imported: HistoricalCatalogImportResult[] = [];
     const failures: HistoricalCatalogImportFailure[] = [];
     const attemptedVersions: number[] = [];
     let nextBeforeClientVersion = plan.nextBeforeClientVersion;
@@ -91,7 +104,15 @@ export class HistoricalCatalogBackfillService {
         if (!importedVersion) {
           throw new Error(`Catalog import returned no result for client version ${clientVersion}`);
         }
-        imported.push(importedVersion);
+        const deduplication = await this.catalogContentService.deduplicateCatalogVersion(
+          importedVersion.catalogVersionId,
+        );
+        imported.push({
+          ...importedVersion,
+          ...deduplication,
+          itemCount: deduplication.itemCount,
+          recipeCount: deduplication.recipeCount,
+        });
         nextBeforeClientVersion = clientVersion;
       } catch (error) {
         failures.push({
@@ -114,6 +135,7 @@ export class HistoricalCatalogBackfillService {
       processed: attemptedVersions.length,
       imported: imported.filter((entry) => !entry.skipped).length,
       verified: imported.filter((entry) => entry.skipped).length,
+      deduplicated: imported.filter((entry) => entry.deduplicated).length,
       failed: failures.length,
       attemptedClientVersions: attemptedVersions,
       nextBeforeClientVersion,

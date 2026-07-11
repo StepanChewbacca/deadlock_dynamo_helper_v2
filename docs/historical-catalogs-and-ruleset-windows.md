@@ -25,6 +25,19 @@ The importer processes missing versions newest first. The cursor is exclusive an
 
 The server caps one batch at 25 versions. Each version remains transactional and idempotent. A failed version is returned in `retryClientVersions`; with `continueOnError: false`, the cursor is kept so the failed version is retried by the next request.
 
+## Shared catalog content
+
+Client builds can have identical item payloads. Every client version still receives its own `item_catalog_versions` and `game_rulesets` row, but identical payload hashes share one physical set of `item_catalog_items` and `item_catalog_recipes`.
+
+`contentCatalogVersionId` points an alias version to the canonical catalog content. API responses expose both the requested catalog id and the effective content catalog id. Recipe graph and match replay resolve this link automatically.
+
+The history status includes:
+
+- `distinctPayloadCount`
+- `deduplicatedVersionCount`
+
+The deduplication migration converts existing duplicate payloads and removes only duplicate physical item and recipe rows. Its rollback restores those rows before dropping the link.
+
 ## Verified window manifest
 
 A window manifest must include a provenance string and exact ISO timestamps. By default, every referenced client version must already have both a ruleset and an imported catalog.

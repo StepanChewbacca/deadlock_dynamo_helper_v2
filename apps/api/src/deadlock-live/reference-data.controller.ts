@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
+import { CatalogContentService } from './catalog-content.service';
 import {
   HistoricalCatalogBackfillService,
   ImportHistoricalCatalogBatchDto,
@@ -18,6 +19,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 export class ReferenceDataController {
   constructor(
     private readonly itemCatalogImportService: ItemCatalogImportService,
+    private readonly catalogContentService: CatalogContentService,
     private readonly historicalCatalogBackfillService: HistoricalCatalogBackfillService,
     private readonly rulesetWindowManifestService: RulesetWindowManifestService,
     private readonly versionedRecipeGraphService: VersionedRecipeGraphService,
@@ -35,12 +37,25 @@ export class ReferenceDataController {
 
   @Get('catalogs')
   async getCatalogs() {
-    return this.itemCatalogImportService.listCatalogs();
+    return this.catalogContentService.listCatalogs();
   }
 
   @Post('catalogs/import')
   async importCatalogs(@Body() dto: ImportItemCatalogsDto) {
-    return this.itemCatalogImportService.importCatalogs(dto ?? {});
+    const result = await this.itemCatalogImportService.importCatalogs(dto ?? {});
+    const imported = [];
+    for (const entry of result.imported) {
+      const deduplication = await this.catalogContentService.deduplicateCatalogVersion(
+        entry.catalogVersionId,
+      );
+      imported.push({
+        ...entry,
+        ...deduplication,
+        itemCount: deduplication.itemCount,
+        recipeCount: deduplication.recipeCount,
+      });
+    }
+    return { ...result, imported };
   }
 
   @Get('catalogs/history/status')

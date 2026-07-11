@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { isAbilityItem, mapAbilityToSkillNumber } from './hero-abilities';
 import { ItemCatalogItem } from './entities/item-catalog-item.entity';
+import {
+  getCatalogContentVersionId,
+  ItemCatalogVersion,
+} from './entities/item-catalog-version.entity';
 import { Item } from './entities/item.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
@@ -37,6 +41,7 @@ interface KnownItemCatalog {
   itemIds: Set<number>;
   source: 'VERSIONED_CATALOG' | 'LEGACY_ITEMS';
   catalogVersionId?: number;
+  contentCatalogVersionId?: number;
 }
 
 export interface StoredMatchReprocessingResult {
@@ -48,6 +53,7 @@ export interface StoredMatchReprocessingResult {
   unknownItemEventsSkipped: number;
   itemCatalogSource: KnownItemCatalog['source'];
   catalogVersionId?: number;
+  contentCatalogVersionId?: number;
   processingVersion: string;
 }
 
@@ -218,6 +224,7 @@ export class StoredMatchReprocessingService {
       unknownItemEventsSkipped,
       itemCatalogSource: knownItems.source,
       catalogVersionId: knownItems.catalogVersionId,
+      contentCatalogVersionId: knownItems.contentCatalogVersionId,
     };
   }
 
@@ -226,8 +233,14 @@ export class StoredMatchReprocessingService {
     resolvedCatalogVersionId: number | undefined,
   ): Promise<KnownItemCatalog> {
     if (resolvedCatalogVersionId) {
+      const catalog = await manager.getRepository(ItemCatalogVersion).findOne({
+        where: { id: resolvedCatalogVersionId },
+      });
+      const contentCatalogVersionId = catalog
+        ? getCatalogContentVersionId(catalog)
+        : resolvedCatalogVersionId;
       const catalogItems = await manager.getRepository(ItemCatalogItem).find({
-        where: { catalogVersionId: resolvedCatalogVersionId },
+        where: { catalogVersionId: contentCatalogVersionId },
       });
       const itemIds = new Set(
         catalogItems
@@ -239,6 +252,7 @@ export class StoredMatchReprocessingService {
           itemIds,
           source: 'VERSIONED_CATALOG',
           catalogVersionId: resolvedCatalogVersionId,
+          contentCatalogVersionId,
         };
       }
     }
