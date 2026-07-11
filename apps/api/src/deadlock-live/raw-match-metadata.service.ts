@@ -98,30 +98,34 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
   ): Promise<RawMatchMetadata> {
     const payloadHash = hashRawMatchMetadata(payload);
     const summary = summarizeRawMatchMetadata(payload);
-
-    await this.rawMatchMetadataRepository
-      .createQueryBuilder()
-      .insert()
-      .into(RawMatchMetadata)
-      .values({
-        matchId,
-        source,
-        payloadHash,
-        payload,
-        ...summary,
-      })
-      .orIgnore()
-      .execute();
-
-    const stored = await this.rawMatchMetadataRepository.findOne({
+    const existing = await this.rawMatchMetadataRepository.findOne({
       where: { matchId, payloadHash },
     });
-    if (!stored) {
-      throw new Error(`Raw metadata was not persisted for match ${matchId}`);
+    if (existing) {
+      return existing;
     }
 
-    this.logger.debug(`Stored raw metadata for match ${matchId} (${payloadHash.slice(0, 12)})`);
-    return stored;
+    try {
+      const stored = await this.rawMatchMetadataRepository.save(
+        this.rawMatchMetadataRepository.create({
+          matchId,
+          source,
+          payloadHash,
+          payload,
+          ...summary,
+        }),
+      );
+      this.logger.debug(`Stored raw metadata for match ${matchId} (${payloadHash.slice(0, 12)})`);
+      return stored;
+    } catch (error) {
+      const stored = await this.rawMatchMetadataRepository.findOne({
+        where: { matchId, payloadHash },
+      });
+      if (stored) {
+        return stored;
+      }
+      throw error;
+    }
   }
 
   async getLatest(matchId: number): Promise<RawMatchMetadata> {
