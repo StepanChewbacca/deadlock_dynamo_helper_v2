@@ -6,6 +6,7 @@ import {
   RecipeGraph,
 } from '@deadlock-live-probe/build-domain';
 import { Repository } from 'typeorm';
+import { CatalogContentService } from './catalog-content.service';
 import { ItemCatalogRecipe } from './entities/item-catalog-recipe.entity';
 import { ItemCatalogVersion } from './entities/item-catalog-version.entity';
 
@@ -16,6 +17,7 @@ export class VersionedRecipeGraphService {
     private readonly catalogVersionRepository: Repository<ItemCatalogVersion>,
     @InjectRepository(ItemCatalogRecipe)
     private readonly recipeRepository: Repository<ItemCatalogRecipe>,
+    private readonly catalogContentService: CatalogContentService,
   ) {}
 
   async createRecipeGraph(clientVersion: number): Promise<RecipeGraph> {
@@ -30,8 +32,11 @@ export class VersionedRecipeGraphService {
       throw new Error(`No item catalog exists for client version ${clientVersion}`);
     }
 
+    const contentCatalogVersionId = await this.catalogContentService.resolveContentCatalogVersionId(
+      catalog.id,
+    );
     const rows = await this.recipeRepository.find({
-      where: { catalogVersionId: catalog.id },
+      where: { catalogVersionId: contentCatalogVersionId },
       order: { parentItemId: 'ASC', componentOrder: 'ASC' },
     });
 
@@ -58,10 +63,15 @@ export class VersionedRecipeGraphService {
       throw new Error(`No item catalog exists for client version ${clientVersion}`);
     }
 
+    const contentCatalogVersionId = await this.catalogContentService.resolveContentCatalogVersionId(
+      catalog.id,
+    );
     const definitions = await this.getRecipeDefinitions(clientVersion);
     return {
       clientVersion,
       catalogVersionId: catalog.id,
+      contentCatalogVersionId,
+      deduplicated: contentCatalogVersionId !== catalog.id,
       payloadHash: catalog.payloadHash,
       isCurrent: catalog.isCurrent,
       parentCount: definitions.length,
