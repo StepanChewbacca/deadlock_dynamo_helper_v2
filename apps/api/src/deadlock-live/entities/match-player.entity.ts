@@ -24,7 +24,7 @@ export class MatchPlayer {
   matchId!: number;
 
   @ManyToOne(() => Match, (m) => m.players, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'match_id' })
+  @JoinColumn({ name: 'matchId', referencedColumnName: 'matchId' })
   match!: Match;
 
   @Column({ type: 'int' })
