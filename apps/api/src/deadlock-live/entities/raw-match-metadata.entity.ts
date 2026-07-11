@@ -3,9 +3,13 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   Unique,
 } from 'typeorm';
+import { GameRuleset } from './game-ruleset.entity';
+import { ItemCatalogVersion } from './item-catalog-version.entity';
 
 export const RULESET_RESOLUTION_METHODS = [
   'OBSERVED',
@@ -20,6 +24,8 @@ export type RulesetResolutionMethod = (typeof RULESET_RESOLUTION_METHODS)[number
 @Unique('uq_raw_match_metadata_match_payload', ['matchId', 'payloadHash'])
 @Index('idx_raw_match_metadata_match_id', ['matchId'])
 @Index('idx_raw_match_metadata_client_version', ['clientVersion'])
+@Index('idx_raw_match_metadata_resolved_ruleset_id', ['resolvedRulesetId'])
+@Index('idx_raw_match_metadata_resolved_catalog_version_id', ['resolvedCatalogVersionId'])
 export class RawMatchMetadata {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -56,6 +62,26 @@ export class RawMatchMetadata {
 
   @Column({ type: 'double precision', default: 0 })
   rulesetResolutionConfidence!: number;
+
+  @Column({ type: 'int', nullable: true })
+  resolvedRulesetId!: number;
+
+  @ManyToOne(() => GameRuleset, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'resolvedRulesetId' })
+  resolvedRuleset!: GameRuleset;
+
+  @Column({ type: 'int', nullable: true })
+  resolvedCatalogVersionId!: number;
+
+  @ManyToOne(() => ItemCatalogVersion, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'resolvedCatalogVersionId' })
+  resolvedCatalogVersion!: ItemCatalogVersion;
+
+  @Column({ type: 'jsonb', nullable: true })
+  rulesetResolutionDetails!: Record<string, unknown>;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  resolvedAt!: Date;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   processingVersion!: string;
