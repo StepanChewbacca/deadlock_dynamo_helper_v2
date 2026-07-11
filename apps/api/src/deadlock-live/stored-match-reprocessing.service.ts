@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { isAbilityItem, mapAbilityToSkillNumber } from './hero-abilities';
+import { ItemCatalogItem } from './entities/item-catalog-item.entity';
 import { Item } from './entities/item.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
@@ -9,7 +10,7 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { RawMatchMetadataService } from './raw-match-metadata.service';
 
-const PROCESSING_VERSION = 'match-metadata-v1';
+export const MATCH_METADATA_PROCESSING_VERSION = 'match-metadata-v2';
 
 interface ParsedBuildItem {
   itemId: number;
@@ -26,12 +27,27 @@ interface ParsedSkillItem {
   gameTimeSec: number;
 }
 
+interface ParsedPlayerItems {
+  buildItems: ParsedBuildItem[];
+  skillItems: ParsedSkillItem[];
+  unknownItemEventsSkipped: number;
+}
+
+interface KnownItemCatalog {
+  itemIds: Set<number>;
+  source: 'VERSIONED_CATALOG' | 'LEGACY_ITEMS';
+  catalogVersionId?: number;
+}
+
 export interface StoredMatchReprocessingResult {
   matchId: number;
   rawMetadataId: number;
   playersProcessed: number;
   itemEventsProcessed: number;
   skillEventsProcessed: number;
+  unknownItemEventsSkipped: number;
+  itemCatalogSource: KnownItemCatalog['source'];
+  catalogVersionId?: number;
   processingVersion: string;
 }
 
@@ -44,19 +60,31 @@ export class StoredMatchReprocessingService {
 
   async reprocess(matchId: number): Promise<StoredMatchReprocessingResult> {
     const rawMetadata = await this.rawMatchMetadataService.getLatest(matchId);
+    return this.reprocessRawMetadata(rawMetadata);
+  }
+
+  async reprocessRawMetadata(
+    rawMetadata: RawMatchMetadata,
+  ): Promise<StoredMatchReprocessingResult> {
+    const matchId = Number(rawMetadata.matchId);
 
     return this.dataSource.transaction(async (manager) => {
-      const result = await this.processPayload(manager, matchId, rawMetadata.payload);
+      const result = await this.processPayload(manager, matchId, rawMetadata);
+      const lastProcessedAt = new Date();
       await manager.getRepository(RawMatchMetadata).update(rawMetadata.id, {
-        processingVersion: PROCESSING_VERSION,
-        lastProcessedAt: new Date(),
+        processingVersion: MATCH_METADATA_PROCESSING_VERSION,
+        lastProcessedAt,
+      });
+      Object.assign(rawMetadata, {
+        processingVersion: MATCH_METADATA_PROCESSING_VERSION,
+        lastProcessedAt,
       });
 
       return {
         matchId,
         rawMetadataId: rawMetadata.id,
         ...result,
-        processingVersion: PROCESSING_VERSION,
+        processingVersion: MATCH_METADATA_PROCESSING_VERSION,
       };
     });
   }
@@ -64,9 +92,11 @@ export class StoredMatchReprocessingService {
   private async processPayload(
     manager: EntityManager,
     matchId: number,
-    payload: Record<string, unknown>,
-  ): Promise<Omit<StoredMatchReprocessingResult, 'matchId' | 'rawMetadataId' | 'processingVersion'>> {
-    const matchInfo = toRecord(payload.match_info);
+    rawMetadata: RawMatchMetadata,
+  ): Promise<
+    Omit<StoredMatchReprocessingResult, 'matchId' | 'rawMetadataId' | 'processingVersion'>
+  > {
+    const matchInfo = toRecord(rawMetadata.payload.match_info);
     if (!matchInfo) {
       throw new Error(`Raw metadata for match ${matchId} does not contain match_info`);
     }
@@ -76,10 +106,7 @@ export class StoredMatchReprocessingService {
       throw new Error(`Raw metadata for match ${matchId} does not contain players`);
     }
 
-    const itemRepository = manager.getRepository(Item);
-    const itemRows = await itemRepository.find();
-    const knownItemIds = new Set(itemRows.map((item) => Number(item.itemId)));
-
+    const knownItems = await this.loadKnownItems(manager, rawMetadata.resolvedCatalogVersionId);
     const matchRepository = manager.getRepository(Match);
     const matchPlayerRepository = manager.getRepository(MatchPlayer);
     const matchPlayerItemRepository = manager.getRepository(MatchPlayerItem);
@@ -106,15 +133,18 @@ export class StoredMatchReprocessingService {
     let playersProcessed = 0;
     let itemEventsProcessed = 0;
     let skillEventsProcessed = 0;
+    let unknownItemEventsSkipped = 0;
+    const processedHeroIds = new Set<number>();
 
     for (const playerPayload of players) {
       const heroId = getNumericValue(playerPayload, 'hero_id');
-      if (heroId === undefined || heroId <= 0) {
+      if (heroId === undefined || heroId <= 0 || processedHeroIds.has(heroId)) {
         continue;
       }
+      processedHeroIds.add(heroId);
 
       const team = getNumericValue(playerPayload, 'team') ?? 0;
-      const parsedItems = this.parseItems(playerPayload, heroId, knownItemIds);
+      const parsedItems = this.parseItems(playerPayload, heroId, knownItems.itemIds);
 
       let player = await matchPlayerRepository.findOne({
         where: { matchId, heroId },
@@ -171,12 +201,52 @@ export class StoredMatchReprocessingService {
       playersProcessed += 1;
       itemEventsProcessed += parsedItems.buildItems.length;
       skillEventsProcessed += orderedSkills.length;
+      unknownItemEventsSkipped += parsedItems.unknownItemEventsSkipped;
+    }
+
+    const existingPlayers = await matchPlayerRepository.find({ where: { matchId } });
+    for (const existingPlayer of existingPlayers) {
+      if (!processedHeroIds.has(Number(existingPlayer.heroId))) {
+        await matchPlayerRepository.delete({ id: existingPlayer.id });
+      }
     }
 
     return {
       playersProcessed,
       itemEventsProcessed,
       skillEventsProcessed,
+      unknownItemEventsSkipped,
+      itemCatalogSource: knownItems.source,
+      catalogVersionId: knownItems.catalogVersionId,
+    };
+  }
+
+  private async loadKnownItems(
+    manager: EntityManager,
+    resolvedCatalogVersionId: number | undefined,
+  ): Promise<KnownItemCatalog> {
+    if (resolvedCatalogVersionId) {
+      const catalogItems = await manager.getRepository(ItemCatalogItem).find({
+        where: { catalogVersionId: resolvedCatalogVersionId },
+      });
+      const itemIds = new Set(
+        catalogItems
+          .filter((item) => item.itemType === 'upgrade')
+          .map((item) => Number(item.itemId)),
+      );
+      if (itemIds.size > 0) {
+        return {
+          itemIds,
+          source: 'VERSIONED_CATALOG',
+          catalogVersionId: resolvedCatalogVersionId,
+        };
+      }
+    }
+
+    const itemRows = await manager.getRepository(Item).find();
+    return {
+      itemIds: new Set(itemRows.map((item) => Number(item.itemId))),
+      source: 'LEGACY_ITEMS',
     };
   }
 
@@ -184,9 +254,10 @@ export class StoredMatchReprocessingService {
     playerPayload: Record<string, unknown>,
     heroId: number,
     knownItemIds: Set<number>,
-  ): { buildItems: ParsedBuildItem[]; skillItems: ParsedSkillItem[] } {
+  ): ParsedPlayerItems {
     const buildItems: ParsedBuildItem[] = [];
     const skillItems: ParsedSkillItem[] = [];
+    let unknownItemEventsSkipped = 0;
 
     for (const item of toRecordArray(playerPayload.items)) {
       const itemId = getNumericValue(item, 'item_id');
@@ -201,6 +272,7 @@ export class StoredMatchReprocessingService {
       }
 
       if (!knownItemIds.has(itemId)) {
+        unknownItemEventsSkipped += 1;
         continue;
       }
 
@@ -215,7 +287,7 @@ export class StoredMatchReprocessingService {
       });
     }
 
-    return { buildItems, skillItems };
+    return { buildItems, skillItems, unknownItemEventsSkipped };
   }
 }
 
