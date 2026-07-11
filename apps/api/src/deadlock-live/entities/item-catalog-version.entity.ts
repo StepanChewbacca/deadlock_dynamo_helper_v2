@@ -28,7 +28,7 @@ export class ItemCatalogVersion {
   @Column({ type: 'varchar', length: 64 })
   source!: string;
 
-  @Column({ type: 'char', length: 64, nullable: true })
+  @Column({ type: 'varchar', length: 64, nullable: true })
   payloadHash!: string;
 
   @Column({ type: 'jsonb', nullable: true })
