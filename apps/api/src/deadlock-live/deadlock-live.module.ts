@@ -12,6 +12,8 @@ import { IngestStatusController } from './ingest-status.controller';
 import { IngestStatusService } from './ingest-status.service';
 import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
 import { AllHeroesAnalysisController } from './all-heroes-analysis.controller';
+import { HistoricalMatchReplayService } from './historical-match-replay.service';
+import { RawMatchMetadataNormalizerService } from './raw-match-metadata-normalizer.service';
 import { SituationalRecommendationService } from './situational-recommendation.service';
 import { CrawlerRun } from './entities/crawler-run.entity';
 import { CrawlerState } from './entities/crawler-state.entity';
@@ -74,6 +76,8 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RulesetResolverService,
     RulesetResolutionRefreshService,
     RawMatchMetadataService,
+    RawMatchMetadataNormalizerService,
+    HistoricalMatchReplayService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
     VersionedRecipeGraphService,
@@ -91,6 +95,8 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RulesetResolverService,
     RulesetResolutionRefreshService,
     RawMatchMetadataService,
+    RawMatchMetadataNormalizerService,
+    HistoricalMatchReplayService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
     VersionedRecipeGraphService,
