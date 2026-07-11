@@ -28,9 +28,13 @@ import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { ReferenceDataImportService } from './reference-data-import.service';
+import { ReferenceDataController } from './reference-data.controller';
 import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
 import { RawMatchMetadataService } from './raw-match-metadata.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
+import { ItemCatalogImportService } from './item-catalog-import.service';
+import { RulesetResolverService } from './ruleset-resolver.service';
+import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
 @Module({
   imports: [
@@ -57,6 +61,7 @@ import { StoredMatchReprocessingService } from './stored-match-reprocessing.serv
     DebugPageController,
     HeroAnalysisController,
     AllHeroesAnalysisController,
+    ReferenceDataController,
     IngestStatusController,
   ],
   providers: [
@@ -65,8 +70,11 @@ import { StoredMatchReprocessingService } from './stored-match-reprocessing.serv
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
+    RulesetResolverService,
     RawMatchMetadataService,
     StoredMatchReprocessingService,
+    ItemCatalogImportService,
+    VersionedRecipeGraphService,
     AllHeroesAnalysisService,
     SituationalRecommendationService,
     ReferenceDataImportService,
@@ -78,8 +86,11 @@ import { StoredMatchReprocessingService } from './stored-match-reprocessing.serv
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
+    RulesetResolverService,
     RawMatchMetadataService,
     StoredMatchReprocessingService,
+    ItemCatalogImportService,
+    VersionedRecipeGraphService,
     AllHeroesAnalysisService,
     SituationalRecommendationService,
     ReferenceDataImportService,
