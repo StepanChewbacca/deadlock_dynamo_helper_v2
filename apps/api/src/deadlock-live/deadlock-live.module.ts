@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CatalogContentService } from './catalog-content.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { RawEventLogService } from './raw-event-log.service';
@@ -82,6 +83,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HistoricalMatchReplayService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
+    CatalogContentService,
     HistoricalCatalogBackfillService,
     RulesetWindowManifestService,
     VersionedRecipeGraphService,
@@ -103,6 +105,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HistoricalMatchReplayService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
+    CatalogContentService,
     HistoricalCatalogBackfillService,
     RulesetWindowManifestService,
     VersionedRecipeGraphService,
