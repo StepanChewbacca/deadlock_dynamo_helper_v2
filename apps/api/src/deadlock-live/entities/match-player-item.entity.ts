@@ -26,7 +26,7 @@ export class MatchPlayerItem {
   @Column({ type: 'bigint', nullable: true })
   upgradeId!: number | null;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   flags!: number | null;
 
   @Column({ type: 'bigint', nullable: true })

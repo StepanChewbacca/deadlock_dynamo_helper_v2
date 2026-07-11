@@ -1,12 +1,14 @@
-import { Controller, Get, Post, Param, ParseIntPipe, Body } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import { AllHeroesAnalysisService, RecommendBuildDto } from './all-heroes-analysis.service';
 import { SituationalRecommendationDto, SituationalRecommendationService } from './situational-recommendation.service';
+import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
 @Controller('deadlock/analysis')
 export class AllHeroesAnalysisController {
   constructor(
     private readonly service: AllHeroesAnalysisService,
     private readonly situationalRecommendationService: SituationalRecommendationService,
+    private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
   ) {}
 
   @Get('heroes')
@@ -29,6 +31,12 @@ export class AllHeroesAnalysisController {
     this.service.startCrawling();
     return { success: true, message: 'Background crawl initiated.' };
   }
+
+  @Post('raw-matches/:matchId/reprocess')
+  async reprocessStoredMatch(@Param('matchId', ParseIntPipe) matchId: number) {
+    return this.storedMatchReprocessingService.reprocess(matchId);
+  }
+
   @Post('recommend')
   async recommendBuild(@Body() dto: RecommendBuildDto) {
     return this.service.recommendBuild(dto);

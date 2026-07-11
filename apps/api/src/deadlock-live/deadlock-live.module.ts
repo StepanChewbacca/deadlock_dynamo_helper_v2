@@ -15,15 +15,22 @@ import { AllHeroesAnalysisController } from './all-heroes-analysis.controller';
 import { SituationalRecommendationService } from './situational-recommendation.service';
 import { CrawlerRun } from './entities/crawler-run.entity';
 import { CrawlerState } from './entities/crawler-state.entity';
+import { GameRuleset } from './entities/game-ruleset.entity';
 import { Hero } from './entities/hero.entity';
+import { ItemCatalogItem } from './entities/item-catalog-item.entity';
+import { ItemCatalogRecipe } from './entities/item-catalog-recipe.entity';
+import { ItemCatalogVersion } from './entities/item-catalog-version.entity';
 import { ItemComponent } from './entities/item-component.entity';
 import { Item } from './entities/item.entity';
 import { Match } from './entities/match.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
+import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { ReferenceDataImportService } from './reference-data-import.service';
 import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
+import { RawMatchMetadataService } from './raw-match-metadata.service';
+import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
 @Module({
   imports: [
@@ -38,6 +45,11 @@ import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
       CrawlerRun,
       CrawlerState,
       ShadowModeDecision,
+      RawMatchMetadata,
+      GameRuleset,
+      ItemCatalogVersion,
+      ItemCatalogItem,
+      ItemCatalogRecipe,
     ]),
   ],
   controllers: [
@@ -53,6 +65,8 @@ import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
+    RawMatchMetadataService,
+    StoredMatchReprocessingService,
     AllHeroesAnalysisService,
     SituationalRecommendationService,
     ReferenceDataImportService,
@@ -64,6 +78,8 @@ import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
     RawEventLogService,
     RecentLiveEventsService,
     HeroAnalysisService,
+    RawMatchMetadataService,
+    StoredMatchReprocessingService,
     AllHeroesAnalysisService,
     SituationalRecommendationService,
     ReferenceDataImportService,
