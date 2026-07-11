@@ -34,6 +34,7 @@ import { RawMatchMetadataService } from './raw-match-metadata.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 import { ItemCatalogImportService } from './item-catalog-import.service';
 import { RulesetResolverService } from './ruleset-resolver.service';
+import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
 import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
 @Module({
@@ -71,6 +72,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecentLiveEventsService,
     HeroAnalysisService,
     RulesetResolverService,
+    RulesetResolutionRefreshService,
     RawMatchMetadataService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
@@ -87,6 +89,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecentLiveEventsService,
     HeroAnalysisService,
     RulesetResolverService,
+    RulesetResolutionRefreshService,
     RawMatchMetadataService,
     StoredMatchReprocessingService,
     ItemCatalogImportService,
