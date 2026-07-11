@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios, { AxiosResponse } from 'axios';
@@ -7,6 +6,8 @@ import {
   RawMatchMetadata,
   RulesetResolutionMethod,
 } from './entities/raw-match-metadata.entity';
+import { RulesetResolverService } from './ruleset-resolver.service';
+import { sha256StableJson } from './stable-json';
 
 const MATCH_METADATA_SOURCE = 'deadlock-api-match-metadata';
 const MATCH_METADATA_URL_PATTERN = /\/v1\/matches\/(\d+)\/metadata(?:\?|$)/;
@@ -55,7 +56,7 @@ export function summarizeRawMatchMetadata(payload: Record<string, unknown>): Raw
 }
 
 export function hashRawMatchMetadata(payload: Record<string, unknown>): string {
-  return createHash('sha256').update(stableSerialize(payload)).digest('hex');
+  return sha256StableJson(payload);
 }
 
 @Injectable()
@@ -66,6 +67,7 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(RawMatchMetadata)
     private readonly rawMatchMetadataRepository: Repository<RawMatchMetadata>,
+    private readonly rulesetResolverService: RulesetResolverService,
   ) {}
 
   onModuleInit(): void {
@@ -102,6 +104,7 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
       where: { matchId, payloadHash },
     });
     if (existing) {
+      await this.resolveBestEffort(existing);
       return existing;
     }
 
@@ -116,12 +119,14 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
         }),
       );
       this.logger.debug(`Stored raw metadata for match ${matchId} (${payloadHash.slice(0, 12)})`);
+      await this.resolveBestEffort(stored);
       return stored;
     } catch (error) {
       const stored = await this.rawMatchMetadataRepository.findOne({
         where: { matchId, payloadHash },
       });
       if (stored) {
+        await this.resolveBestEffort(stored);
         return stored;
       }
       throw error;
@@ -145,22 +150,17 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
       lastProcessedAt: new Date(),
     });
   }
-}
 
-function stableSerialize(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableSerialize(entry)).join(',')}]`;
+  private async resolveBestEffort(rawMetadata: RawMatchMetadata): Promise<void> {
+    try {
+      await this.rulesetResolverService.resolveAndPersist(rawMetadata);
+    } catch (error) {
+      this.logger.warn(
+        `Stored raw metadata for match ${rawMetadata.matchId}, but ruleset resolution failed: ` +
+          `${(error as Error).message}`,
+      );
+    }
   }
-
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const properties = Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`);
-    return `{${properties.join(',')}}`;
-  }
-
-  return JSON.stringify(value) ?? 'null';
 }
 
 function toRecord(value: unknown): Record<string, unknown> | undefined {
