@@ -12,6 +12,9 @@
     "paths": {
       "@deadlock-live-probe/shared": [
         "packages/shared/src"
+      ],
+      "@deadlock-live-probe/build-domain": [
+        "packages/deadlock-build-domain/src"
       ]
     }
   }
