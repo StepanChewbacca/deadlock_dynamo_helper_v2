@@ -6,7 +6,7 @@ import {
   RawMatchMetadata,
   RulesetResolutionMethod,
 } from './entities/raw-match-metadata.entity';
-import { RulesetResolverService } from './ruleset-resolver.service';
+import { RawMatchMetadataNormalizerService } from './raw-match-metadata-normalizer.service';
 import { sha256StableJson } from './stable-json';
 
 const MATCH_METADATA_SOURCE = 'deadlock-api-match-metadata';
@@ -67,7 +67,7 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(RawMatchMetadata)
     private readonly rawMatchMetadataRepository: Repository<RawMatchMetadata>,
-    private readonly rulesetResolverService: RulesetResolverService,
+    private readonly rawMatchMetadataNormalizerService: RawMatchMetadataNormalizerService,
   ) {}
 
   onModuleInit(): void {
@@ -104,7 +104,7 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
       where: { matchId, payloadHash },
     });
     if (existing) {
-      await this.resolveBestEffort(existing);
+      await this.normalizeBestEffort(existing);
       return existing;
     }
 
@@ -119,14 +119,14 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
         }),
       );
       this.logger.debug(`Stored raw metadata for match ${matchId} (${payloadHash.slice(0, 12)})`);
-      await this.resolveBestEffort(stored);
+      await this.normalizeBestEffort(stored);
       return stored;
     } catch (error) {
       const stored = await this.rawMatchMetadataRepository.findOne({
         where: { matchId, payloadHash },
       });
       if (stored) {
-        await this.resolveBestEffort(stored);
+        await this.normalizeBestEffort(stored);
         return stored;
       }
       throw error;
@@ -151,12 +151,12 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async resolveBestEffort(rawMetadata: RawMatchMetadata): Promise<void> {
+  private async normalizeBestEffort(rawMetadata: RawMatchMetadata): Promise<void> {
     try {
-      await this.rulesetResolverService.resolveAndPersist(rawMetadata);
+      await this.rawMatchMetadataNormalizerService.normalizeRawMetadata(rawMetadata, true);
     } catch (error) {
       this.logger.warn(
-        `Stored raw metadata for match ${rawMetadata.matchId}, but ruleset resolution failed: ` +
+        `Stored raw metadata for match ${rawMetadata.matchId}, but normalization failed: ` +
           `${(error as Error).message}`,
       );
     }
