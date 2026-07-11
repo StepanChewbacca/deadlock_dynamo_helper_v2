@@ -4,6 +4,7 @@ import {
   ResolvePendingRulesetsDto,
   RulesetResolverService,
 } from './ruleset-resolver.service';
+import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
 import { SituationalRecommendationDto, SituationalRecommendationService } from './situational-recommendation.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
@@ -14,6 +15,7 @@ export class AllHeroesAnalysisController {
     private readonly situationalRecommendationService: SituationalRecommendationService,
     private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
     private readonly rulesetResolverService: RulesetResolverService,
+    private readonly rulesetResolutionRefreshService: RulesetResolutionRefreshService,
   ) {}
 
   @Get('heroes')
@@ -49,7 +51,7 @@ export class AllHeroesAnalysisController {
 
   @Post('raw-matches/:matchId/ruleset/resolve')
   async resolveStoredMatchRuleset(@Param('matchId', ParseIntPipe) matchId: number) {
-    return this.rulesetResolverService.resolveLatestForMatch(matchId);
+    return this.rulesetResolutionRefreshService.resolveLatestForMatch(matchId);
   }
 
   @Post('raw-matches/:matchId/reprocess')
