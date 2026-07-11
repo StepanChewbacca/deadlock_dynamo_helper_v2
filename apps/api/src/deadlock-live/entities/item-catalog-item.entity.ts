@@ -32,6 +32,9 @@ export class ItemCatalogItem {
   @Column({ type: 'varchar', length: 255 })
   className!: string;
 
+  @Column({ type: 'varchar', length: 32, default: 'unknown' })
+  itemType!: string;
+
   @Column({ type: 'varchar', length: 64 })
   slotType!: string;
 
@@ -49,6 +52,9 @@ export class ItemCatalogItem {
 
   @Column({ type: 'boolean', default: true })
   active!: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  isActiveItem!: boolean;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   activationType!: string;
