@@ -11,7 +11,10 @@ Yarn workspace monorepo capturing real-time *Deadlock* game events through Overw
 ## 🚀 Quick Start Commands
 
 - **Install dependencies:** `yarn install --ignore-engines`
+- **Run database migrations:** `yarn db:migrate`
 - **Build packages:** `yarn build`
 - **Run test suites:** `yarn test`
+
+Database reset, backup, migration, and raw metadata reprocessing instructions are in [`docs/database-migrations.md`](docs/database-migrations.md).
 
 For detailed setup, sideloading, and validation instructions, refer to the [Overwolf Deadlock Live Probe Runbook](file:///wsl$/Ubuntu/home/chewie/deadlock/docs/overwolf-deadlock-live-probe-runbook.md).
