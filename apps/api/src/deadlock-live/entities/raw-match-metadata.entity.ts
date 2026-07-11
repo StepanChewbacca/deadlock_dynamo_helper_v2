@@ -30,7 +30,7 @@ export class RawMatchMetadata {
   @Column({ type: 'varchar', length: 64 })
   source!: string;
 
-  @Column({ type: 'char', length: 64 })
+  @Column({ type: 'varchar', length: 64 })
   payloadHash!: string;
 
   @Column({ type: 'jsonb' })
