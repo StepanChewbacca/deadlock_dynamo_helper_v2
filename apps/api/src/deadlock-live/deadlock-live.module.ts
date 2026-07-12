@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogContentService } from './catalog-content.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
+import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
 import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
@@ -80,6 +81,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   providers: [
     LiveMatchStateService,
     InventoryShadowReplayService,
+    InventoryTimelineReplayService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
@@ -105,6 +107,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   exports: [
     LiveMatchStateService,
     InventoryShadowReplayService,
+    InventoryTimelineReplayService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,

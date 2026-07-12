@@ -1,4 +1,5 @@
 import { Controller, Get, NotFoundException, Param, ParseIntPipe } from '@nestjs/common';
+import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
 import { RecentMatchSnapshot, RecentMatchesWindowService } from './recent-matches-window.service';
 
@@ -7,6 +8,7 @@ export class MatchTimelineNormalizationController {
   constructor(
     private readonly recentMatchesWindowService: RecentMatchesWindowService,
     private readonly matchTimelineNormalizationService: MatchTimelineNormalizationService,
+    private readonly inventoryTimelineReplayService: InventoryTimelineReplayService,
   ) {}
 
   @Get(':matchId/timelines')
@@ -15,18 +17,39 @@ export class MatchTimelineNormalizationController {
     return this.matchTimelineNormalizationService.normalizeMatch(match);
   }
 
+  @Get(':matchId/inventory-replays')
+  async getMatchInventoryReplays(@Param('matchId', ParseIntPipe) matchId: number) {
+    const match = await this.getReadyMatch(matchId);
+    const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
+    return this.inventoryTimelineReplayService.replayMatch(timelines);
+  }
+
   @Get(':matchId/players/:playerId/timeline')
   async getPlayerTimeline(
     @Param('matchId', ParseIntPipe) matchId: number,
     @Param('playerId', ParseIntPipe) playerId: number,
   ) {
+    const player = await this.getReadyPlayer(matchId, playerId);
+    return this.matchTimelineNormalizationService.normalizePlayer(player);
+  }
+
+  @Get(':matchId/players/:playerId/inventory-replay')
+  async getPlayerInventoryReplay(
+    @Param('matchId', ParseIntPipe) matchId: number,
+    @Param('playerId', ParseIntPipe) playerId: number,
+  ) {
+    const player = await this.getReadyPlayer(matchId, playerId);
+    const timeline = this.matchTimelineNormalizationService.normalizePlayer(player);
+    return this.inventoryTimelineReplayService.replayPlayer(timeline);
+  }
+
+  private async getReadyPlayer(matchId: number, playerId: number) {
     const match = await this.getReadyMatch(matchId);
     const player = match.players.find((candidate) => candidate.id === playerId);
     if (!player) {
       throw new NotFoundException(`Player ${playerId} is not present in match ${matchId}.`);
     }
-
-    return this.matchTimelineNormalizationService.normalizePlayer(player);
+    return player;
   }
 
   private async getReadyMatch(matchId: number): Promise<RecentMatchSnapshot> {
