@@ -133,22 +133,6 @@ export class MatchTimelineNormalizationService {
         insertionOrder: insertionOrder++,
       });
 
-      const upgradeId = this.resolveUpgradeId(row, itemId, diagnostics);
-      if (upgradeId !== undefined) {
-        actions.push({
-          type: 'UPGRADE',
-          gameTimeS: purchaseTimeS,
-          itemId,
-          relatedItemId: upgradeId,
-          instanceId,
-          sourceRowId: row.id,
-          slotOrder: row.slotOrder,
-          evidence: 'upgradeId',
-          confidence: 1,
-          insertionOrder: insertionOrder++,
-        });
-      }
-
       if (soldTimeS !== undefined) {
         actions.push({
           type: 'SELL',
@@ -187,7 +171,7 @@ export class MatchTimelineNormalizationService {
     itemId: number,
     diagnostics: TimelineDiagnostic[],
   ): number | undefined {
-    if (row.soldTimeS === undefined) {
+    if (row.soldTimeS === undefined || row.soldTimeS === 0) {
       return undefined;
     }
 
@@ -213,28 +197,6 @@ export class MatchTimelineNormalizationService {
 
     return soldTimeS;
   }
-
-  private resolveUpgradeId(
-    row: RecentMatchItemSnapshot,
-    itemId: number,
-    diagnostics: TimelineDiagnostic[],
-  ): number | undefined {
-    if (row.upgradeId === undefined || row.upgradeId === 0) {
-      return undefined;
-    }
-
-    const upgradeId = toPositiveInteger(row.upgradeId);
-    if (upgradeId === undefined || upgradeId === itemId) {
-      diagnostics.push({
-        code: 'INVALID_UPGRADE_ID',
-        sourceRowId: row.id,
-        itemId,
-      });
-      return undefined;
-    }
-
-    return upgradeId;
-  }
 }
 
 function compareItemRows(left: RecentMatchItemSnapshot, right: RecentMatchItemSnapshot): number {
@@ -258,7 +220,14 @@ function compareActions(left: PendingAction, right: PendingAction): number {
     return left.gameTimeS - right.gameTimeS;
   }
 
-  const typeDifference = actionPriority(left.type) - actionPriority(right.type);
+  if (left.instanceId === right.instanceId) {
+    const lifecycleDifference = lifecycleActionPriority(left.type) - lifecycleActionPriority(right.type);
+    if (lifecycleDifference !== 0) {
+      return lifecycleDifference;
+    }
+  }
+
+  const typeDifference = crossInstanceActionPriority(left.type) - crossInstanceActionPriority(right.type);
   if (typeDifference !== 0) {
     return typeDifference;
   }
@@ -266,7 +235,21 @@ function compareActions(left: PendingAction, right: PendingAction): number {
   return left.insertionOrder - right.insertionOrder;
 }
 
-function actionPriority(type: CanonicalItemActionType): number {
+function lifecycleActionPriority(type: CanonicalItemActionType): number {
+  switch (type) {
+    case 'BUY':
+    case 'REBUY':
+      return 0;
+    case 'UPGRADE':
+      return 1;
+    case 'SELL':
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function crossInstanceActionPriority(type: CanonicalItemActionType): number {
   switch (type) {
     case 'SELL':
       return 0;
