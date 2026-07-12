@@ -61,11 +61,13 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
       nextRecipes.set(parentItemId, componentItemIds);
     }
 
-    this.componentItemIdsByParent = new Map(
-      [...nextRecipes.entries()].map(([parentItemId, componentItemIds]) => [
-        parentItemId,
-        [...componentItemIds].sort((left, right) => left - right),
-      ]),
+    this.componentItemIdsByParent = new Map<number, readonly number[]>(
+      [...nextRecipes.entries()].map(
+        ([parentItemId, componentItemIds]): [number, readonly number[]] => [
+          parentItemId,
+          [...componentItemIds],
+        ],
+      ),
     );
     this.logger.log(
       `Loaded ${this.componentItemIdsByParent.size} item recipes for historical timeline reconciliation.`,
@@ -108,10 +110,15 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
 
       const proposals = this.buildUpgradeProposals(actionsAtTime, availableInstanceIds);
       const acceptedProposals = selectUnambiguousProposals(proposals);
-      const proposalByParentInstanceId = new Map(
-        acceptedProposals.map((proposal) => [proposal.parentAction.instanceId, proposal]),
+      const proposalByParentInstanceId = new Map<string, UpgradeProposal>(
+        acceptedProposals.map(
+          (proposal): [string, UpgradeProposal] => [
+            proposal.parentAction.instanceId,
+            proposal,
+          ],
+        ),
       );
-      const consumedSellInstanceIds = new Set(
+      const consumedSellInstanceIds = new Set<string>(
         acceptedProposals.flatMap((proposal) =>
           proposal.componentSellActions.map((action) => action.instanceId),
         ),
