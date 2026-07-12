@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemComponent } from './entities/item-component.entity';
@@ -7,6 +8,8 @@ import type {
   NormalizedMatchItemTimelines,
   NormalizedPlayerItemTimeline,
 } from './match-timeline-normalization.service';
+
+export const TIMELINE_RECIPE_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 interface UpgradeProposal {
   parentAction: CanonicalItemAction;
@@ -30,6 +33,14 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`Timeline reconciliation started without recipes: ${message}`);
     }
+  }
+
+  @Interval('recipe-aware-timeline-reconciliation-refresh', TIMELINE_RECIPE_REFRESH_INTERVAL_MS)
+  refreshOnInterval(): void {
+    void this.refreshRecipes().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to refresh timeline recipes: ${message}`);
+    });
   }
 
   async refreshRecipes(): Promise<number> {
