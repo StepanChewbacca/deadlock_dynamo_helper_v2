@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, MoreThanOrEqual, Repository } from 'typeorm';
 import { Match } from './entities/match.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
@@ -9,6 +9,7 @@ import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.e
 
 export const RECENT_MATCH_WINDOW_DAYS = 7;
 export const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;
+export const RECENT_MATCH_QUERY_BATCH_SIZE = 500;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -81,6 +82,12 @@ export class RecentMatchesWindowService implements OnModuleInit {
   constructor(
     @InjectRepository(Match)
     private readonly matchRepository: Repository<Match>,
+    @InjectRepository(MatchPlayer)
+    private readonly matchPlayerRepository: Repository<MatchPlayer>,
+    @InjectRepository(MatchPlayerItem)
+    private readonly matchPlayerItemRepository: Repository<MatchPlayerItem>,
+    @InjectRepository(MatchPlayerSkillUpgrade)
+    private readonly matchPlayerSkillUpgradeRepository: Repository<MatchPlayerSkillUpgrade>,
   ) {}
 
   onModuleInit(): void {
@@ -192,18 +199,54 @@ export class RecentMatchesWindowService implements OnModuleInit {
     const cutoff = getRecentMatchCutoff(now);
 
     try {
-      const matches = await this.matchRepository
-        .createQueryBuilder('match')
-        .leftJoinAndSelect('match.players', 'player')
-        .leftJoinAndSelect('player.itemPurchases', 'itemPurchase')
-        .leftJoinAndSelect('player.skillUpgrades', 'skillUpgrade')
-        .where('match.startTime >= :cutoff', { cutoff })
-        .orderBy('match.startTime', 'DESC')
-        .addOrderBy('player.id', 'ASC')
-        .getMany();
+      const matches = await this.matchRepository.find({
+        where: { startTime: MoreThanOrEqual(cutoff) },
+        order: { startTime: 'DESC' },
+      });
+
+      const matchIds = matches.map((match) => Number(match.matchId));
+      const players = await loadInBatches(matchIds, (batch) =>
+        this.matchPlayerRepository.find({
+          where: { matchId: In(batch) },
+        }),
+      );
+
+      const playersById = new Map<number, MatchPlayer>();
+      const playersByMatchId = new Map<number, MatchPlayer[]>();
+
+      for (const player of players) {
+        player.itemPurchases = [];
+        player.skillUpgrades = [];
+        playersById.set(Number(player.id), player);
+
+        const matchId = Number(player.matchId);
+        const matchPlayers = playersByMatchId.get(matchId) ?? [];
+        matchPlayers.push(player);
+        playersByMatchId.set(matchId, matchPlayers);
+      }
+
+      const playerIds = players.map((player) => Number(player.id));
+      for (const playerIdBatch of chunkValues(playerIds, RECENT_MATCH_QUERY_BATCH_SIZE)) {
+        const [items, skills] = await Promise.all([
+          this.matchPlayerItemRepository.find({
+            where: { matchPlayerId: In(playerIdBatch) },
+          }),
+          this.matchPlayerSkillUpgradeRepository.find({
+            where: { matchPlayerId: In(playerIdBatch) },
+          }),
+        ]);
+
+        for (const item of items) {
+          playersById.get(Number(item.matchPlayerId))?.itemPurchases.push(item);
+        }
+        for (const skill of skills) {
+          playersById.get(Number(skill.matchPlayerId))?.skillUpgrades.push(skill);
+        }
+      }
 
       const nextWindow = new Map<number, RecentMatchSnapshot>();
       for (const match of matches) {
+        match.players = playersByMatchId.get(Number(match.matchId)) ?? [];
         const snapshot = toRecentMatchSnapshot(match);
         nextWindow.set(snapshot.matchId, snapshot);
       }
@@ -215,7 +258,7 @@ export class RecentMatchesWindowService implements OnModuleInit {
 
       const status = this.getStatus(now);
       this.logger.log(
-        `Loaded ${status.matchCount} matches and ${status.playerCount} players from the last ${RECENT_MATCH_WINDOW_DAYS} days into memory.`,
+        `Loaded ${status.matchCount} matches, ${status.playerCount} players, ${status.itemEventCount} item events and ${status.skillEventCount} skill events from the last ${RECENT_MATCH_WINDOW_DAYS} days into memory in ${status.lastRefreshDurationMs} ms.`,
       );
       return status;
     } catch (error) {
@@ -228,6 +271,29 @@ export class RecentMatchesWindowService implements OnModuleInit {
 
 export function getRecentMatchCutoff(now: Date): Date {
   return new Date(now.getTime() - RECENT_MATCH_WINDOW_DAYS * DAY_MS);
+}
+
+export function chunkValues<T>(values: T[], batchSize: number): T[][] {
+  if (batchSize <= 0) {
+    throw new Error('batchSize must be greater than zero');
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += batchSize) {
+    chunks.push(values.slice(index, index + batchSize));
+  }
+  return chunks;
+}
+
+async function loadInBatches<T>(
+  values: number[],
+  loader: (batch: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const result: T[] = [];
+  for (const batch of chunkValues(values, RECENT_MATCH_QUERY_BATCH_SIZE)) {
+    result.push(...(await loader(batch)));
+  }
+  return result;
 }
 
 export function toRecentMatchSnapshot(match: Match): RecentMatchSnapshot {
