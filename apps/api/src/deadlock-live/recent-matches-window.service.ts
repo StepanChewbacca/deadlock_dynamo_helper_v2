@@ -87,7 +87,7 @@ export class RecentMatchesWindowService implements OnModuleInit {
     this.refreshInBackground('initial');
   }
 
-  @Interval(RECENT_MATCH_REFRESH_INTERVAL_MS)
+  @Interval('recent-matches-window-refresh', RECENT_MATCH_REFRESH_INTERVAL_MS)
   refreshOnInterval(): void {
     this.refreshInBackground('scheduled');
   }
