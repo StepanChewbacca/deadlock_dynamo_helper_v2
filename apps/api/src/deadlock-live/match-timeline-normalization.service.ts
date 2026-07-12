@@ -61,6 +61,7 @@ export interface NormalizedMatchItemTimelines {
 
 interface PendingAction extends Omit<CanonicalItemAction, 'sequence'> {
   insertionOrder: number;
+  zeroDurationLifecycle: boolean;
 }
 
 interface PreviousPurchase {
@@ -120,6 +121,7 @@ export class MatchTimelineNormalizationService {
         (previous) => previous.soldTimeS !== undefined && previous.soldTimeS <= purchaseTimeS,
       );
       const instanceId = `${player.id}:${row.id}`;
+      const zeroDurationLifecycle = soldTimeS === purchaseTimeS;
 
       actions.push({
         type: isRebuy ? 'REBUY' : 'BUY',
@@ -131,23 +133,8 @@ export class MatchTimelineNormalizationService {
         evidence: 'purchaseTimeS',
         confidence: 1,
         insertionOrder: insertionOrder++,
+        zeroDurationLifecycle,
       });
-
-      const upgradeId = this.resolveUpgradeId(row, itemId, diagnostics);
-      if (upgradeId !== undefined) {
-        actions.push({
-          type: 'UPGRADE',
-          gameTimeS: purchaseTimeS,
-          itemId,
-          relatedItemId: upgradeId,
-          instanceId,
-          sourceRowId: row.id,
-          slotOrder: row.slotOrder,
-          evidence: 'upgradeId',
-          confidence: 1,
-          insertionOrder: insertionOrder++,
-        });
-      }
 
       if (soldTimeS !== undefined) {
         actions.push({
@@ -160,6 +147,7 @@ export class MatchTimelineNormalizationService {
           evidence: 'soldTimeS',
           confidence: 1,
           insertionOrder: insertionOrder++,
+          zeroDurationLifecycle,
         });
       }
 
@@ -173,10 +161,12 @@ export class MatchTimelineNormalizationService {
       matchId: player.matchId,
       playerId: player.id,
       heroId: player.heroId,
-      actions: actions.map(({ insertionOrder: _insertionOrder, ...action }, index) => ({
-        ...action,
-        sequence: index + 1,
-      })),
+      actions: actions.map(
+        ({ insertionOrder: _insertionOrder, zeroDurationLifecycle: _zeroDurationLifecycle, ...action }, index) => ({
+          ...action,
+          sequence: index + 1,
+        }),
+      ),
       diagnostics,
     };
   }
@@ -187,7 +177,7 @@ export class MatchTimelineNormalizationService {
     itemId: number,
     diagnostics: TimelineDiagnostic[],
   ): number | undefined {
-    if (row.soldTimeS === undefined) {
+    if (row.soldTimeS === undefined || row.soldTimeS === 0) {
       return undefined;
     }
 
@@ -213,28 +203,6 @@ export class MatchTimelineNormalizationService {
 
     return soldTimeS;
   }
-
-  private resolveUpgradeId(
-    row: RecentMatchItemSnapshot,
-    itemId: number,
-    diagnostics: TimelineDiagnostic[],
-  ): number | undefined {
-    if (row.upgradeId === undefined || row.upgradeId === 0) {
-      return undefined;
-    }
-
-    const upgradeId = toPositiveInteger(row.upgradeId);
-    if (upgradeId === undefined || upgradeId === itemId) {
-      diagnostics.push({
-        code: 'INVALID_UPGRADE_ID',
-        sourceRowId: row.id,
-        itemId,
-      });
-      return undefined;
-    }
-
-    return upgradeId;
-  }
 }
 
 function compareItemRows(left: RecentMatchItemSnapshot, right: RecentMatchItemSnapshot): number {
@@ -258,7 +226,7 @@ function compareActions(left: PendingAction, right: PendingAction): number {
     return left.gameTimeS - right.gameTimeS;
   }
 
-  const typeDifference = actionPriority(left.type) - actionPriority(right.type);
+  const typeDifference = actionPriority(left) - actionPriority(right);
   if (typeDifference !== 0) {
     return typeDifference;
   }
@@ -266,17 +234,21 @@ function compareActions(left: PendingAction, right: PendingAction): number {
   return left.insertionOrder - right.insertionOrder;
 }
 
-function actionPriority(type: CanonicalItemActionType): number {
-  switch (type) {
+function actionPriority(action: PendingAction): number {
+  if ((action.type === 'BUY' || action.type === 'REBUY') && action.zeroDurationLifecycle) {
+    return 0;
+  }
+
+  switch (action.type) {
     case 'SELL':
-      return 0;
+      return 1;
     case 'BUY':
     case 'REBUY':
-      return 1;
-    case 'UPGRADE':
       return 2;
-    default:
+    case 'UPGRADE':
       return 3;
+    default:
+      return 4;
   }
 }
 
