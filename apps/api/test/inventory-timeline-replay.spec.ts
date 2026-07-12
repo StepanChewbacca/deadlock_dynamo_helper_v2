@@ -72,6 +72,28 @@ describe('InventoryTimelineReplayService', () => {
     ]);
   });
 
+  it('does not consume components when the parent instance already exists', () => {
+    const upgrade = createAction(3, 'UPGRADE', 180, 300, '7:parent');
+    upgrade.consumedComponentItemIds = [100];
+    upgrade.consumedComponentInstanceIds = ['7:component'];
+
+    const replay = service.replayPlayer(
+      createTimeline([
+        createAction(1, 'BUY', 60, 100, '7:component'),
+        createAction(2, 'BUY', 90, 300, '7:parent'),
+        upgrade,
+      ]),
+    );
+
+    expect(replay.finalInventory.map((instance) => instance.instanceId)).toEqual([
+      '7:component',
+      '7:parent',
+    ]);
+    expect(replay.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'DUPLICATE_UPGRADE_PARENT_INSTANCE',
+    ]);
+  });
+
   it('does not overwrite an already-held instance on duplicate acquisition', () => {
     const replay = service.replayPlayer(
       createTimeline([
