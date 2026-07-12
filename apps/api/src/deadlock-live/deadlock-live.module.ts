@@ -7,6 +7,7 @@ import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
 import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 import { RecentMatchesWindowController } from './recent-matches-window.controller';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
 import { LiveIngestController } from './live-ingest.controller';
@@ -82,6 +83,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
+    RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,
     HeroAnalysisService,
     RulesetResolverService,
@@ -106,6 +108,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
+    RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,
     HeroAnalysisService,
     RulesetResolverService,
