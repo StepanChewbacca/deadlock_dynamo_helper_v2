@@ -3,7 +3,9 @@ import { MatchPlayer } from '../src/deadlock-live/entities/match-player.entity';
 import { MatchPlayerItem } from '../src/deadlock-live/entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from '../src/deadlock-live/entities/match-player-skill-upgrade.entity';
 import {
+  chunkValues,
   getRecentMatchCutoff,
+  RECENT_MATCH_QUERY_BATCH_SIZE,
   RECENT_MATCH_REFRESH_INTERVAL_MS,
   RECENT_MATCH_WINDOW_DAYS,
   toRecentMatchSnapshot,
@@ -16,6 +18,17 @@ describe('recent matches window', () => {
     expect(RECENT_MATCH_WINDOW_DAYS).toBe(7);
     expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);
     expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-07-05T12:00:00.000Z');
+  });
+
+  it('splits database identifiers into bounded batches', () => {
+    const values = Array.from({ length: RECENT_MATCH_QUERY_BATCH_SIZE * 2 + 1 }, (_, index) => index + 1);
+
+    const batches = chunkValues(values, RECENT_MATCH_QUERY_BATCH_SIZE);
+
+    expect(batches).toHaveLength(3);
+    expect(batches[0]).toHaveLength(RECENT_MATCH_QUERY_BATCH_SIZE);
+    expect(batches[1]).toHaveLength(RECENT_MATCH_QUERY_BATCH_SIZE);
+    expect(batches[2]).toEqual([RECENT_MATCH_QUERY_BATCH_SIZE * 2 + 1]);
   });
 
   it('creates a version-independent snapshot with ordered item and skill timelines', () => {
