@@ -4,7 +4,7 @@ import { RecentMatchPlayerSnapshot } from '../src/deadlock-live/recent-matches-w
 describe('MatchTimelineNormalizationService', () => {
   const service = new MatchTimelineNormalizationService();
 
-  it('normalizes buy, sell, rebuy and upgrade actions deterministically', () => {
+  it('normalizes buy, sell and rebuy actions deterministically', () => {
     const timeline = service.normalizePlayer(
       createPlayer([
         { id: 1, itemId: 100, purchaseTimeS: 60, soldTimeS: 180, slotOrder: 1 },
@@ -18,11 +18,9 @@ describe('MatchTimelineNormalizationService', () => {
       'SELL',
       'REBUY',
       'BUY',
-      'UPGRADE',
     ]);
-    expect(timeline.actions.map((action) => action.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(timeline.actions.map((action) => action.sequence)).toEqual([1, 2, 3, 4]);
     expect(timeline.actions[2].instanceId).toBe('7:2');
-    expect(timeline.actions[4].relatedItemId).toBe(300);
     expect(timeline.diagnostics).toEqual([]);
   });
 
@@ -35,6 +33,38 @@ describe('MatchTimelineNormalizationService', () => {
     );
 
     expect(timeline.actions.map((action) => action.type)).toEqual(['BUY', 'BUY']);
+  });
+
+  it('treats zero sold time and upgrade metadata as absent evidence', () => {
+    const timeline = service.normalizePlayer(
+      createPlayer([
+        { id: 1, itemId: 100, purchaseTimeS: 60, soldTimeS: 0, upgradeId: 1 },
+        { id: 2, itemId: 200, purchaseTimeS: 120, soldTimeS: 0, upgradeId: 300 },
+      ]),
+    );
+
+    expect(timeline.actions.map((action) => action.type)).toEqual(['BUY', 'BUY']);
+    expect(timeline.diagnostics).toEqual([]);
+  });
+
+  it('orders a zero-duration lifecycle as buy before sell for the same instance', () => {
+    const timeline = service.normalizePlayer(
+      createPlayer([{ id: 1, itemId: 100, purchaseTimeS: 60, soldTimeS: 60 }]),
+    );
+
+    expect(timeline.actions.map((action) => action.type)).toEqual(['BUY', 'SELL']);
+    expect(timeline.actions[0].instanceId).toBe(timeline.actions[1].instanceId);
+  });
+
+  it('orders a replacement sale before a different item purchase at the same time', () => {
+    const timeline = service.normalizePlayer(
+      createPlayer([
+        { id: 1, itemId: 100, purchaseTimeS: 30, soldTimeS: 60 },
+        { id: 2, itemId: 200, purchaseTimeS: 60 },
+      ]),
+    );
+
+    expect(timeline.actions.map((action) => action.type)).toEqual(['BUY', 'SELL', 'BUY']);
   });
 
   it('reports invalid evidence instead of inventing actions', () => {
@@ -50,7 +80,6 @@ describe('MatchTimelineNormalizationService', () => {
     expect(timeline.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       'MISSING_PURCHASE_TIME',
       'SOLD_BEFORE_PURCHASE',
-      'INVALID_UPGRADE_ID',
     ]);
   });
 });
