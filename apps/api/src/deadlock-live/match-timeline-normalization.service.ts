@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 import {
   RecentMatchItemSnapshot,
   RecentMatchPlayerSnapshot,
@@ -15,13 +16,14 @@ export type CanonicalItemActionType =
   | 'RECONCILE'
   | 'UNKNOWN_REMOVE';
 
+export type TimelineEvidenceLevel = 'OBSERVED' | 'DERIVED' | 'INFERRED';
+
 export type TimelineDiagnosticCode =
   | 'INVALID_ITEM_ID'
   | 'MISSING_PURCHASE_TIME'
   | 'INVALID_PURCHASE_TIME'
   | 'INVALID_SOLD_TIME'
-  | 'SOLD_BEFORE_PURCHASE'
-  | 'INVALID_UPGRADE_ID';
+  | 'SOLD_BEFORE_PURCHASE';
 
 export interface CanonicalItemAction {
   sequence: number;
@@ -31,9 +33,12 @@ export interface CanonicalItemAction {
   instanceId: string;
   sourceRowId: number;
   relatedItemId?: number;
+  consumedComponentItemIds?: number[];
+  consumedComponentInstanceIds?: string[];
   slotOrder?: number;
-  evidence: 'purchaseTimeS' | 'soldTimeS' | 'upgradeId';
-  confidence: 1;
+  evidence: 'purchaseTimeS' | 'soldTimeS' | 'recipeGraph';
+  evidenceLevel: TimelineEvidenceLevel;
+  confidence: number;
 }
 
 export interface TimelineDiagnostic {
@@ -57,6 +62,7 @@ export interface NormalizedMatchItemTimelines {
   players: NormalizedPlayerItemTimeline[];
   actionCount: number;
   diagnosticCount: number;
+  upgradeCount: number;
 }
 
 interface PendingAction extends Omit<CanonicalItemAction, 'sequence'> {
@@ -71,19 +77,32 @@ interface PreviousPurchase {
 
 @Injectable()
 export class MatchTimelineNormalizationService {
-  normalizeMatch(match: RecentMatchSnapshot): NormalizedMatchItemTimelines {
-    const players = match.players.map((player) => this.normalizePlayer(player));
+  constructor(
+    private readonly recipeAwareTimelineReconciliationService?: RecipeAwareTimelineReconciliationService,
+  ) {}
 
-    return {
+  normalizeMatch(match: RecentMatchSnapshot): NormalizedMatchItemTimelines {
+    const players = match.players.map((player) => this.normalizeObservedPlayer(player));
+    const observed: NormalizedMatchItemTimelines = {
       matchId: match.matchId,
       startTime: new Date(match.startTime),
       players,
       actionCount: players.reduce((total, player) => total + player.actions.length, 0),
       diagnosticCount: players.reduce((total, player) => total + player.diagnostics.length, 0),
+      upgradeCount: 0,
     };
+
+    return this.recipeAwareTimelineReconciliationService?.reconcileMatch(observed) ?? observed;
   }
 
   normalizePlayer(player: RecentMatchPlayerSnapshot): NormalizedPlayerItemTimeline {
+    const observed = this.normalizeObservedPlayer(player);
+    return this.recipeAwareTimelineReconciliationService?.reconcilePlayer(observed) ?? observed;
+  }
+
+  private normalizeObservedPlayer(
+    player: RecentMatchPlayerSnapshot,
+  ): NormalizedPlayerItemTimeline {
     const diagnostics: TimelineDiagnostic[] = [];
     const actions: PendingAction[] = [];
     const previousPurchasesByItemId = new Map<number, PreviousPurchase[]>();
@@ -131,6 +150,7 @@ export class MatchTimelineNormalizationService {
         sourceRowId: row.id,
         slotOrder: row.slotOrder,
         evidence: 'purchaseTimeS',
+        evidenceLevel: 'OBSERVED',
         confidence: 1,
         insertionOrder: insertionOrder++,
         zeroDurationLifecycle,
@@ -145,6 +165,7 @@ export class MatchTimelineNormalizationService {
           sourceRowId: row.id,
           slotOrder: row.slotOrder,
           evidence: 'soldTimeS',
+          evidenceLevel: 'OBSERVED',
           confidence: 1,
           insertionOrder: insertionOrder++,
           zeroDurationLifecycle,
