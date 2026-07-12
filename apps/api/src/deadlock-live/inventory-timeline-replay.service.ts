@@ -188,6 +188,11 @@ export class InventoryTimelineReplayService {
     heldByInstanceId: Map<string, InventoryItemInstanceSnapshot>,
     diagnostics: InventoryReplayDiagnostic[],
   ): void {
+    if (heldByInstanceId.has(action.instanceId)) {
+      diagnostics.push(createDiagnostic('DUPLICATE_UPGRADE_PARENT_INSTANCE', action));
+      return;
+    }
+
     const componentInstanceIds = [...new Set(action.consumedComponentInstanceIds ?? [])];
     const componentItemIds = action.consumedComponentItemIds ?? [];
 
@@ -197,17 +202,16 @@ export class InventoryTimelineReplayService {
 
     for (const [index, componentInstanceId] of componentInstanceIds.entries()) {
       const heldComponent = heldByInstanceId.get(componentInstanceId);
+      const expectedComponentItemId = componentItemIds[index];
       if (!heldComponent) {
-        diagnostics.push(
-          createDiagnostic('MISSING_UPGRADE_COMPONENT', action, {
-            componentInstanceId,
-            expectedComponentItemId: componentItemIds[index] ?? 0,
-          }),
-        );
+        const details: Record<string, string | number> = { componentInstanceId };
+        if (expectedComponentItemId !== undefined) {
+          details.expectedComponentItemId = expectedComponentItemId;
+        }
+        diagnostics.push(createDiagnostic('MISSING_UPGRADE_COMPONENT', action, details));
         continue;
       }
 
-      const expectedComponentItemId = componentItemIds[index];
       if (
         expectedComponentItemId !== undefined &&
         heldComponent.itemId !== expectedComponentItemId
@@ -222,11 +226,6 @@ export class InventoryTimelineReplayService {
       }
 
       heldByInstanceId.delete(componentInstanceId);
-    }
-
-    if (heldByInstanceId.has(action.instanceId)) {
-      diagnostics.push(createDiagnostic('DUPLICATE_UPGRADE_PARENT_INSTANCE', action));
-      return;
     }
 
     heldByInstanceId.set(action.instanceId, createInstance(action, 'UPGRADE'));
