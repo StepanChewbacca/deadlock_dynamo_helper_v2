@@ -1,4 +1,5 @@
 import { Controller, Get, NotFoundException, Param, ParseIntPipe } from '@nestjs/common';
+import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
 import { RecentMatchSnapshot, RecentMatchesWindowService } from './recent-matches-window.service';
@@ -9,6 +10,7 @@ export class MatchTimelineNormalizationController {
     private readonly recentMatchesWindowService: RecentMatchesWindowService,
     private readonly matchTimelineNormalizationService: MatchTimelineNormalizationService,
     private readonly inventoryTimelineReplayService: InventoryTimelineReplayService,
+    private readonly canonicalBuildSequenceService: CanonicalBuildSequenceService,
   ) {}
 
   @Get(':matchId/timelines')
@@ -22,6 +24,14 @@ export class MatchTimelineNormalizationController {
     const match = await this.getReadyMatch(matchId);
     const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
     return this.inventoryTimelineReplayService.replayMatch(timelines);
+  }
+
+  @Get(':matchId/build-sequences')
+  async getMatchBuildSequences(@Param('matchId', ParseIntPipe) matchId: number) {
+    const match = await this.getReadyMatch(matchId);
+    const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
+    const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
+    return this.canonicalBuildSequenceService.canonicalizeMatch(replay);
   }
 
   @Get(':matchId/players/:playerId/timeline')
@@ -41,6 +51,17 @@ export class MatchTimelineNormalizationController {
     const player = await this.getReadyPlayer(matchId, playerId);
     const timeline = this.matchTimelineNormalizationService.normalizePlayer(player);
     return this.inventoryTimelineReplayService.replayPlayer(timeline);
+  }
+
+  @Get(':matchId/players/:playerId/build-sequence')
+  async getPlayerBuildSequence(
+    @Param('matchId', ParseIntPipe) matchId: number,
+    @Param('playerId', ParseIntPipe) playerId: number,
+  ) {
+    const player = await this.getReadyPlayer(matchId, playerId);
+    const timeline = this.matchTimelineNormalizationService.normalizePlayer(player);
+    const replay = this.inventoryTimelineReplayService.replayPlayer(timeline);
+    return this.canonicalBuildSequenceService.canonicalizePlayer(replay);
   }
 
   private async getReadyPlayer(matchId: number, playerId: number) {
