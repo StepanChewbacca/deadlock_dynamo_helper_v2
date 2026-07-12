@@ -4,6 +4,7 @@ import { MatchPlayerItem } from '../src/deadlock-live/entities/match-player-item
 import { MatchPlayerSkillUpgrade } from '../src/deadlock-live/entities/match-player-skill-upgrade.entity';
 import {
   getRecentMatchCutoff,
+  RECENT_MATCH_REFRESH_INTERVAL_MS,
   RECENT_MATCH_WINDOW_DAYS,
   toRecentMatchSnapshot,
 } from '../src/deadlock-live/recent-matches-window.service';
@@ -13,6 +14,7 @@ describe('recent matches window', () => {
     const now = new Date('2026-07-12T12:00:00.000Z');
 
     expect(RECENT_MATCH_WINDOW_DAYS).toBe(7);
+    expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);
     expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-07-05T12:00:00.000Z');
   });
 

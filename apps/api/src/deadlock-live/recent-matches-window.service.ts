@@ -8,7 +8,7 @@ import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
 
 export const RECENT_MATCH_WINDOW_DAYS = 7;
-export const RECENT_MATCH_REFRESH_INTERVAL_MS = 30_000;
+export const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -83,18 +83,13 @@ export class RecentMatchesWindowService implements OnModuleInit {
     private readonly matchRepository: Repository<Match>,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.refresh();
+  onModuleInit(): void {
+    this.refreshInBackground('initial');
   }
 
   @Interval(RECENT_MATCH_REFRESH_INTERVAL_MS)
-  async refreshOnInterval(): Promise<void> {
-    try {
-      await this.refresh();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to refresh recent matches window: ${message}`);
-    }
+  refreshOnInterval(): void {
+    this.refreshInBackground('scheduled');
   }
 
   async refresh(now = new Date()): Promise<RecentMatchesWindowStatus> {
@@ -183,6 +178,13 @@ export class RecentMatchesWindowService implements OnModuleInit {
       newestMatchStartTime: startTimes.length > 0 ? new Date(Math.max(...startTimes)) : undefined,
       lastError: this.lastError,
     };
+  }
+
+  private refreshInBackground(trigger: 'initial' | 'scheduled'): void {
+    void this.refresh().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to refresh recent matches window (${trigger}): ${message}`);
+    });
   }
 
   private async loadWindow(now: Date): Promise<RecentMatchesWindowStatus> {
