@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import { AllHeroesAnalysisService, RecommendBuildDto } from './all-heroes-analysis.service';
-import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
 import {
   HistoricalMatchReplayService,
   ReplayHistoricalMatchesDto,
@@ -15,10 +14,7 @@ import {
   RulesetResolverService,
 } from './ruleset-resolver.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
-import {
-  SituationalRecommendationDto,
-  SituationalRecommendationService,
-} from './situational-recommendation.service';
+import { SituationalRecommendationDto, SituationalRecommendationService } from './situational-recommendation.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
 @Controller('deadlock/analysis')
@@ -28,7 +24,6 @@ export class AllHeroesAnalysisController {
     private readonly situationalRecommendationService: SituationalRecommendationService,
     private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
     private readonly recentMatchesWindowService: RecentMatchesWindowService,
-    private readonly heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     private readonly rulesetResolverService: RulesetResolverService,
     private readonly rulesetResolutionRefreshService: RulesetResolutionRefreshService,
     private readonly rawMatchMetadataNormalizerService: RawMatchMetadataNormalizerService,
@@ -95,7 +90,6 @@ export class AllHeroesAnalysisController {
   async reprocessStoredMatch(@Param('matchId', ParseIntPipe) matchId: number) {
     const result = await this.storedMatchReprocessingService.reprocess(matchId);
     await this.recentMatchesWindowService.refresh();
-    await this.heroBuildTransitionAggregationService.refresh();
     return result;
   }
 
