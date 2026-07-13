@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { OverwolfLiveBatchDto } from '@deadlock-live-probe/shared';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
+import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
@@ -12,6 +13,8 @@ export class LiveIngestController {
     private readonly liveMatchStateService: LiveMatchStateService,
     private readonly inventoryShadowReplayService: InventoryShadowReplayService,
     private readonly recentLiveEventsService: RecentLiveEventsService,
+    private readonly liveBuildRecommendationTraversalService:
+      LiveBuildRecommendationTraversalService,
   ) {}
 
   @Post('events')
@@ -20,6 +23,7 @@ export class LiveIngestController {
     this.recentLiveEventsService.append(batch.events);
     const state = this.liveMatchStateService.applyBatch(batch);
     this.inventoryShadowReplayService.applyBatch(batch, state?.matchId);
+    this.liveBuildRecommendationTraversalService.observeState(state);
     return { ok: true };
   }
 
@@ -44,6 +48,21 @@ export class LiveIngestController {
     @Param('steamId') steamId: string,
   ) {
     return this.inventoryShadowReplayService.getPlayerTimeline(matchId, steamId);
+  }
+
+  @Get('matches/:matchId/build-recommendation')
+  getLiveBuildRecommendation(@Param('matchId') matchId: string) {
+    return this.liveBuildRecommendationTraversalService.getMatchSnapshot(matchId);
+  }
+
+  @Get('build-recommendations/status')
+  getLiveBuildRecommendationStatus() {
+    return this.liveBuildRecommendationTraversalService.getStatus();
+  }
+
+  @Get('build-recommendations')
+  getLiveBuildRecommendations() {
+    return this.liveBuildRecommendationTraversalService.getAllSnapshots();
   }
 
   @Get('events/recent')
