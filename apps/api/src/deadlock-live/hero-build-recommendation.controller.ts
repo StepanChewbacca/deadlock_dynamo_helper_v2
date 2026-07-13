@@ -1,5 +1,13 @@
 import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
 import {
+  filterHeroBuildRecommendationAlternatives,
+  HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
+  HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_HISTORICAL_COUNT,
+  HERO_BUILD_MAX_MIN_ALTERNATIVE_HISTORICAL_COUNT,
+  HeroBuildAlternativeFilterOptions,
+} from './hero-build-recommendation-alternative-filter';
+import {
+  HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
   HeroBuildRecommendationRequest,
   HeroBuildRecommendationService,
@@ -10,6 +18,13 @@ export class RecommendHeroBuildDto {
   itemIds!: number[];
   gameTimeS!: number;
   limit?: number;
+  minAlternativeHistoricalCount?: number;
+  minAlternativeConfidence?: number;
+}
+
+interface ValidatedRecommendHeroBuildRequest {
+  recommendationRequest: HeroBuildRecommendationRequest;
+  alternativeFilter: HeroBuildAlternativeFilterOptions;
 }
 
 @Controller('deadlock/analysis/build-recommendation')
@@ -20,12 +35,20 @@ export class HeroBuildRecommendationController {
 
   @Post()
   async recommend(@Body() dto: RecommendHeroBuildDto) {
-    const request = validateRequest(dto);
-    return this.heroBuildRecommendationService.recommend(request);
+    const validated = validateRequest(dto);
+    const response = await this.heroBuildRecommendationService.recommend({
+      ...validated.recommendationRequest,
+      limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
+    });
+
+    return filterHeroBuildRecommendationAlternatives(
+      response,
+      validated.alternativeFilter,
+    );
   }
 }
 
-function validateRequest(dto: RecommendHeroBuildDto): HeroBuildRecommendationRequest {
+function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuildRequest {
   if (!Number.isSafeInteger(dto?.heroId) || dto.heroId <= 0) {
     throw new BadRequestException('heroId must be a positive safe integer.');
   }
@@ -50,11 +73,42 @@ function validateRequest(dto: RecommendHeroBuildDto): HeroBuildRecommendationReq
       `limit must be a positive safe integer not exceeding ${HERO_BUILD_MAX_RECOMMENDATION_LIMIT}.`,
     );
   }
+  if (
+    dto.minAlternativeHistoricalCount !== undefined &&
+    (!Number.isSafeInteger(dto.minAlternativeHistoricalCount) ||
+      dto.minAlternativeHistoricalCount < 0 ||
+      dto.minAlternativeHistoricalCount >
+        HERO_BUILD_MAX_MIN_ALTERNATIVE_HISTORICAL_COUNT)
+  ) {
+    throw new BadRequestException(
+      `minAlternativeHistoricalCount must be a non-negative safe integer not exceeding ${HERO_BUILD_MAX_MIN_ALTERNATIVE_HISTORICAL_COUNT}.`,
+    );
+  }
+  if (
+    dto.minAlternativeConfidence !== undefined &&
+    (!Number.isFinite(dto.minAlternativeConfidence) ||
+      dto.minAlternativeConfidence < 0 ||
+      dto.minAlternativeConfidence > 1)
+  ) {
+    throw new BadRequestException(
+      'minAlternativeConfidence must be a finite number between 0 and 1.',
+    );
+  }
 
   return {
-    heroId: dto.heroId,
-    itemIds: [...dto.itemIds],
-    gameTimeS: dto.gameTimeS,
-    limit: dto.limit,
+    recommendationRequest: {
+      heroId: dto.heroId,
+      itemIds: [...dto.itemIds],
+      gameTimeS: dto.gameTimeS,
+    },
+    alternativeFilter: {
+      limit: dto.limit ?? HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
+      minHistoricalCount:
+        dto.minAlternativeHistoricalCount ??
+        HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_HISTORICAL_COUNT,
+      minConfidence:
+        dto.minAlternativeConfidence ??
+        HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
+    },
   };
 }
