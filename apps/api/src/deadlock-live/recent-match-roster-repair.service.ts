@@ -54,7 +54,7 @@ const DISCOVER_REPAIR_CANDIDATES_SQL = `
   WITH current_rosters AS (
     SELECT
       "matchId",
-      COUNT(DISTINCT "heroId") FILTER (WHERE "heroId" > 0)::int AS "currentPlayerCount"
+      (COUNT(DISTINCT "heroId") FILTER (WHERE "heroId" > 0))::int AS "currentPlayerCount"
     FROM "match_players"
     WHERE "matchId" = ANY($1::bigint[])
     GROUP BY "matchId"
@@ -156,9 +156,9 @@ export class RecentMatchRosterRepairService {
   }
 
   private async execute(): Promise<void> {
-    let windowStatus = this.recentMatchesWindowService.getStatus();
+    const windowStatus = this.recentMatchesWindowService.getStatus();
     if (!windowStatus.lastRefreshedAt) {
-      windowStatus = await this.recentMatchesWindowService.refresh();
+      await this.recentMatchesWindowService.refresh();
     }
 
     const matchIds = this.recentMatchesWindowService.getMatchIds();
