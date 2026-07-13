@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
+import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
 import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
 import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
 import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
@@ -93,6 +94,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     CanonicalBuildSequenceService,
     HeroBuildTransitionAggregationService,
     HeroBuildRecommendationService,
+    HeroBuildRecommendationPresentationService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
@@ -123,6 +125,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     CanonicalBuildSequenceService,
     HeroBuildTransitionAggregationService,
     HeroBuildRecommendationService,
+    HeroBuildRecommendationPresentationService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
