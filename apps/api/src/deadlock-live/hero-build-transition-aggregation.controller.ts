@@ -5,7 +5,7 @@ import {
 } from './hero-build-transition-aggregation.service';
 
 export class GetHeroBuildNextActionsDto {
-  heroId!: number;
+  heroId?: number;
   stateKey?: string;
   itemIds?: number[];
   limit?: number;
@@ -26,10 +26,11 @@ export class HeroBuildTransitionAggregationController {
 
   @Post('next-actions')
   async getNextActions(@Body() dto: GetHeroBuildNextActionsDto) {
-    const heroId = parsePositiveInteger(dto?.heroId, 'heroId');
-    const stateKey = resolveStateKey(dto ?? {});
-    const limit = parseBoundedPositiveInteger(dto?.limit, 'limit', 10, 100);
-    const minCount = parseBoundedPositiveInteger(dto?.minCount, 'minCount', 1, 1_000_000);
+    const body = dto ?? {};
+    const heroId = parsePositiveInteger(body.heroId, 'heroId');
+    const stateKey = resolveStateKey(body);
+    const limit = parseBoundedPositiveInteger(body.limit, 'limit', 10, 100);
+    const minCount = parseBoundedPositiveInteger(body.minCount, 'minCount', 1, 1_000_000);
 
     await this.heroBuildTransitionAggregationService.ensureReady();
     return this.heroBuildTransitionAggregationService.getNextActions(
@@ -63,10 +64,10 @@ function resolveStateKey(dto: GetHeroBuildNextActionsDto): string {
 }
 
 function parsePositiveInteger(value: unknown, fieldName: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     throw new BadRequestException(`${fieldName} must be a positive safe integer.`);
   }
-  return Number(value);
+  return value;
 }
 
 function parseBoundedPositiveInteger(
