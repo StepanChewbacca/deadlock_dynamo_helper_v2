@@ -320,6 +320,10 @@ export class HeroBuildTransitionAggregationService implements OnModuleInit {
     };
   }
 
+  getHeroPolicy(heroId: number): HeroBuildPolicy | undefined {
+    return this.policiesByHeroId.get(heroId);
+  }
+
   getNextActions(
     heroId: number,
     stateKey: string,
