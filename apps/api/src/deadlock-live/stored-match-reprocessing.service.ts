@@ -57,6 +57,13 @@ export interface StoredMatchReprocessingResult {
   processingVersion: string;
 }
 
+export function shouldPruneMissingMatchPlayers(
+  existingPlayerCount: number,
+  processedPlayerCount: number,
+): boolean {
+  return processedPlayerCount >= existingPlayerCount;
+}
+
 @Injectable()
 export class StoredMatchReprocessingService {
   constructor(
@@ -65,7 +72,7 @@ export class StoredMatchReprocessingService {
   ) {}
 
   async reprocess(matchId: number): Promise<StoredMatchReprocessingResult> {
-    const rawMetadata = await this.rawMatchMetadataService.getLatest(matchId);
+    const rawMetadata = await this.rawMatchMetadataService.getBestForReprocessing(matchId);
     return this.reprocessRawMetadata(rawMetadata);
   }
 
@@ -136,6 +143,9 @@ export class StoredMatchReprocessingService {
     match.winningTeam = winningTeam;
     await matchRepository.save(match);
 
+    const existingPlayersBeforeProcessing = await matchPlayerRepository.find({
+      where: { matchId },
+    });
     let playersProcessed = 0;
     let itemEventsProcessed = 0;
     let skillEventsProcessed = 0;
@@ -210,10 +220,17 @@ export class StoredMatchReprocessingService {
       unknownItemEventsSkipped += parsedItems.unknownItemEventsSkipped;
     }
 
-    const existingPlayers = await matchPlayerRepository.find({ where: { matchId } });
-    for (const existingPlayer of existingPlayers) {
-      if (!processedHeroIds.has(Number(existingPlayer.heroId))) {
-        await matchPlayerRepository.delete({ id: existingPlayer.id });
+    if (
+      shouldPruneMissingMatchPlayers(
+        existingPlayersBeforeProcessing.length,
+        processedHeroIds.size,
+      )
+    ) {
+      const existingPlayers = await matchPlayerRepository.find({ where: { matchId } });
+      for (const existingPlayer of existingPlayers) {
+        if (!processedHeroIds.has(Number(existingPlayer.heroId))) {
+          await matchPlayerRepository.delete({ id: existingPlayer.id });
+        }
       }
     }
 
@@ -320,7 +337,10 @@ function toRecordArray(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
-function getNumericValue(record: Record<string, unknown>, key: string): number | undefined {
+function getNumericValue(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
   const value = record[key];
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
