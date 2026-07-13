@@ -7,6 +7,7 @@ import { HeroBuildRecommendationPresentationService } from './hero-build-recomme
 import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
 import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
 import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
+import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
@@ -89,6 +90,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   ],
   providers: [
     LiveMatchStateService,
+    LiveBuildRecommendationTraversalService,
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
@@ -120,6 +122,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   ],
   exports: [
     LiveMatchStateService,
+    LiveBuildRecommendationTraversalService,
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
