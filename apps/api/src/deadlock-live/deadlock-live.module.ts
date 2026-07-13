@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
+import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
+import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
@@ -76,6 +78,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     AllHeroesAnalysisController,
     RecentMatchesWindowController,
     MatchTimelineNormalizationController,
+    HeroBuildTransitionAggregationController,
     ReferenceDataController,
     IngestStatusController,
   ],
@@ -84,6 +87,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
+    HeroBuildTransitionAggregationService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
@@ -111,6 +115,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
+    HeroBuildTransitionAggregationService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,

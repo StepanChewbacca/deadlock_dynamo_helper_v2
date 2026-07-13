@@ -116,6 +116,10 @@ export class RecentMatchesWindowService implements OnModuleInit {
     return Array.from(this.matchesById.values(), cloneMatchSnapshot);
   }
 
+  getMatchIds(): number[] {
+    return Array.from(this.matchesById.keys());
+  }
+
   getMatch(matchId: number): RecentMatchSnapshot | undefined {
     const match = this.matchesById.get(matchId);
     return match ? cloneMatchSnapshot(match) : undefined;
