@@ -16,6 +16,7 @@ export const HERO_BUILD_MAX_RECOMMENDATION_LIMIT = 20;
 
 const SUPPORT_SMOOTHING = 5;
 const TIME_DISTANCE_SCALE_S = 600;
+const MISSING_ITEM_DISTANCE_WEIGHT = 4;
 
 export type HeroBuildRecommendationMode = 'EXACT' | 'BACKOFF' | 'NO_MATCH';
 export type HeroBuildRecommendationActionType = 'BUY' | 'UPGRADE' | 'SELL' | 'HOLD';
@@ -23,6 +24,9 @@ export type HeroBuildRecommendationNoMatchReason =
   | 'HERO_POLICY_NOT_FOUND'
   | 'NO_NEARBY_STATE'
   | 'NO_LEGAL_ACTION';
+export type HeroBuildRecommendationBackoffReason =
+  | 'SUBSET_STATE'
+  | 'DIRECTIONAL_FALLBACK';
 
 export interface HeroBuildRecommendationRequest {
   heroId: number;
@@ -42,6 +46,9 @@ export interface HeroBuildRecommendationAction {
   matchedStateKey: string;
   matchedStateObservationCount: number;
   stateDistance: number;
+  missingItemCount: number;
+  extraItemCount: number;
+  matchedBySubset: boolean;
   predictedStateKey: string;
   score: number;
   confidence: number;
@@ -54,10 +61,14 @@ export interface HeroBuildRecommendationResponse {
   gameTimeS: number;
   matchedStateKey?: string;
   stateDistance?: number;
+  missingItemCount?: number;
+  extraItemCount?: number;
+  matchedBySubset?: boolean;
   observationCount: number;
   candidateStateCount: number;
   action: HeroBuildRecommendationAction;
   alternatives: HeroBuildRecommendationAction[];
+  backoffReason?: HeroBuildRecommendationBackoffReason;
   noMatchReason?: HeroBuildRecommendationNoMatchReason;
   policyLastRefreshedAt?: Date;
 }
@@ -69,6 +80,13 @@ export interface HeroBuildRecommendationOptions {
   limit: number;
 }
 
+export interface DirectionalInventoryDistance {
+  distance: number;
+  missingItemCount: number;
+  extraItemCount: number;
+  matchedBySubset: boolean;
+}
+
 export type HeroBuildRecipeResolver = (parentItemId: number) => readonly number[];
 
 type InventoryItemCounts = ReadonlyMap<number, number>;
@@ -78,8 +96,7 @@ interface ParsedPolicyState {
   itemCounts: InventoryItemCounts;
 }
 
-interface StateCandidate extends ParsedPolicyState {
-  distance: number;
+interface StateCandidate extends ParsedPolicyState, DirectionalInventoryDistance {
   quality: number;
 }
 
@@ -175,12 +192,7 @@ export function recommendFromPolicy(
 
   if (exactState && exactState.observationCount >= options.minExactObservations) {
     const exactActions = rankActions(
-      [{
-        state: exactState,
-        itemCounts: requestedItemCounts,
-        distance: 0,
-        quality: calculateStateQuality(exactState.observationCount, 0),
-      }],
+      [createStateCandidate(exactState, requestedItemCounts, requestedItemCounts)],
       requestedItemCounts,
       request.gameTimeS,
       recipeResolver,
@@ -198,23 +210,13 @@ export function recommendFromPolicy(
     }
   }
 
-  const candidates = parsedStates
-    .map((parsedState): StateCandidate => {
-      const distance = calculateInventoryMultisetDistance(
-        requestedItemCounts,
-        parsedState.itemCounts,
-      );
-      return {
-        ...parsedState,
-        distance,
-        quality: calculateStateQuality(parsedState.state.observationCount, distance),
-      };
-    })
-    .filter((candidate) => candidate.distance <= options.maxBackoffDistance)
-    .sort(compareStateCandidates)
-    .slice(0, options.maxBackoffStates);
+  const nearbyCandidates = parsedStates
+    .map((parsedState) =>
+      createStateCandidate(parsedState.state, parsedState.itemCounts, requestedItemCounts),
+    )
+    .filter((candidate) => candidate.distance <= options.maxBackoffDistance);
 
-  if (candidates.length === 0) {
+  if (nearbyCandidates.length === 0) {
     return createNoMatchResponse(
       request,
       requestedStateKey,
@@ -223,28 +225,57 @@ export function recommendFromPolicy(
     );
   }
 
-  const backoffActions = rankActions(
-    candidates,
+  const subsetCandidates = nearbyCandidates
+    .filter((candidate) => candidate.matchedBySubset)
+    .sort(compareStateCandidates)
+    .slice(0, options.maxBackoffStates);
+  const subsetActions = rankActions(
+    subsetCandidates,
     requestedItemCounts,
     request.gameTimeS,
     recipeResolver,
   );
-  if (backoffActions.length === 0) {
-    return createNoMatchResponse(
+
+  if (subsetActions.length > 0) {
+    return createMatchedResponse(
+      'BACKOFF',
       request,
       requestedStateKey,
-      'NO_LEGAL_ACTION',
-      candidates.length,
+      subsetCandidates.length,
+      subsetActions,
+      options.limit,
+      'SUBSET_STATE',
     );
   }
 
-  return createMatchedResponse(
-    'BACKOFF',
+  const directionalCandidates = nearbyCandidates
+    .filter((candidate) => !candidate.matchedBySubset)
+    .sort(compareStateCandidates)
+    .slice(0, options.maxBackoffStates);
+  const directionalActions = rankActions(
+    directionalCandidates,
+    requestedItemCounts,
+    request.gameTimeS,
+    recipeResolver,
+  );
+
+  if (directionalActions.length > 0) {
+    return createMatchedResponse(
+      'BACKOFF',
+      request,
+      requestedStateKey,
+      directionalCandidates.length,
+      directionalActions,
+      options.limit,
+      'DIRECTIONAL_FALLBACK',
+    );
+  }
+
+  return createNoMatchResponse(
     request,
     requestedStateKey,
-    candidates.length,
-    backoffActions,
-    options.limit,
+    'NO_LEGAL_ACTION',
+    nearbyCandidates.length,
   );
 }
 
@@ -274,16 +305,37 @@ export function parseInventoryStateKey(stateKey: string): InventoryItemCounts | 
   return itemCounts;
 }
 
+export function calculateDirectionalInventoryDistance(
+  current: InventoryItemCounts,
+  historical: InventoryItemCounts,
+): DirectionalInventoryDistance {
+  const itemIds = new Set<number>([...current.keys(), ...historical.keys()]);
+  let missingItemCount = 0;
+  let extraItemCount = 0;
+
+  for (const itemId of itemIds) {
+    const currentCount = current.get(itemId) ?? 0;
+    const historicalCount = historical.get(itemId) ?? 0;
+    if (historicalCount > currentCount) {
+      missingItemCount += historicalCount - currentCount;
+    } else if (currentCount > historicalCount) {
+      extraItemCount += currentCount - historicalCount;
+    }
+  }
+
+  return {
+    distance: missingItemCount + extraItemCount,
+    missingItemCount,
+    extraItemCount,
+    matchedBySubset: missingItemCount === 0,
+  };
+}
+
 export function calculateInventoryMultisetDistance(
   left: InventoryItemCounts,
   right: InventoryItemCounts,
 ): number {
-  const itemIds = new Set<number>([...left.keys(), ...right.keys()]);
-  let distance = 0;
-  for (const itemId of itemIds) {
-    distance += Math.abs((left.get(itemId) ?? 0) - (right.get(itemId) ?? 0));
-  }
-  return distance;
+  return calculateDirectionalInventoryDistance(left, right).distance;
 }
 
 export function normalizeRecommendationLimit(value: number | undefined): number {
@@ -291,6 +343,28 @@ export function normalizeRecommendationLimit(value: number | undefined): number 
     return HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT;
   }
   return Math.min(value, HERO_BUILD_MAX_RECOMMENDATION_LIMIT);
+}
+
+function createStateCandidate(
+  state: HeroBuildPolicyState,
+  itemCounts: InventoryItemCounts,
+  requestedItemCounts: InventoryItemCounts,
+): StateCandidate {
+  const directionalDistance = calculateDirectionalInventoryDistance(
+    requestedItemCounts,
+    itemCounts,
+  );
+
+  return {
+    state,
+    itemCounts,
+    ...directionalDistance,
+    quality: calculateStateQuality(
+      state.observationCount,
+      directionalDistance.missingItemCount,
+      directionalDistance.extraItemCount,
+    ),
+  };
 }
 
 function rankActions(
@@ -344,7 +418,9 @@ function createRecommendationAction(
     (candidate.state.observationCount + SUPPORT_SMOOTHING);
   const timeDifferenceS = Math.abs(gameTimeS - historicalAction.averageGameTimeS);
   const timeFit = 1 / (1 + timeDifferenceS / TIME_DISTANCE_SCALE_S);
-  const distanceFit = 1 / (1 + candidate.distance);
+  const directionalDistance =
+    candidate.extraItemCount + candidate.missingItemCount * MISSING_ITEM_DISTANCE_WEIGHT;
+  const distanceFit = 1 / (1 + directionalDistance);
   const score = clampProbability(
     historicalAction.probability *
       (0.55 + 0.45 * support) *
@@ -363,6 +439,9 @@ function createRecommendationAction(
     matchedStateKey: candidate.state.stateKey,
     matchedStateObservationCount: candidate.state.observationCount,
     stateDistance: candidate.distance,
+    missingItemCount: candidate.missingItemCount,
+    extraItemCount: candidate.extraItemCount,
+    matchedBySubset: candidate.matchedBySubset,
     predictedStateKey: createStateKeyFromCounts(resolved.predictedItemCounts),
     score,
     confidence: score,
@@ -373,7 +452,10 @@ function resolveLegalAction(
   historicalAction: HeroBuildPolicyNextAction,
   requestedItemCounts: InventoryItemCounts,
   recipeResolver: HeroBuildRecipeResolver,
-): { type: Exclude<HeroBuildRecommendationActionType, 'HOLD'>; predictedItemCounts: Map<number, number> } | undefined {
+): {
+  type: Exclude<HeroBuildRecommendationActionType, 'HOLD'>;
+  predictedItemCounts: Map<number, number>;
+} | undefined {
   const predictedItemCounts = new Map(requestedItemCounts);
 
   if (historicalAction.actionType === 'BUY' || historicalAction.actionType === 'REBUY') {
@@ -409,6 +491,7 @@ function createMatchedResponse(
   candidateStateCount: number,
   rankedActions: readonly HeroBuildRecommendationAction[],
   limit: number,
+  backoffReason?: HeroBuildRecommendationBackoffReason,
 ): HeroBuildRecommendationResponse {
   const selected = rankedActions.slice(0, limit);
   const action = selected[0];
@@ -420,10 +503,14 @@ function createMatchedResponse(
     gameTimeS: request.gameTimeS,
     matchedStateKey: action.matchedStateKey,
     stateDistance: action.stateDistance,
+    missingItemCount: action.missingItemCount,
+    extraItemCount: action.extraItemCount,
+    matchedBySubset: action.matchedBySubset,
     observationCount: action.matchedStateObservationCount,
     candidateStateCount,
     action: { ...action },
     alternatives: selected.slice(1).map((alternative) => ({ ...alternative })),
+    backoffReason,
   };
 }
 
@@ -450,6 +537,9 @@ function createNoMatchResponse(
       matchedStateKey: requestedStateKey,
       matchedStateObservationCount: 0,
       stateDistance: 0,
+      missingItemCount: 0,
+      extraItemCount: 0,
+      matchedBySubset: true,
       predictedStateKey: requestedStateKey,
       score: 0,
       confidence: 0,
@@ -497,17 +587,26 @@ function decrementItemCount(itemCounts: Map<number, number>, itemId: number): bo
   return true;
 }
 
-function calculateStateQuality(observationCount: number, distance: number): number {
+function calculateStateQuality(
+  observationCount: number,
+  missingItemCount: number,
+  extraItemCount: number,
+): number {
   const support = observationCount / (observationCount + SUPPORT_SMOOTHING);
-  return support / (1 + distance);
+  const directionalDistance =
+    extraItemCount + missingItemCount * MISSING_ITEM_DISTANCE_WEIGHT;
+  return support / (1 + directionalDistance);
 }
 
 function compareStateCandidates(left: StateCandidate, right: StateCandidate): number {
+  if (left.missingItemCount !== right.missingItemCount) {
+    return left.missingItemCount - right.missingItemCount;
+  }
+  if (left.extraItemCount !== right.extraItemCount) {
+    return left.extraItemCount - right.extraItemCount;
+  }
   if (left.quality !== right.quality) {
     return right.quality - left.quality;
-  }
-  if (left.distance !== right.distance) {
-    return left.distance - right.distance;
   }
   if (left.state.observationCount !== right.state.observationCount) {
     return right.state.observationCount - left.state.observationCount;
@@ -525,8 +624,11 @@ function compareRecommendationActions(
   if (left.historicalCount !== right.historicalCount) {
     return right.historicalCount - left.historicalCount;
   }
-  if (left.stateDistance !== right.stateDistance) {
-    return left.stateDistance - right.stateDistance;
+  if (left.missingItemCount !== right.missingItemCount) {
+    return left.missingItemCount - right.missingItemCount;
+  }
+  if (left.extraItemCount !== right.extraItemCount) {
+    return left.extraItemCount - right.extraItemCount;
   }
   if (left.matchedStateObservationCount !== right.matchedStateObservationCount) {
     return right.matchedStateObservationCount - left.matchedStateObservationCount;
