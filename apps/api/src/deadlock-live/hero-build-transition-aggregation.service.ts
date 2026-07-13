@@ -4,7 +4,10 @@ import type {
   CanonicalBuildActionType,
   CanonicalPlayerBuildSequence,
 } from './canonical-build-sequence.service';
-import { CanonicalBuildSequenceService, EMPTY_INVENTORY_STATE_KEY } from './canonical-build-sequence.service';
+import {
+  CanonicalBuildSequenceService,
+  EMPTY_INVENTORY_STATE_KEY,
+} from './canonical-build-sequence.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
@@ -387,21 +390,28 @@ export class HeroBuildTransitionAggregationService implements OnModuleInit {
         this.logger.warn(`Using the existing recipe cache for policy aggregation: ${message}`);
       }
 
-      const matches = this.recentMatchesWindowService.getMatches();
+      const matchIds = this.recentMatchesWindowService.getMatchIds();
       const accumulator = new HeroBuildTransitionAccumulator();
+      let processedMatchCount = 0;
 
-      for (const match of matches) {
+      for (const matchId of matchIds) {
+        const match = this.recentMatchesWindowService.getMatch(matchId);
+        if (!match) {
+          continue;
+        }
+
         const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
         const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
         const sequences = this.canonicalBuildSequenceService.canonicalizeMatch(replay);
         for (const player of sequences.players) {
           accumulator.addPlayer(player);
         }
+        processedMatchCount += 1;
       }
 
       const snapshot = accumulator.build();
       this.policiesByHeroId = new Map(snapshot.policiesByHeroId);
-      this.matchCount = matches.length;
+      this.matchCount = processedMatchCount;
       this.sourcePlayerCount = snapshot.sourcePlayerCount;
       this.includedPlayerCount = snapshot.includedPlayerCount;
       this.excludedPlayerCount = snapshot.excludedPlayerCount;
