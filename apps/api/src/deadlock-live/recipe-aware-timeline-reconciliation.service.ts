@@ -86,6 +86,10 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
     return this.componentItemIdsByParent.size;
   }
 
+  getComponentItemIds(parentItemId: number): readonly number[] {
+    return this.componentItemIdsByParent.get(parentItemId) ?? [];
+  }
+
   reconcileMatch(timelines: NormalizedMatchItemTimelines): NormalizedMatchItemTimelines {
     const players = timelines.players.map((player) => this.reconcilePlayer(player));
 
