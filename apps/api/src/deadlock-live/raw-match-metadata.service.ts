@@ -59,6 +59,39 @@ export function hashRawMatchMetadata(payload: Record<string, unknown>): string {
   return sha256StableJson(payload);
 }
 
+export function countValidUniquePlayerHeroes(payload: Record<string, unknown>): number {
+  const matchInfo = toRecord(payload.match_info);
+  const players = Array.isArray(matchInfo?.players) ? matchInfo.players : [];
+  const heroIds = new Set<number>();
+
+  for (const entry of players) {
+    const player = toRecord(entry);
+    const heroId = getNumericValue(player, 'hero_id');
+    if (heroId !== undefined && heroId > 0) {
+      heroIds.add(heroId);
+    }
+  }
+
+  return heroIds.size;
+}
+
+export function selectBestRawMatchMetadata(
+  candidates: readonly RawMatchMetadata[],
+): RawMatchMetadata | undefined {
+  let best: RawMatchMetadata | undefined;
+  let bestPlayerCount = -1;
+
+  for (const candidate of candidates) {
+    const playerCount = countValidUniquePlayerHeroes(candidate.payload);
+    if (playerCount > bestPlayerCount) {
+      best = candidate;
+      bestPlayerCount = playerCount;
+    }
+  }
+
+  return best;
+}
+
 @Injectable()
 export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RawMatchMetadataService.name);
@@ -138,6 +171,18 @@ export class RawMatchMetadataService implements OnModuleInit, OnModuleDestroy {
       where: { matchId },
       order: { fetchedAt: 'DESC', id: 'DESC' },
     });
+    if (!stored) {
+      throw new Error(`No raw metadata found for match ${matchId}`);
+    }
+    return stored;
+  }
+
+  async getBestForReprocessing(matchId: number): Promise<RawMatchMetadata> {
+    const candidates = await this.rawMatchMetadataRepository.find({
+      where: { matchId },
+      order: { fetchedAt: 'DESC', id: 'DESC' },
+    });
+    const stored = selectBestRawMatchMetadata(candidates);
     if (!stored) {
       throw new Error(`No raw metadata found for match ${matchId}`);
     }
