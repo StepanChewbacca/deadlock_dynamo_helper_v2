@@ -170,32 +170,34 @@ export class HeroBuildTransitionAccumulator {
     let transitionCount = 0;
     let actionOptionCount = 0;
 
-    for (const [heroId, mutableHero] of [...this.heroesById.entries()].sort(
-      ([leftHeroId], [rightHeroId]) => leftHeroId - rightHeroId,
-    )) {
+    for (const [heroId, mutableHero] of this.heroesById) {
       const statesByKey = new Map<string, HeroBuildPolicyState>();
 
-      for (const [stateKey, mutableState] of [...mutableHero.statesByKey.entries()].sort(
-        ([leftStateKey], [rightStateKey]) => leftStateKey.localeCompare(rightStateKey),
-      )) {
+      for (const [stateKey, mutableState] of mutableHero.statesByKey) {
         const nextActions = [...mutableState.actionsByKey.values()]
-          .map((action): HeroBuildPolicyNextAction => ({
-            actionType: action.actionType,
-            itemId: action.itemId,
-            actionKey: action.actionKey,
-            count: action.count,
-            probability: action.count / mutableState.observationCount,
-            averageGameTimeS: action.totalGameTimeS / action.count,
-            afterStates: [...action.afterStateCounts.entries()]
+          .map((action): HeroBuildPolicyNextAction => {
+            const afterStates = [...action.afterStateCounts.entries()]
               .map(([afterStateKey, count]): HeroBuildPolicyAfterState => ({
                 afterStateKey,
                 count,
                 probability: count / action.count,
               }))
-              .sort(compareAfterStates),
-          }))
+              .sort(compareAfterStates);
+            action.afterStateCounts.clear();
+
+            return {
+              actionType: action.actionType,
+              itemId: action.itemId,
+              actionKey: action.actionKey,
+              count: action.count,
+              probability: action.count / mutableState.observationCount,
+              averageGameTimeS: action.totalGameTimeS / action.count,
+              afterStates,
+            };
+          })
           .sort(compareNextActions);
 
+        mutableState.actionsByKey.clear();
         statesByKey.set(stateKey, {
           heroId,
           stateKey,
@@ -206,6 +208,7 @@ export class HeroBuildTransitionAccumulator {
         actionOptionCount += nextActions.length;
       }
 
+      mutableHero.statesByKey.clear();
       const policy: HeroBuildPolicy = {
         heroId,
         playerCount: mutableHero.playerCount,
@@ -218,6 +221,7 @@ export class HeroBuildTransitionAccumulator {
       transitionCount += policy.transitionCount;
     }
 
+    this.heroesById.clear();
     return {
       sourcePlayerCount: this.sourcePlayerCount,
       includedPlayerCount: this.includedPlayerCount,
