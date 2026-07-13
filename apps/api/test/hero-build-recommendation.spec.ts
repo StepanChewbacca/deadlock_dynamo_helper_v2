@@ -4,6 +4,7 @@ import {
   HeroBuildRecommendationOptions,
   parseInventoryStateKey,
   recommendFromPolicy,
+  resolveObservedOwnedCountLimit,
 } from '../src/deadlock-live/hero-build-recommendation.service';
 import {
   HeroBuildPolicy,
@@ -50,6 +51,8 @@ describe('hero build recommendation', () => {
     expect(result.mode).toBe('EXACT');
     expect(result.action.type).toBe('BUY');
     expect(result.action.itemId).toBe(200);
+    expect(result.action.currentOwnedCount).toBe(0);
+    expect(result.action.observedOwnedCountLimit).toBe(1);
     expect(result.action.predictedStateKey).toBe('100x1|200x1');
     expect(result.stateDistance).toBe(0);
     expect(result.missingItemCount).toBe(0);
@@ -119,6 +122,51 @@ describe('hero build recommendation', () => {
     expect(result.action.missingItemCount).toBe(1);
     expect(result.action.extraItemCount).toBe(0);
     expect(result.action.matchedBySubset).toBe(false);
+  });
+
+  it('filters a repeat purchase after the current count reaches observed evidence', () => {
+    const state = createState('EMPTY', 100, [
+      createAction('BUY', 100, 80, 0.8, 60, ['100x1']),
+      createAction('BUY', 200, 20, 0.2, 60, ['200x1']),
+    ]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [100, 100], gameTimeS: 180 },
+      '100x2',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.mode).toBe('BACKOFF');
+    expect(result.action.itemId).toBe(200);
+    expect(result.action.currentOwnedCount).toBe(0);
+    expect(result.action.observedOwnedCountLimit).toBe(1);
+    expect(result.alternatives.some((action) => action.itemId === 100)).toBe(false);
+  });
+
+  it('allows another copy when the observed transition proves the higher count', () => {
+    const action = createAction('BUY', 100, 10, 1, 180, ['100x2']);
+    const state = createState('100x1', 10, [action]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [100], gameTimeS: 180 },
+      '100x1',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(resolveObservedOwnedCountLimit(action, parseInventoryStateKey('100x1')!)).toBe(2);
+    expect(result.mode).toBe('EXACT');
+    expect(result.action.itemId).toBe(100);
+    expect(result.action.currentOwnedCount).toBe(1);
+    expect(result.action.observedOwnedCountLimit).toBe(2);
+    expect(result.action.predictedStateKey).toBe('100x2');
   });
 
   it('filters a sell action when the item is not held', () => {
@@ -244,6 +292,7 @@ function createAction(
   count: number,
   probability: number,
   averageGameTimeS: number,
+  afterStateKeys: string[] = [],
 ): HeroBuildPolicyNextAction {
   return {
     actionType,
@@ -252,7 +301,11 @@ function createAction(
     count,
     probability,
     averageGameTimeS,
-    afterStates: [],
+    afterStates: afterStateKeys.map((afterStateKey) => ({
+      afterStateKey,
+      count: 1,
+      probability: 1 / afterStateKeys.length,
+    })),
   };
 }
 
