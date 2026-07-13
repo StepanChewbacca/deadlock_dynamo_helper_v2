@@ -1,4 +1,5 @@
 import {
+  calculateDirectionalInventoryDistance,
   calculateInventoryMultisetDistance,
   HeroBuildRecommendationOptions,
   parseInventoryStateKey,
@@ -19,12 +20,18 @@ const OPTIONS: HeroBuildRecommendationOptions = {
 
 describe('hero build recommendation', () => {
   it('calculates multiset distance with duplicate item counts', () => {
-    const left = parseInventoryStateKey('100x1|200x2');
-    const right = parseInventoryStateKey('100x1|200x1|300x1');
+    const current = parseInventoryStateKey('100x1|200x2');
+    const historical = parseInventoryStateKey('100x1|200x1|300x1');
 
-    expect(left).toBeDefined();
-    expect(right).toBeDefined();
-    expect(calculateInventoryMultisetDistance(left!, right!)).toBe(2);
+    expect(current).toBeDefined();
+    expect(historical).toBeDefined();
+    expect(calculateInventoryMultisetDistance(current!, historical!)).toBe(2);
+    expect(calculateDirectionalInventoryDistance(current!, historical!)).toEqual({
+      distance: 2,
+      missingItemCount: 1,
+      extraItemCount: 1,
+      matchedBySubset: false,
+    });
   });
 
   it('uses an exact state when it has enough observations', () => {
@@ -45,30 +52,73 @@ describe('hero build recommendation', () => {
     expect(result.action.itemId).toBe(200);
     expect(result.action.predictedStateKey).toBe('100x1|200x1');
     expect(result.stateDistance).toBe(0);
+    expect(result.missingItemCount).toBe(0);
+    expect(result.extraItemCount).toBe(0);
+    expect(result.matchedBySubset).toBe(true);
+    expect(result.backoffReason).toBeUndefined();
   });
 
-  it('backs off from weak exact evidence to a stronger nearby state', () => {
-    const weakExact = createState('100x1', 1, [createAction('BUY', 900, 1, 0.1, 180)]);
-    const strongNearby = createState(
+  it('prefers a legal subset state over a stronger future state', () => {
+    const weakExact = createState('100x1', 1, [createAction('BUY', 900, 1, 1, 180)]);
+    const strongFuture = createState(
       '100x1|200x1',
       100,
-      [createAction('BUY', 300, 80, 0.8, 180)],
+      [createAction('BUY', 300, 100, 1, 180)],
     );
-    const policy = createPolicy(72, [weakExact, strongNearby]);
+    const policy = createPolicy(72, [weakExact, strongFuture]);
 
     const result = recommendFromPolicy(
       { heroId: 72, itemIds: [100], gameTimeS: 180 },
       '100x1',
       policy,
-      parseStates([weakExact, strongNearby]),
+      parseStates([weakExact, strongFuture]),
       () => [],
       OPTIONS,
     );
 
     expect(result.mode).toBe('BACKOFF');
-    expect(result.action.itemId).toBe(300);
-    expect(result.action.matchedStateKey).toBe('100x1|200x1');
-    expect(result.action.stateDistance).toBe(1);
+    expect(result.backoffReason).toBe('SUBSET_STATE');
+    expect(result.candidateStateCount).toBe(1);
+    expect(result.action.itemId).toBe(900);
+    expect(result.action.matchedStateKey).toBe('100x1');
+    expect(result.action.stateDistance).toBe(0);
+    expect(result.action.missingItemCount).toBe(0);
+    expect(result.action.extraItemCount).toBe(0);
+    expect(result.action.matchedBySubset).toBe(true);
+    expect(result.alternatives.some((action) => action.itemId === 300)).toBe(false);
+  });
+
+  it('uses a directional fallback only when subset states have no legal action', () => {
+    const subsetState = createState(
+      '10x1',
+      20,
+      [createAction('UPGRADE', 30, 20, 1, 300)],
+    );
+    const futureState = createState(
+      '10x1|20x1',
+      50,
+      [createAction('BUY', 40, 40, 0.8, 300)],
+    );
+    const policy = createPolicy(72, [subsetState, futureState]);
+    const recipeResolver = (parentItemId: number) => parentItemId === 30 ? [10, 20] : [];
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [10], gameTimeS: 300 },
+      '10x1',
+      policy,
+      parseStates([subsetState, futureState]),
+      recipeResolver,
+      OPTIONS,
+    );
+
+    expect(result.mode).toBe('BACKOFF');
+    expect(result.backoffReason).toBe('DIRECTIONAL_FALLBACK');
+    expect(result.action.type).toBe('BUY');
+    expect(result.action.itemId).toBe(40);
+    expect(result.action.matchedStateKey).toBe('10x1|20x1');
+    expect(result.action.missingItemCount).toBe(1);
+    expect(result.action.extraItemCount).toBe(0);
+    expect(result.action.matchedBySubset).toBe(false);
   });
 
   it('filters a sell action when the item is not held', () => {
