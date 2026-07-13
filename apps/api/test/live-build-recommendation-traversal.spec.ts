@@ -84,8 +84,8 @@ describe('live build recommendation traversal', () => {
 
   it('discards an obsolete result and resolves only the latest desired inventory state', async () => {
     const firstRecommendation = deferred<HeroBuildRecommendationResponse>();
-    const recommend = jest
-      .fn<Promise<HeroBuildRecommendationResponse>, [{ itemIds: number[] }]>()
+    const recommend = createRecommendMock();
+    recommend
       .mockImplementationOnce(() => firstRecommendation.promise)
       .mockImplementationOnce(async (request) => createRecommendation(request.itemIds));
     const harness = createHarness(recommend);
@@ -124,11 +124,7 @@ describe('live build recommendation traversal', () => {
   });
 });
 
-function createHarness(
-  recommend = jest.fn(async (request: { itemIds: number[] }) =>
-    createRecommendation(request.itemIds),
-  ),
-) {
+function createHarness(recommend = createRecommendMock()) {
   const present = jest.fn(async (response: HeroBuildRecommendationWithAlternativeFilter) => ({
     ...response,
     action: {
@@ -159,6 +155,12 @@ function createHarness(
   return { service, recommend, present };
 }
 
+function createRecommendMock() {
+  return jest.fn(async (request: { itemIds: number[] }) =>
+    createRecommendation(request.itemIds),
+  );
+}
+
 function createState(gameTimeSec: number, itemIds: number[]): MinimalMatchState {
   return {
     matchId: 'match-1',
@@ -182,12 +184,10 @@ function createState(gameTimeSec: number, itemIds: number[]): MinimalMatchState 
 }
 
 function createRecommendation(itemIds: number[]): HeroBuildRecommendationResponse {
-  const requestedStateKey = itemIds.length > 0
-    ? [...itemIds]
-        .sort((left, right) => left - right)
-        .map((itemId) => `${itemId}x1`)
-        .join('|')
-    : 'EMPTY';
+  const requestedStateKey = createStateKey(itemIds);
+  const predictedStateKey = requestedStateKey === 'EMPTY'
+    ? '999x1'
+    : `${requestedStateKey}|999x1`;
 
   return {
     mode: 'EXACT',
@@ -217,12 +217,27 @@ function createRecommendation(itemIds: number[]): HeroBuildRecommendationRespons
       matchedBySubset: true,
       currentOwnedCount: 0,
       observedOwnedCountLimit: 1,
-      predictedStateKey: `${requestedStateKey}|999x1`,
+      predictedStateKey,
       score: 0.8,
       confidence: 0.8,
     },
     alternatives: [],
   };
+}
+
+function createStateKey(itemIds: number[]): string {
+  if (itemIds.length === 0) {
+    return 'EMPTY';
+  }
+
+  const counts = new Map<number, number>();
+  for (const itemId of itemIds) {
+    counts.set(itemId, (counts.get(itemId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([leftItemId], [rightItemId]) => leftItemId - rightItemId)
+    .map(([itemId, count]) => `${itemId}x${count}`)
+    .join('|');
 }
 
 function deferred<T>(): Deferred<T> {
