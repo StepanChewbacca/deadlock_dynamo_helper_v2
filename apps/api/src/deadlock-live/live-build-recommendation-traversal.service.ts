@@ -106,6 +106,7 @@ export class LiveBuildRecommendationTraversalService {
     const runtime = this.getOrCreateRuntime(state.matchId, observedAt);
     runtime.lastObservedAtMs = observedAt.getTime();
     runtime.snapshot.lastObservedAt = observedAt.toISOString();
+    this.evictOldRuntimes();
 
     const localPlayer = findLocalPlayer(state);
     if (!localPlayer) {
@@ -146,7 +147,6 @@ export class LiveBuildRecommendationTraversalService {
     };
 
     this.startWorker(runtime);
-    this.evictOldRuntimes();
   }
 
   getMatchSnapshot(matchId: string): LiveBuildRecommendationTraversalSnapshot | undefined {
@@ -245,6 +245,7 @@ export class LiveBuildRecommendationTraversalService {
 
     runtime.worker = this.processRuntime(runtime).finally(() => {
       runtime.worker = undefined;
+      this.evictOldRuntimes();
       if (
         runtime.desiredInput &&
         runtime.desiredInput.traversalKey !== runtime.lastAttemptedKey
