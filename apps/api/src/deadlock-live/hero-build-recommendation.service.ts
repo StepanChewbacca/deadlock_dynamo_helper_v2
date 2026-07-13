@@ -1,0 +1,543 @@
+import { Injectable } from '@nestjs/common';
+import {
+  createInventoryStateKeyFromItemIds,
+  HeroBuildPolicy,
+  HeroBuildPolicyNextAction,
+  HeroBuildPolicyState,
+  HeroBuildTransitionAggregationService,
+} from './hero-build-transition-aggregation.service';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+
+export const HERO_BUILD_MIN_EXACT_OBSERVATIONS = 3;
+export const HERO_BUILD_MAX_BACKOFF_DISTANCE = 4;
+export const HERO_BUILD_MAX_BACKOFF_STATES = 64;
+export const HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT = 5;
+export const HERO_BUILD_MAX_RECOMMENDATION_LIMIT = 20;
+
+const SUPPORT_SMOOTHING = 5;
+const TIME_DISTANCE_SCALE_S = 600;
+
+export type HeroBuildRecommendationMode = 'EXACT' | 'BACKOFF' | 'NO_MATCH';
+export type HeroBuildRecommendationActionType = 'BUY' | 'UPGRADE' | 'SELL' | 'HOLD';
+export type HeroBuildRecommendationNoMatchReason =
+  | 'HERO_POLICY_NOT_FOUND'
+  | 'NO_NEARBY_STATE'
+  | 'NO_LEGAL_ACTION';
+
+export interface HeroBuildRecommendationRequest {
+  heroId: number;
+  itemIds: number[];
+  gameTimeS: number;
+  limit?: number;
+}
+
+export interface HeroBuildRecommendationAction {
+  type: HeroBuildRecommendationActionType;
+  sourceActionType?: HeroBuildPolicyNextAction['actionType'];
+  itemId?: number;
+  actionKey: string;
+  historicalCount: number;
+  historicalProbability: number;
+  averageGameTimeS: number;
+  matchedStateKey: string;
+  matchedStateObservationCount: number;
+  stateDistance: number;
+  predictedStateKey: string;
+  score: number;
+  confidence: number;
+}
+
+export interface HeroBuildRecommendationResponse {
+  mode: HeroBuildRecommendationMode;
+  heroId: number;
+  requestedStateKey: string;
+  gameTimeS: number;
+  matchedStateKey?: string;
+  stateDistance?: number;
+  observationCount: number;
+  candidateStateCount: number;
+  action: HeroBuildRecommendationAction;
+  alternatives: HeroBuildRecommendationAction[];
+  noMatchReason?: HeroBuildRecommendationNoMatchReason;
+  policyLastRefreshedAt?: Date;
+}
+
+export interface HeroBuildRecommendationOptions {
+  minExactObservations: number;
+  maxBackoffDistance: number;
+  maxBackoffStates: number;
+  limit: number;
+}
+
+export type HeroBuildRecipeResolver = (parentItemId: number) => readonly number[];
+
+type InventoryItemCounts = ReadonlyMap<number, number>;
+
+interface ParsedPolicyState {
+  state: HeroBuildPolicyState;
+  itemCounts: InventoryItemCounts;
+}
+
+interface StateCandidate extends ParsedPolicyState {
+  distance: number;
+  quality: number;
+}
+
+interface CachedHeroPolicyStates {
+  policyVersionMs: number;
+  states: ParsedPolicyState[];
+}
+
+@Injectable()
+export class HeroBuildRecommendationService {
+  private readonly parsedStatesByHeroId = new Map<number, CachedHeroPolicyStates>();
+
+  constructor(
+    private readonly heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
+    private readonly recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
+  ) {}
+
+  async recommend(
+    request: HeroBuildRecommendationRequest,
+  ): Promise<HeroBuildRecommendationResponse> {
+    await this.heroBuildTransitionAggregationService.ensureReady();
+
+    const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
+    const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(request.heroId);
+    const requestedStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
+    const policyVersionMs = policyStatus.lastRefreshedAt?.getTime() ?? 0;
+
+    if (!policy) {
+      return createNoMatchResponse(
+        request,
+        requestedStateKey,
+        'HERO_POLICY_NOT_FOUND',
+        0,
+        policyStatus.lastRefreshedAt,
+      );
+    }
+
+    const parsedStates = this.getParsedStates(request.heroId, policy, policyVersionMs);
+    const response = recommendFromPolicy(
+      request,
+      requestedStateKey,
+      policy,
+      parsedStates,
+      (parentItemId) =>
+        this.recipeAwareTimelineReconciliationService.getComponentItemIds(parentItemId),
+      {
+        minExactObservations: HERO_BUILD_MIN_EXACT_OBSERVATIONS,
+        maxBackoffDistance: HERO_BUILD_MAX_BACKOFF_DISTANCE,
+        maxBackoffStates: HERO_BUILD_MAX_BACKOFF_STATES,
+        limit: normalizeRecommendationLimit(request.limit),
+      },
+    );
+
+    return {
+      ...response,
+      policyLastRefreshedAt: cloneDate(policyStatus.lastRefreshedAt),
+    };
+  }
+
+  private getParsedStates(
+    heroId: number,
+    policy: HeroBuildPolicy,
+    policyVersionMs: number,
+  ): ParsedPolicyState[] {
+    const cached = this.parsedStatesByHeroId.get(heroId);
+    if (cached?.policyVersionMs === policyVersionMs) {
+      return cached.states;
+    }
+
+    const states: ParsedPolicyState[] = [];
+    for (const state of policy.statesByKey.values()) {
+      const itemCounts = parseInventoryStateKey(state.stateKey);
+      if (itemCounts) {
+        states.push({ state, itemCounts });
+      }
+    }
+
+    this.parsedStatesByHeroId.set(heroId, { policyVersionMs, states });
+    return states;
+  }
+}
+
+export function recommendFromPolicy(
+  request: HeroBuildRecommendationRequest,
+  requestedStateKey: string,
+  policy: HeroBuildPolicy,
+  parsedStates: readonly ParsedPolicyState[],
+  recipeResolver: HeroBuildRecipeResolver,
+  options: HeroBuildRecommendationOptions,
+): HeroBuildRecommendationResponse {
+  const requestedItemCounts = createItemCounts(request.itemIds);
+  const exactState = policy.statesByKey.get(requestedStateKey);
+
+  if (exactState && exactState.observationCount >= options.minExactObservations) {
+    const exactActions = rankActions(
+      [{
+        state: exactState,
+        itemCounts: requestedItemCounts,
+        distance: 0,
+        quality: calculateStateQuality(exactState.observationCount, 0),
+      }],
+      requestedItemCounts,
+      request.gameTimeS,
+      recipeResolver,
+    );
+
+    if (exactActions.length > 0) {
+      return createMatchedResponse(
+        'EXACT',
+        request,
+        requestedStateKey,
+        1,
+        exactActions,
+        options.limit,
+      );
+    }
+  }
+
+  const candidates = parsedStates
+    .map((parsedState): StateCandidate => {
+      const distance = calculateInventoryMultisetDistance(
+        requestedItemCounts,
+        parsedState.itemCounts,
+      );
+      return {
+        ...parsedState,
+        distance,
+        quality: calculateStateQuality(parsedState.state.observationCount, distance),
+      };
+    })
+    .filter((candidate) => candidate.distance <= options.maxBackoffDistance)
+    .sort(compareStateCandidates)
+    .slice(0, options.maxBackoffStates);
+
+  if (candidates.length === 0) {
+    return createNoMatchResponse(
+      request,
+      requestedStateKey,
+      'NO_NEARBY_STATE',
+      0,
+    );
+  }
+
+  const backoffActions = rankActions(
+    candidates,
+    requestedItemCounts,
+    request.gameTimeS,
+    recipeResolver,
+  );
+  if (backoffActions.length === 0) {
+    return createNoMatchResponse(
+      request,
+      requestedStateKey,
+      'NO_LEGAL_ACTION',
+      candidates.length,
+    );
+  }
+
+  return createMatchedResponse(
+    'BACKOFF',
+    request,
+    requestedStateKey,
+    candidates.length,
+    backoffActions,
+    options.limit,
+  );
+}
+
+export function parseInventoryStateKey(stateKey: string): InventoryItemCounts | undefined {
+  if (stateKey === 'EMPTY') {
+    return new Map<number, number>();
+  }
+  if (stateKey.length === 0) {
+    return undefined;
+  }
+
+  const itemCounts = new Map<number, number>();
+  for (const token of stateKey.split('|')) {
+    const match = /^([1-9][0-9]*)x([1-9][0-9]*)$/.exec(token);
+    if (!match) {
+      return undefined;
+    }
+
+    const itemId = Number(match[1]);
+    const count = Number(match[2]);
+    if (!Number.isSafeInteger(itemId) || !Number.isSafeInteger(count)) {
+      return undefined;
+    }
+    itemCounts.set(itemId, count);
+  }
+
+  return itemCounts;
+}
+
+export function calculateInventoryMultisetDistance(
+  left: InventoryItemCounts,
+  right: InventoryItemCounts,
+): number {
+  const itemIds = new Set<number>([...left.keys(), ...right.keys()]);
+  let distance = 0;
+  for (const itemId of itemIds) {
+    distance += Math.abs((left.get(itemId) ?? 0) - (right.get(itemId) ?? 0));
+  }
+  return distance;
+}
+
+export function normalizeRecommendationLimit(value: number | undefined): number {
+  if (value === undefined) {
+    return HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT;
+  }
+  return Math.min(value, HERO_BUILD_MAX_RECOMMENDATION_LIMIT);
+}
+
+function rankActions(
+  candidates: readonly StateCandidate[],
+  requestedItemCounts: InventoryItemCounts,
+  gameTimeS: number,
+  recipeResolver: HeroBuildRecipeResolver,
+): HeroBuildRecommendationAction[] {
+  const bestByActionKey = new Map<string, HeroBuildRecommendationAction>();
+
+  for (const candidate of candidates) {
+    for (const historicalAction of candidate.state.nextActions) {
+      const action = createRecommendationAction(
+        historicalAction,
+        candidate,
+        requestedItemCounts,
+        gameTimeS,
+        recipeResolver,
+      );
+      if (!action) {
+        continue;
+      }
+
+      const existing = bestByActionKey.get(action.actionKey);
+      if (!existing || compareRecommendationActions(action, existing) < 0) {
+        bestByActionKey.set(action.actionKey, action);
+      }
+    }
+  }
+
+  return [...bestByActionKey.values()].sort(compareRecommendationActions);
+}
+
+function createRecommendationAction(
+  historicalAction: HeroBuildPolicyNextAction,
+  candidate: StateCandidate,
+  requestedItemCounts: InventoryItemCounts,
+  gameTimeS: number,
+  recipeResolver: HeroBuildRecipeResolver,
+): HeroBuildRecommendationAction | undefined {
+  const resolved = resolveLegalAction(
+    historicalAction,
+    requestedItemCounts,
+    recipeResolver,
+  );
+  if (!resolved) {
+    return undefined;
+  }
+
+  const support = candidate.state.observationCount /
+    (candidate.state.observationCount + SUPPORT_SMOOTHING);
+  const timeDifferenceS = Math.abs(gameTimeS - historicalAction.averageGameTimeS);
+  const timeFit = 1 / (1 + timeDifferenceS / TIME_DISTANCE_SCALE_S);
+  const distanceFit = 1 / (1 + candidate.distance);
+  const score = clampProbability(
+    historicalAction.probability *
+      (0.55 + 0.45 * support) *
+      distanceFit *
+      (0.7 + 0.3 * timeFit),
+  );
+
+  return {
+    type: resolved.type,
+    sourceActionType: historicalAction.actionType,
+    itemId: historicalAction.itemId,
+    actionKey: `${resolved.type}:${historicalAction.itemId}`,
+    historicalCount: historicalAction.count,
+    historicalProbability: historicalAction.probability,
+    averageGameTimeS: historicalAction.averageGameTimeS,
+    matchedStateKey: candidate.state.stateKey,
+    matchedStateObservationCount: candidate.state.observationCount,
+    stateDistance: candidate.distance,
+    predictedStateKey: createStateKeyFromCounts(resolved.predictedItemCounts),
+    score,
+    confidence: score,
+  };
+}
+
+function resolveLegalAction(
+  historicalAction: HeroBuildPolicyNextAction,
+  requestedItemCounts: InventoryItemCounts,
+  recipeResolver: HeroBuildRecipeResolver,
+): { type: Exclude<HeroBuildRecommendationActionType, 'HOLD'>; predictedItemCounts: Map<number, number> } | undefined {
+  const predictedItemCounts = new Map(requestedItemCounts);
+
+  if (historicalAction.actionType === 'BUY' || historicalAction.actionType === 'REBUY') {
+    incrementItemCount(predictedItemCounts, historicalAction.itemId);
+    return { type: 'BUY', predictedItemCounts };
+  }
+
+  if (historicalAction.actionType === 'SELL') {
+    if (!decrementItemCount(predictedItemCounts, historicalAction.itemId)) {
+      return undefined;
+    }
+    return { type: 'SELL', predictedItemCounts };
+  }
+
+  const componentItemIds = recipeResolver(historicalAction.itemId);
+  if (componentItemIds.length === 0) {
+    return undefined;
+  }
+
+  for (const componentItemId of componentItemIds) {
+    if (!decrementItemCount(predictedItemCounts, componentItemId)) {
+      return undefined;
+    }
+  }
+  incrementItemCount(predictedItemCounts, historicalAction.itemId);
+  return { type: 'UPGRADE', predictedItemCounts };
+}
+
+function createMatchedResponse(
+  mode: Exclude<HeroBuildRecommendationMode, 'NO_MATCH'>,
+  request: HeroBuildRecommendationRequest,
+  requestedStateKey: string,
+  candidateStateCount: number,
+  rankedActions: readonly HeroBuildRecommendationAction[],
+  limit: number,
+): HeroBuildRecommendationResponse {
+  const selected = rankedActions.slice(0, limit);
+  const action = selected[0];
+
+  return {
+    mode,
+    heroId: request.heroId,
+    requestedStateKey,
+    gameTimeS: request.gameTimeS,
+    matchedStateKey: action.matchedStateKey,
+    stateDistance: action.stateDistance,
+    observationCount: action.matchedStateObservationCount,
+    candidateStateCount,
+    action: { ...action },
+    alternatives: selected.slice(1).map((alternative) => ({ ...alternative })),
+  };
+}
+
+function createNoMatchResponse(
+  request: HeroBuildRecommendationRequest,
+  requestedStateKey: string,
+  noMatchReason: HeroBuildRecommendationNoMatchReason,
+  candidateStateCount: number,
+  policyLastRefreshedAt?: Date,
+): HeroBuildRecommendationResponse {
+  return {
+    mode: 'NO_MATCH',
+    heroId: request.heroId,
+    requestedStateKey,
+    gameTimeS: request.gameTimeS,
+    observationCount: 0,
+    candidateStateCount,
+    action: {
+      type: 'HOLD',
+      actionKey: 'HOLD',
+      historicalCount: 0,
+      historicalProbability: 0,
+      averageGameTimeS: request.gameTimeS,
+      matchedStateKey: requestedStateKey,
+      matchedStateObservationCount: 0,
+      stateDistance: 0,
+      predictedStateKey: requestedStateKey,
+      score: 0,
+      confidence: 0,
+    },
+    alternatives: [],
+    noMatchReason,
+    policyLastRefreshedAt: cloneDate(policyLastRefreshedAt),
+  };
+}
+
+function createItemCounts(itemIds: readonly number[]): Map<number, number> {
+  const itemCounts = new Map<number, number>();
+  for (const itemId of itemIds) {
+    incrementItemCount(itemCounts, itemId);
+  }
+  return itemCounts;
+}
+
+function createStateKeyFromCounts(itemCounts: InventoryItemCounts): string {
+  if (itemCounts.size === 0) {
+    return 'EMPTY';
+  }
+
+  return [...itemCounts.entries()]
+    .filter(([, count]) => count > 0)
+    .sort(([leftItemId], [rightItemId]) => leftItemId - rightItemId)
+    .map(([itemId, count]) => `${itemId}x${count}`)
+    .join('|') || 'EMPTY';
+}
+
+function incrementItemCount(itemCounts: Map<number, number>, itemId: number): void {
+  itemCounts.set(itemId, (itemCounts.get(itemId) ?? 0) + 1);
+}
+
+function decrementItemCount(itemCounts: Map<number, number>, itemId: number): boolean {
+  const count = itemCounts.get(itemId) ?? 0;
+  if (count <= 0) {
+    return false;
+  }
+  if (count === 1) {
+    itemCounts.delete(itemId);
+  } else {
+    itemCounts.set(itemId, count - 1);
+  }
+  return true;
+}
+
+function calculateStateQuality(observationCount: number, distance: number): number {
+  const support = observationCount / (observationCount + SUPPORT_SMOOTHING);
+  return support / (1 + distance);
+}
+
+function compareStateCandidates(left: StateCandidate, right: StateCandidate): number {
+  if (left.quality !== right.quality) {
+    return right.quality - left.quality;
+  }
+  if (left.distance !== right.distance) {
+    return left.distance - right.distance;
+  }
+  if (left.state.observationCount !== right.state.observationCount) {
+    return right.state.observationCount - left.state.observationCount;
+  }
+  return left.state.stateKey.localeCompare(right.state.stateKey);
+}
+
+function compareRecommendationActions(
+  left: HeroBuildRecommendationAction,
+  right: HeroBuildRecommendationAction,
+): number {
+  if (left.score !== right.score) {
+    return right.score - left.score;
+  }
+  if (left.historicalCount !== right.historicalCount) {
+    return right.historicalCount - left.historicalCount;
+  }
+  if (left.stateDistance !== right.stateDistance) {
+    return left.stateDistance - right.stateDistance;
+  }
+  if (left.matchedStateObservationCount !== right.matchedStateObservationCount) {
+    return right.matchedStateObservationCount - left.matchedStateObservationCount;
+  }
+  return left.actionKey.localeCompare(right.actionKey);
+}
+
+function clampProbability(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function cloneDate(value: Date | undefined): Date | undefined {
+  return value ? new Date(value) : undefined;
+}
