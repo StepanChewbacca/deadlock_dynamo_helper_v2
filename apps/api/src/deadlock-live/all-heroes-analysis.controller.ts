@@ -8,6 +8,7 @@ import {
   NormalizeRawMatchMetadataDto,
   RawMatchMetadataNormalizerService,
 } from './raw-match-metadata-normalizer.service';
+import { RecentMatchesWindowService } from './recent-matches-window.service';
 import {
   ResolvePendingRulesetsDto,
   RulesetResolverService,
@@ -22,6 +23,7 @@ export class AllHeroesAnalysisController {
     private readonly service: AllHeroesAnalysisService,
     private readonly situationalRecommendationService: SituationalRecommendationService,
     private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
+    private readonly recentMatchesWindowService: RecentMatchesWindowService,
     private readonly rulesetResolverService: RulesetResolverService,
     private readonly rulesetResolutionRefreshService: RulesetResolutionRefreshService,
     private readonly rawMatchMetadataNormalizerService: RawMatchMetadataNormalizerService,
@@ -86,7 +88,9 @@ export class AllHeroesAnalysisController {
 
   @Post('raw-matches/:matchId/reprocess')
   async reprocessStoredMatch(@Param('matchId', ParseIntPipe) matchId: number) {
-    return this.storedMatchReprocessingService.reprocess(matchId);
+    const result = await this.storedMatchReprocessingService.reprocess(matchId);
+    await this.recentMatchesWindowService.refresh();
+    return result;
   }
 
   @Post('recommend')
