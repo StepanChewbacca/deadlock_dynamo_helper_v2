@@ -49,6 +49,8 @@ export interface HeroBuildRecommendationAction {
   missingItemCount: number;
   extraItemCount: number;
   matchedBySubset: boolean;
+  currentOwnedCount?: number;
+  observedOwnedCountLimit?: number;
   predictedStateKey: string;
   score: number;
   confidence: number;
@@ -103,6 +105,13 @@ interface StateCandidate extends ParsedPolicyState, DirectionalInventoryDistance
 interface CachedHeroPolicyStates {
   policyVersionMs: number;
   states: ParsedPolicyState[];
+}
+
+interface ResolvedLegalAction {
+  type: Exclude<HeroBuildRecommendationActionType, 'HOLD'>;
+  predictedItemCounts: Map<number, number>;
+  currentOwnedCount?: number;
+  observedOwnedCountLimit?: number;
 }
 
 @Injectable()
@@ -407,6 +416,7 @@ function createRecommendationAction(
 ): HeroBuildRecommendationAction | undefined {
   const resolved = resolveLegalAction(
     historicalAction,
+    candidate.itemCounts,
     requestedItemCounts,
     recipeResolver,
   );
@@ -442,6 +452,8 @@ function createRecommendationAction(
     missingItemCount: candidate.missingItemCount,
     extraItemCount: candidate.extraItemCount,
     matchedBySubset: candidate.matchedBySubset,
+    currentOwnedCount: resolved.currentOwnedCount,
+    observedOwnedCountLimit: resolved.observedOwnedCountLimit,
     predictedStateKey: createStateKeyFromCounts(resolved.predictedItemCounts),
     score,
     confidence: score,
@@ -450,17 +462,29 @@ function createRecommendationAction(
 
 function resolveLegalAction(
   historicalAction: HeroBuildPolicyNextAction,
+  matchedItemCounts: InventoryItemCounts,
   requestedItemCounts: InventoryItemCounts,
   recipeResolver: HeroBuildRecipeResolver,
-): {
-  type: Exclude<HeroBuildRecommendationActionType, 'HOLD'>;
-  predictedItemCounts: Map<number, number>;
-} | undefined {
+): ResolvedLegalAction | undefined {
   const predictedItemCounts = new Map(requestedItemCounts);
 
   if (historicalAction.actionType === 'BUY' || historicalAction.actionType === 'REBUY') {
+    const currentOwnedCount = requestedItemCounts.get(historicalAction.itemId) ?? 0;
+    const observedOwnedCountLimit = resolveObservedOwnedCountLimit(
+      historicalAction,
+      matchedItemCounts,
+    );
+    if (currentOwnedCount >= observedOwnedCountLimit) {
+      return undefined;
+    }
+
     incrementItemCount(predictedItemCounts, historicalAction.itemId);
-    return { type: 'BUY', predictedItemCounts };
+    return {
+      type: 'BUY',
+      predictedItemCounts,
+      currentOwnedCount,
+      observedOwnedCountLimit,
+    };
   }
 
   if (historicalAction.actionType === 'SELL') {
@@ -482,6 +506,27 @@ function resolveLegalAction(
   }
   incrementItemCount(predictedItemCounts, historicalAction.itemId);
   return { type: 'UPGRADE', predictedItemCounts };
+}
+
+export function resolveObservedOwnedCountLimit(
+  historicalAction: HeroBuildPolicyNextAction,
+  matchedItemCounts: InventoryItemCounts,
+): number {
+  const matchedOwnedCount = matchedItemCounts.get(historicalAction.itemId) ?? 0;
+  let observedOwnedCountLimit = matchedOwnedCount + 1;
+
+  for (const afterState of historicalAction.afterStates) {
+    const afterItemCounts = parseInventoryStateKey(afterState.afterStateKey);
+    if (!afterItemCounts) {
+      continue;
+    }
+    observedOwnedCountLimit = Math.max(
+      observedOwnedCountLimit,
+      afterItemCounts.get(historicalAction.itemId) ?? 0,
+    );
+  }
+
+  return observedOwnedCountLimit;
 }
 
 function createMatchedResponse(
