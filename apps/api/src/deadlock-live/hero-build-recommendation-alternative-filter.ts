@@ -17,8 +17,10 @@ export interface HeroBuildAlternativeFilterSummary {
   minimumHistoricalCount: number;
   minimumConfidence: number;
   availableCount: number;
+  eligibleCount: number;
   returnedCount: number;
-  filteredCount: number;
+  evidenceRejectedCount: number;
+  limitTruncatedCount: number;
 }
 
 export type HeroBuildRecommendationWithAlternativeFilter = HeroBuildRecommendationResponse & {
@@ -30,9 +32,11 @@ export function filterHeroBuildRecommendationAlternatives(
   options: HeroBuildAlternativeFilterOptions,
 ): HeroBuildRecommendationWithAlternativeFilter {
   const availableCount = response.alternatives.length;
+  const eligibleAlternatives = response.alternatives.filter((action) =>
+    isAlternativeEligible(action, options),
+  );
   const maximumAlternativeCount = Math.max(0, options.limit - 1);
-  const alternatives = response.alternatives
-    .filter((action) => isAlternativeEligible(action, options))
+  const alternatives = eligibleAlternatives
     .slice(0, maximumAlternativeCount)
     .map((action) => ({ ...action }));
 
@@ -44,8 +48,10 @@ export function filterHeroBuildRecommendationAlternatives(
       minimumHistoricalCount: options.minHistoricalCount,
       minimumConfidence: options.minConfidence,
       availableCount,
+      eligibleCount: eligibleAlternatives.length,
       returnedCount: alternatives.length,
-      filteredCount: availableCount - alternatives.length,
+      evidenceRejectedCount: availableCount - eligibleAlternatives.length,
+      limitTruncatedCount: eligibleAlternatives.length - alternatives.length,
     },
   };
 }
