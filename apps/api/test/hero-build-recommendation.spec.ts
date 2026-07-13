@@ -1,0 +1,214 @@
+import {
+  calculateInventoryMultisetDistance,
+  HeroBuildRecommendationOptions,
+  parseInventoryStateKey,
+  recommendFromPolicy,
+} from '../src/deadlock-live/hero-build-recommendation.service';
+import {
+  HeroBuildPolicy,
+  HeroBuildPolicyNextAction,
+  HeroBuildPolicyState,
+} from '../src/deadlock-live/hero-build-transition-aggregation.service';
+
+const OPTIONS: HeroBuildRecommendationOptions = {
+  minExactObservations: 3,
+  maxBackoffDistance: 4,
+  maxBackoffStates: 64,
+  limit: 5,
+};
+
+describe('hero build recommendation', () => {
+  it('calculates multiset distance with duplicate item counts', () => {
+    const left = parseInventoryStateKey('100x1|200x2');
+    const right = parseInventoryStateKey('100x1|200x1|300x1');
+
+    expect(left).toBeDefined();
+    expect(right).toBeDefined();
+    expect(calculateInventoryMultisetDistance(left!, right!)).toBe(2);
+  });
+
+  it('uses an exact state when it has enough observations', () => {
+    const state = createState('100x1', 10, [createAction('BUY', 200, 7, 0.7, 180)]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [100], gameTimeS: 180 },
+      '100x1',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.mode).toBe('EXACT');
+    expect(result.action.type).toBe('BUY');
+    expect(result.action.itemId).toBe(200);
+    expect(result.action.predictedStateKey).toBe('100x1|200x1');
+    expect(result.stateDistance).toBe(0);
+  });
+
+  it('backs off from weak exact evidence to a stronger nearby state', () => {
+    const weakExact = createState('100x1', 1, [createAction('BUY', 900, 1, 0.1, 180)]);
+    const strongNearby = createState(
+      '100x1|200x1',
+      100,
+      [createAction('BUY', 300, 80, 0.8, 180)],
+    );
+    const policy = createPolicy(72, [weakExact, strongNearby]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [100], gameTimeS: 180 },
+      '100x1',
+      policy,
+      parseStates([weakExact, strongNearby]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.mode).toBe('BACKOFF');
+    expect(result.action.itemId).toBe(300);
+    expect(result.action.matchedStateKey).toBe('100x1|200x1');
+    expect(result.action.stateDistance).toBe(1);
+  });
+
+  it('filters a sell action when the item is not held', () => {
+    const state = createState('100x1', 10, [
+      createAction('SELL', 999, 9, 0.9, 200),
+      createAction('BUY', 200, 1, 0.1, 200),
+    ]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [100], gameTimeS: 200 },
+      '100x1',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.action.type).toBe('BUY');
+    expect(result.action.itemId).toBe(200);
+    expect(result.alternatives.some((action) => action.type === 'SELL')).toBe(false);
+  });
+
+  it('allows an upgrade only when every recipe component is held', () => {
+    const completeState = createState(
+      '10x1|20x1',
+      10,
+      [createAction('UPGRADE', 30, 8, 0.8, 300)],
+    );
+    const policy = createPolicy(72, [completeState]);
+    const recipeResolver = (parentItemId: number) => parentItemId === 30 ? [10, 20] : [];
+
+    const complete = recommendFromPolicy(
+      { heroId: 72, itemIds: [10, 20], gameTimeS: 300 },
+      '10x1|20x1',
+      policy,
+      parseStates([completeState]),
+      recipeResolver,
+      OPTIONS,
+    );
+    const incomplete = recommendFromPolicy(
+      { heroId: 72, itemIds: [10], gameTimeS: 300 },
+      '10x1',
+      policy,
+      parseStates([completeState]),
+      recipeResolver,
+      OPTIONS,
+    );
+
+    expect(complete.action.type).toBe('UPGRADE');
+    expect(complete.action.predictedStateKey).toBe('30x1');
+    expect(incomplete.mode).toBe('NO_MATCH');
+    expect(incomplete.action.type).toBe('HOLD');
+    expect(incomplete.noMatchReason).toBe('NO_LEGAL_ACTION');
+  });
+
+  it('normalizes a historical rebuy into a buy recommendation', () => {
+    const state = createState('EMPTY', 10, [createAction('REBUY', 100, 10, 1, 60)]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [], gameTimeS: 60 },
+      'EMPTY',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.action.type).toBe('BUY');
+    expect(result.action.sourceActionType).toBe('REBUY');
+    expect(result.action.actionKey).toBe('BUY:100');
+  });
+
+  it('returns hold when no state is within the backoff distance', () => {
+    const state = createState('1x1|2x1|3x1|4x1|5x1', 10, [
+      createAction('BUY', 100, 10, 1, 300),
+    ]);
+    const policy = createPolicy(72, [state]);
+
+    const result = recommendFromPolicy(
+      { heroId: 72, itemIds: [], gameTimeS: 300 },
+      'EMPTY',
+      policy,
+      parseStates([state]),
+      () => [],
+      OPTIONS,
+    );
+
+    expect(result.mode).toBe('NO_MATCH');
+    expect(result.action.type).toBe('HOLD');
+    expect(result.noMatchReason).toBe('NO_NEARBY_STATE');
+  });
+});
+
+function createPolicy(heroId: number, states: HeroBuildPolicyState[]): HeroBuildPolicy {
+  return {
+    heroId,
+    playerCount: 100,
+    stateCount: states.length,
+    transitionCount: states.reduce((total, state) => total + state.observationCount, 0),
+    statesByKey: new Map(states.map((state) => [state.stateKey, state])),
+  };
+}
+
+function createState(
+  stateKey: string,
+  observationCount: number,
+  nextActions: HeroBuildPolicyNextAction[],
+): HeroBuildPolicyState {
+  return {
+    heroId: 72,
+    stateKey,
+    observationCount,
+    nextActionCount: nextActions.length,
+    nextActions,
+  };
+}
+
+function createAction(
+  actionType: HeroBuildPolicyNextAction['actionType'],
+  itemId: number,
+  count: number,
+  probability: number,
+  averageGameTimeS: number,
+): HeroBuildPolicyNextAction {
+  return {
+    actionType,
+    itemId,
+    actionKey: `${actionType}:${itemId}`,
+    count,
+    probability,
+    averageGameTimeS,
+    afterStates: [],
+  };
+}
+
+function parseStates(states: HeroBuildPolicyState[]) {
+  return states.map((state) => ({
+    state,
+    itemCounts: parseInventoryStateKey(state.stateKey)!,
+  }));
+}
