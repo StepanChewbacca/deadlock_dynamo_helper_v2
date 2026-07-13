@@ -6,6 +6,7 @@ import {
   HERO_BUILD_MAX_MIN_ALTERNATIVE_HISTORICAL_COUNT,
   HeroBuildAlternativeFilterOptions,
 } from './hero-build-recommendation-alternative-filter';
+import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
 import {
   HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
@@ -31,6 +32,8 @@ interface ValidatedRecommendHeroBuildRequest {
 export class HeroBuildRecommendationController {
   constructor(
     private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
+    private readonly heroBuildRecommendationPresentationService:
+      HeroBuildRecommendationPresentationService,
   ) {}
 
   @Post()
@@ -40,11 +43,12 @@ export class HeroBuildRecommendationController {
       ...validated.recommendationRequest,
       limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
     });
-
-    return filterHeroBuildRecommendationAlternatives(
+    const filtered = filterHeroBuildRecommendationAlternatives(
       response,
       validated.alternativeFilter,
     );
+
+    return this.heroBuildRecommendationPresentationService.present(filtered);
   }
 }
 
