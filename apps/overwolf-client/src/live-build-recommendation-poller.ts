@@ -31,6 +31,16 @@ export interface LiveBuildRecommendationAction {
   typicalGameTimeLabel: string;
   item?: LiveBuildRecommendationItem;
   explanation: LiveBuildRecommendationExplanation;
+  baseScore?: number;
+  contextualScore?: number;
+  baseRank?: number;
+  contextualRank?: number;
+  isSituational?: boolean;
+  wasPromotedByMatchup?: boolean;
+  situationalAgainstHeroId?: number;
+  situationalInteractionOddsRatio?: number;
+  situationalLower95OddsRatio?: number;
+  matchupObservationCount?: number;
 }
 
 export interface LiveBuildRecommendationPayload {
@@ -45,6 +55,7 @@ export interface LiveBuildRecommendationSnapshot {
   steamId?: string;
   heroId?: number;
   itemIds: number[];
+  enemyHeroIds?: number[];
   inventoryStateKey?: string;
   gameTimeS?: number;
   timeBucket?: number;
@@ -229,6 +240,7 @@ export function createLiveBuildRecommendationPresentationKey(
     snapshot.lastError ?? '',
     snapshot.recommendation?.mode ?? '',
     snapshot.recommendation?.action.actionKey ?? '',
+    snapshot.recommendation?.action.wasPromotedByMatchup ? 'promoted' : 'base',
   ].join('|');
 }
 
@@ -237,6 +249,7 @@ function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot
     state: 'WAITING_FOR_BACKEND',
     matchId,
     itemIds: [],
+    enemyHeroIds: [],
     isStale: false,
     refreshCount: 0,
     cacheHitCount: 0,
