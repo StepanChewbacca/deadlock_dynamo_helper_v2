@@ -2,7 +2,7 @@ import { RawMatchMetadata } from '../src/deadlock-live/entities/raw-match-metada
 import { RulesetResolutionRefreshService } from '../src/deadlock-live/ruleset-resolution-refresh.service';
 
 function createRawMetadata(): RawMatchMetadata {
-  return {
+  return Object.assign(new RawMatchMetadata(), {
     id: 1718,
     matchId: 91825430,
     source: 'deadlock-api-match-metadata',
@@ -12,21 +12,21 @@ function createRawMetadata(): RawMatchMetadata {
         start_time: 1783007796,
       },
     },
-    metadataVersion: undefined as any,
+    metadataVersion: undefined,
     clientVersion: 6629,
-    gameMode: undefined as any,
-    matchMode: undefined as any,
-    gameModeVersion: undefined as any,
-    rulesetResolutionMethod: 'TIME_WINDOW',
+    gameMode: undefined,
+    matchMode: undefined,
+    gameModeVersion: undefined,
+    rulesetResolutionMethod: 'TIME_WINDOW' as const,
     rulesetResolutionConfidence: 0.75,
     resolvedRulesetId: 1,
     resolvedCatalogVersionId: 1,
     rulesetResolutionDetails: { sourcePath: 'game_rulesets.client-6629' },
     resolvedAt: new Date('2026-07-11T17:40:00.000Z'),
-    processingVersion: undefined as any,
-    lastProcessedAt: undefined as any,
+    processingVersion: undefined,
+    lastProcessedAt: undefined,
     fetchedAt: new Date('2026-07-11T17:30:00.000Z'),
-  };
+  });
 }
 
 describe('RulesetResolutionRefreshService', () => {
