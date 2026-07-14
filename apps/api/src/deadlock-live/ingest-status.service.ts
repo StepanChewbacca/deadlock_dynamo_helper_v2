@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
-import { HeroAnalysisService } from './hero-analysis.service';
 import { CrawlerRun } from './entities/crawler-run.entity';
 import { CrawlerState } from './entities/crawler-state.entity';
 import { Hero } from './entities/hero.entity';
 import { Item } from './entities/item.entity';
 import { Match } from './entities/match.entity';
 import { MatchPlayer } from './entities/match-player.entity';
+import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
+import { RecentMatchCrawlerService } from './recent-match-crawler.service';
 
 @Injectable()
 export class IngestStatusService {
@@ -25,12 +25,20 @@ export class IngestStatusService {
     private readonly crawlerStateRepo: Repository<CrawlerState>,
     @InjectRepository(CrawlerRun)
     private readonly crawlerRunRepo: Repository<CrawlerRun>,
-    private readonly heroAnalysisService: HeroAnalysisService,
-    private readonly allHeroesAnalysisService: AllHeroesAnalysisService,
+    private readonly recentMatchCrawlerService: RecentMatchCrawlerService,
+    private readonly heroBuildTransitionAggregationService:
+      HeroBuildTransitionAggregationService,
   ) {}
 
   async getStatus() {
-    const [matchesTotal, matchPlayersTotal, heroesTotal, itemsTotal, crawlerStates, latestRuns] = await Promise.all([
+    const [
+      matchesTotal,
+      matchPlayersTotal,
+      heroesTotal,
+      itemsTotal,
+      crawlerStates,
+      latestRuns,
+    ] = await Promise.all([
       this.matchRepo.count(),
       this.matchPlayerRepo.count(),
       this.heroRepo.count(),
@@ -47,8 +55,8 @@ export class IngestStatusService {
       crawlerStates,
       latestRuns,
       liveProgress: {
-        dynamo: this.heroAnalysisService.getProgress(),
-        allHeroes: this.allHeroesAnalysisService.getProgress(),
+        recentMatches: this.recentMatchCrawlerService.getProgress(),
+        graphPolicy: this.heroBuildTransitionAggregationService.getStatus(),
       },
     };
   }
