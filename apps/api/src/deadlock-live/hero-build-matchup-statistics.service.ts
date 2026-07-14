@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { canonicalHeroId } from './all-heroes-analysis.service';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
+import { canonicalHeroId } from './hero-id-aliases';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
 import {
