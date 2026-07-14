@@ -32,7 +32,9 @@ export function decorateLiveBuildRecommendation(
   const primary = root.querySelector('.live-build-primary-copy');
   applyActionMarker(primary, recommendation.action, heroNames);
 
-  const alternatives = [...root.querySelectorAll('.live-build-alternative-copy')];
+  const alternatives = Array.from(
+    root.querySelectorAll('.live-build-alternative-copy'),
+  );
   recommendation.alternatives.forEach((action, index) => {
     applyActionMarker(alternatives[index], action, heroNames);
   });
@@ -149,11 +151,11 @@ function captureAction(value: unknown): void {
 function decorateProjectedBuildRows(): void {
   const heroNames = getHeroNames();
   const rows = document.querySelectorAll('.live-build-phase tbody tr');
-  for (const row of rows) {
+  rows.forEach((row) => {
     const actionCell = row.children.item(1) as HTMLElement | null;
     const itemCell = row.children.item(2) as HTMLElement | null;
     if (!actionCell || !itemCell) {
-      continue;
+      return;
     }
 
     const lookupKey = createActionLookupKey(
@@ -167,7 +169,7 @@ function decorateProjectedBuildRows(): void {
     } else {
       row.classList.remove('live-build-situational-row');
     }
-  }
+  });
 }
 
 function readItemCellName(cell: HTMLElement): string {
