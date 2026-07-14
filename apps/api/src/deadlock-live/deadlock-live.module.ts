@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AllHeroesAnalysisController } from './all-heroes-analysis.controller';
-import { AllHeroesAnalysisFacadeService } from './all-heroes-analysis-facade.service';
-import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
+import { AnalysisOperationsController } from './analysis-operations.controller';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
 import { ContextualHeroBuildRecommendationService } from './contextual-hero-build-recommendation.service';
@@ -21,9 +19,6 @@ import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.e
 import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
-import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
-import { HeroAnalysisController } from './hero-analysis.controller';
-import { HeroAnalysisService } from './hero-analysis.service';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
 import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
@@ -56,7 +51,6 @@ import { ReferenceDataImportService } from './reference-data-import.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
 import { RulesetResolverService } from './ruleset-resolver.service';
 import { RulesetWindowManifestService } from './ruleset-window-manifest.service';
-import { SituationalRecommendationService } from './situational-recommendation.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
@@ -72,7 +66,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       ItemComponent,
       CrawlerRun,
       CrawlerState,
-      ShadowModeDecision,
       RawMatchMetadata,
       GameRuleset,
       ItemCatalogVersion,
@@ -83,8 +76,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   controllers: [
     LiveIngestController,
     DebugPageController,
-    HeroAnalysisController,
-    AllHeroesAnalysisController,
+    AnalysisOperationsController,
     RecentMatchesWindowController,
     MatchTimelineNormalizationController,
     HeroBuildTransitionAggregationController,
@@ -112,7 +104,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecentMatchRosterRepairService,
     RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,
-    HeroAnalysisService,
     RulesetResolverService,
     RulesetResolutionRefreshService,
     RawMatchMetadataService,
@@ -124,11 +115,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HistoricalCatalogBackfillService,
     RulesetWindowManifestService,
     VersionedRecipeGraphService,
-    {
-      provide: AllHeroesAnalysisService,
-      useClass: AllHeroesAnalysisFacadeService,
-    },
-    SituationalRecommendationService,
     ReferenceDataImportService,
     IngestStatusService,
   ],
@@ -149,7 +135,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecentMatchRosterRepairService,
     RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,
-    HeroAnalysisService,
     RulesetResolverService,
     RulesetResolutionRefreshService,
     RawMatchMetadataService,
@@ -161,8 +146,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HistoricalCatalogBackfillService,
     RulesetWindowManifestService,
     VersionedRecipeGraphService,
-    AllHeroesAnalysisService,
-    SituationalRecommendationService,
     ReferenceDataImportService,
     IngestStatusService,
   ],
