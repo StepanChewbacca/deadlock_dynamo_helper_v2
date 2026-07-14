@@ -1,3 +1,4 @@
+import { initializeDesktopBuildDeduplication } from './live-build-desktop-dedup';
 import { LiveBuildRecommendationSnapshot } from './live-build-recommendation-poller';
 import {
   clearLiveBuildDesktop as clearBaseDesktop,
@@ -14,6 +15,7 @@ const STYLE_ID = 'live-build-full-route-overrides';
 export function showLiveBuildDesktop(snapshot: LiveBuildRecommendationSnapshot): void {
   injectOverrides();
   initializeDesktopSituationalItems();
+  initializeDesktopBuildDeduplication();
   showBaseDesktop(createFullRouteSnapshot(snapshot));
   decorateDesktopSituationalItems(snapshot);
 }
