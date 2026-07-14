@@ -1,0 +1,449 @@
+name: Apply two-week retention refactor
+
+on:
+  push:
+    branches:
+      - agent/two-week-match-retention
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/two-week-match-retention
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Apply retention and version-independence changes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one occurrence, found {count}')
+              return text.replace(old, new, 1)
+
+          def replace_count(text: str, old: str, new: str, expected: int, label: str) -> str:
+              count = text.count(old)
+              if count != expected:
+                  raise RuntimeError(f'{label}: expected {expected} occurrences, found {count}')
+              return text.replace(old, new)
+
+          def regex_once(text: str, pattern: str, replacement: str, label: str) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected one regex match, found {count}')
+              return updated
+
+          root = Path('.')
+
+          # 14-day, 10,000-match in-memory window.
+          path = root / 'apps/api/src/deadlock-live/recent-matches-window.service.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "export const RECENT_MATCH_WINDOW_DAYS = 7;\nexport const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;\nexport const RECENT_MATCH_QUERY_BATCH_SIZE = 500;",
+              "export const RECENT_MATCH_WINDOW_DAYS = 14;\nexport const RECENT_MATCH_TARGET_COUNT = 10_000;\nexport const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;\nexport const RECENT_MATCH_QUERY_BATCH_SIZE = 500;",
+              'recent window constants',
+          )
+          text = replace_once(
+              text,
+              "  windowDays: number;\n  refreshIntervalMs: number;",
+              "  windowDays: number;\n  targetMatchCount: number;\n  refreshIntervalMs: number;",
+              'recent status target field',
+          )
+          text = replace_once(
+              text,
+              "      windowDays: RECENT_MATCH_WINDOW_DAYS,\n      refreshIntervalMs: RECENT_MATCH_REFRESH_INTERVAL_MS,",
+              "      windowDays: RECENT_MATCH_WINDOW_DAYS,\n      targetMatchCount: RECENT_MATCH_TARGET_COUNT,\n      refreshIntervalMs: RECENT_MATCH_REFRESH_INTERVAL_MS,",
+              'recent status target value',
+          )
+          text = replace_once(
+              text,
+              "        where: { startTime: MoreThanOrEqual(cutoff) },\n        order: { startTime: 'DESC' },",
+              "        where: { startTime: MoreThanOrEqual(cutoff) },\n        order: { startTime: 'DESC' },\n        take: RECENT_MATCH_TARGET_COUNT,",
+              'recent query cap',
+          )
+          path.write_text(text)
+
+          # Global 14-day crawler retention and six runs per day.
+          path = root / 'apps/api/src/deadlock-live/all-heroes-analysis.service.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "import { Repository, In } from 'typeorm';\nimport { Cron, CronExpression } from '@nestjs/schedule';",
+              "import { In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';\nimport { Cron } from '@nestjs/schedule';",
+              'crawler imports',
+          )
+          text = replace_once(
+              text,
+              "import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';\nimport { getDeadlockApiRequestConfig } from './deadlock-api-request';",
+              "import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';\nimport { RawMatchMetadata } from './entities/raw-match-metadata.entity';\nimport { getDeadlockApiRequestConfig } from './deadlock-api-request';\nimport {\n  getRecentMatchCutoff,\n  RECENT_MATCH_TARGET_COUNT,\n  RECENT_MATCH_WINDOW_DAYS,\n} from './recent-matches-window.service';",
+              'crawler retention imports',
+          )
+          text = replace_once(
+              text,
+              "const REQUEST_DELAY_MS = 2000;\nconst RATE_LIMIT_WAIT_MS = 60000;\nconst MAX_MATCHES_PER_HERO = 1000;\nconst MAX_CRAWL_MATCHES = 2500;\nconst MIN_BADGE = 116;",
+              "const REQUEST_DELAY_MS = 2000;\nconst RATE_LIMIT_WAIT_MS = 60000;\nexport const ALL_HEROES_CRAWL_CRON = '0 0 */4 * * *';\nconst RETENTION_DELETE_BATCH_SIZE = 500;\nconst MIN_BADGE = 116;\n\nexport function calculateMissingMatchCount(currentMatchCount: number): number {\n  return Math.max(0, RECENT_MATCH_TARGET_COUNT - currentMatchCount);\n}",
+              'crawler constants',
+          )
+          text = replace_count(
+              text,
+              "      take: MAX_MATCHES_PER_HERO,\n",
+              "",
+              2,
+              'remove per-hero query limits',
+          )
+          text = replace_once(
+              text,
+              "  @Cron(CronExpression.EVERY_DAY_AT_3AM)\n  async scheduledCrawl() {\n    this.logger.log('Starting scheduled daily crawl for all heroes');\n    await this.startCrawling();\n  }",
+              "  @Cron(ALL_HEROES_CRAWL_CRON, {\n    name: 'all-heroes-crawl-six-times-daily',\n    timeZone: 'UTC',\n  })\n  async scheduledCrawl() {\n    this.logger.log('Starting scheduled four-hour crawl for the 14-day match window');\n    await this.startCrawling();\n  }",
+              'crawler cron',
+          )
+
+          new_run_crawl = '''  private async runCrawl() {
+            try {
+              this.progress.status = `Applying ${RECENT_MATCH_WINDOW_DAYS}-day retention before discovery...`;
+              await this.syncCrawlerState();
+              const removedBeforeCrawl = await this.pruneInvalidMatches();
+
+              const cutoff = getRecentMatchCutoff(new Date());
+              this.progress.status = 'Loading valid match IDs from database...';
+              const existingMatches = await this.matchRepo.find({
+                where: { startTime: MoreThanOrEqual(cutoff) },
+                select: { matchId: true },
+              });
+              const processedIds = new Set(existingMatches.map((match) => Number(match.matchId)));
+              const missingMatchCount = calculateMissingMatchCount(processedIds.size);
+              this.logger.log(
+                `Retained ${processedIds.size}/${RECENT_MATCH_TARGET_COUNT} matches from the last ` +
+                  `${RECENT_MATCH_WINDOW_DAYS} days; removed ${removedBeforeCrawl} invalid matches.`,
+              );
+
+              this.progress.status = missingMatchCount > 0
+                ? `Fetching up to ${missingMatchCount} new matches from API...`
+                : 'The recent match window is already full.';
+              await this.syncCrawlerState();
+              const newMatchIds = missingMatchCount > 0
+                ? await this.fetchCandidateMatchIds(processedIds, missingMatchCount, cutoff)
+                : [];
+
+              this.progress.total = newMatchIds.length;
+              this.logger.log(`Found ${newMatchIds.length} new valid matches to process`);
+              await this.updateCrawlerRun({
+                discoveredMatches: newMatchIds.length,
+                targetMatches: missingMatchCount,
+              });
+              await this.syncCrawlerState();
+
+              for (let i = 0; i < newMatchIds.length; i++) {
+                const matchId = newMatchIds[i];
+                this.progress.current = i + 1;
+                this.progress.status = `Processing match ${i + 1}/${newMatchIds.length}: ${matchId}`;
+                await this.updateCrawlerRun({
+                  processedMatches: i,
+                  currentMatchId: matchId,
+                  statusMessage: this.progress.status,
+                });
+                await this.syncCrawlerState(matchId);
+
+                try {
+                  await this.processMatch(matchId, cutoff);
+                } catch (err) {
+                  this.logger.warn(`Failed to process match ${matchId}: ${(err as any).message}`);
+                  if ((err as any).response?.status === 429) {
+                    this.progress.status = 'Rate limited, waiting 60s...';
+                    await this.sleep(RATE_LIMIT_WAIT_MS);
+                    try {
+                      await this.processMatch(matchId, cutoff);
+                    } catch (retryErr) {
+                      this.logger.warn(`Retry failed for match ${matchId}: ${(retryErr as any).message}`);
+                    }
+                  }
+                }
+
+                await this.sleep(REQUEST_DELAY_MS);
+              }
+
+              this.progress.status = `Applying ${RECENT_MATCH_WINDOW_DAYS}-day retention after crawl...`;
+              await this.syncCrawlerState();
+              const removedAfterCrawl = await this.pruneInvalidMatches();
+              const finalCutoff = getRecentMatchCutoff(new Date());
+              const finalMatchCount = await this.matchRepo.count({
+                where: { startTime: MoreThanOrEqual(finalCutoff) },
+              });
+
+              this.progress.status =
+                `Crawl finished successfully: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
+                `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`;
+              this.logger.log(
+                `${this.progress.status} Removed ${removedAfterCrawl} matches after processing.`,
+              );
+              await this.finalizeCrawlerRun('completed');
+            } catch (err) {
+              this.logger.error('Crawl error:', err);
+              this.progress.status = `Crawl aborted: ${(err as any).message}`;
+              await this.finalizeCrawlerRun('failed', (err as any).message);
+            } finally {
+              this.isCrawling = false;
+              this.progress.isCrawling = false;
+              await this.syncCrawlerState();
+            }
+          }
+
+          private async fetchCandidateMatchIds'''
+          text = regex_once(
+              text,
+              r"  private async runCrawl\(\) \{.*?\n  private async fetchCandidateMatchIds",
+              new_run_crawl,
+              'crawler run implementation',
+          )
+          text = replace_once(
+              text,
+              "  private async fetchCandidateMatchIds(processedIds: Set<number>, targetCount: number): Promise<number[]> {",
+              "  private async fetchCandidateMatchIds(\n    processedIds: Set<number>,\n    targetCount: number,\n    cutoff: Date,\n  ): Promise<number[]> {",
+              'crawler discovery signature',
+          )
+          text = replace_once(
+              text,
+              "            min_average_badge: MIN_BADGE,\n            order_by: 'match_id',",
+              "            min_average_badge: MIN_BADGE,\n            min_unix_timestamp: Math.floor(cutoff.getTime() / 1000),\n            order_by: 'match_id',",
+              'crawler API cutoff',
+          )
+          text = replace_once(
+              text,
+              "  private async processMatch(matchId: number) {",
+              "  private async processMatch(matchId: number, cutoff: Date): Promise<boolean> {",
+              'process match signature',
+          )
+          text = replace_once(text, "    if (!matchInfo) return;", "    if (!matchInfo) return false;", 'missing match info')
+          text = replace_once(text, "    if (players.length === 0) return;", "    if (players.length === 0) return false;", 'missing players')
+          text = replace_once(
+              text,
+              "    const startTime = new Date((matchInfo.start_time || 0) * 1000);\n    const durationS = matchInfo.duration_s || 0;",
+              "    const startTime = new Date((matchInfo.start_time || 0) * 1000);\n    if (startTime < cutoff) {\n      this.logger.debug(`Skipping expired match ${matchId} with start time ${startTime.toISOString()}`);\n      return false;\n    }\n    const durationS = matchInfo.duration_s || 0;",
+              'process match cutoff guard',
+          )
+          text = replace_once(
+              text,
+              "      }\n    }\n  }\n\n  private async trimOldRecords() {",
+              "      }\n    }\n\n    return true;\n  }\n\n  private async trimOldRecords() {",
+              'process match success result',
+          )
+
+          prune_method = '''  private async pruneInvalidMatches(now = new Date()): Promise<number> {
+            const cutoff = getRecentMatchCutoff(now);
+            const expiredMatches = await this.matchRepo.find({
+              where: { startTime: LessThan(cutoff) },
+              select: { matchId: true },
+            });
+            const validMatchCount = await this.matchRepo.count({
+              where: { startTime: MoreThanOrEqual(cutoff) },
+            });
+            const overflowCount = Math.max(0, validMatchCount - RECENT_MATCH_TARGET_COUNT);
+            const overflowMatches = overflowCount > 0
+              ? await this.matchRepo.find({
+                  where: { startTime: MoreThanOrEqual(cutoff) },
+                  order: { startTime: 'ASC', matchId: 'ASC' },
+                  take: overflowCount,
+                  select: { matchId: true },
+                })
+              : [];
+            const matchIds = [
+              ...new Set(
+                [...expiredMatches, ...overflowMatches].map((match) => Number(match.matchId)),
+              ),
+            ];
+
+            for (let index = 0; index < matchIds.length; index += RETENTION_DELETE_BATCH_SIZE) {
+              const batch = matchIds.slice(index, index + RETENTION_DELETE_BATCH_SIZE);
+              await this.matchRepo.manager.transaction(async (manager) => {
+                await manager.getRepository(RawMatchMetadata).delete({ matchId: In(batch) });
+                await manager.getRepository(Match).delete({ matchId: In(batch) });
+              });
+            }
+
+            if (matchIds.length > 0) {
+              this.logger.log(
+                `Deleted ${matchIds.length} expired or overflow matches outside the newest ` +
+                  `${RECENT_MATCH_TARGET_COUNT} matches in the ${RECENT_MATCH_WINDOW_DAYS}-day window.`,
+              );
+            }
+
+            return matchIds.length;
+          }
+
+          private sleep'''
+          text = regex_once(
+              text,
+              r"  private async trimOldRecords\(\) \{.*?\n  private sleep",
+              prune_method,
+              'replace per-hero trim with global retention',
+          )
+          path.write_text(text)
+
+          # Historical reprocessing must validate against the version-independent items table only.
+          path = root / 'apps/api/src/deadlock-live/stored-match-reprocessing.service.ts'
+          text = path.read_text()
+          text = replace_once(text, "import { ItemCatalogItem } from './entities/item-catalog-item.entity';\n", "", 'remove catalog item import')
+          text = replace_once(
+              text,
+              "import {\n  getCatalogContentVersionId,\n  ItemCatalogVersion,\n} from './entities/item-catalog-version.entity';\n",
+              "",
+              'remove catalog version imports',
+          )
+          text = replace_once(
+              text,
+              "export const MATCH_METADATA_PROCESSING_VERSION = 'match-metadata-v2';",
+              "export const MATCH_METADATA_PROCESSING_VERSION = 'match-metadata-v3-version-independent';",
+              'processing version',
+          )
+          text = replace_once(
+              text,
+              "interface KnownItemCatalog {\n  itemIds: Set<number>;\n  source: 'VERSIONED_CATALOG' | 'LEGACY_ITEMS';\n  catalogVersionId?: number;\n  contentCatalogVersionId?: number;\n}",
+              "interface KnownItemCatalog {\n  itemIds: Set<number>;\n  source: 'ITEMS_REFERENCE';\n}",
+              'known item source',
+          )
+          text = replace_once(
+              text,
+              "    const knownItems = await this.loadKnownItems(manager, rawMetadata.resolvedCatalogVersionId);",
+              "    const knownItems = await this.loadKnownItems(manager);",
+              'version-independent item loading',
+          )
+          text = replace_once(
+              text,
+              "      itemCatalogSource: knownItems.source,\n      catalogVersionId: knownItems.catalogVersionId,\n      contentCatalogVersionId: knownItems.contentCatalogVersionId,",
+              "      itemCatalogSource: knownItems.source,",
+              'remove version diagnostics from processing result',
+          )
+          version_independent_loader = '''  private async loadKnownItems(manager: EntityManager): Promise<KnownItemCatalog> {
+            const itemRows = await manager.getRepository(Item).find();
+            return {
+              itemIds: new Set(itemRows.map((item) => Number(item.itemId))),
+              source: 'ITEMS_REFERENCE',
+            };
+          }
+
+          private parseItems'''
+          text = regex_once(
+              text,
+              r"  private async loadKnownItems\(.*?\n  private parseItems",
+              version_independent_loader,
+              'replace versioned item loader',
+          )
+          path.write_text(text)
+
+          # Normalization versions remain audit metadata, but no longer decide replay or ruleset resolution.
+          path = root / 'apps/api/src/deadlock-live/historical-match-replay.service.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "        const normalization = await this.rawMatchMetadataNormalizerService.normalizeRawMetadata(\n          row,\n          dto.resolveRuleset !== false,\n        );",
+              "        const normalization = await this.rawMatchMetadataNormalizerService.normalizeRawMetadata(\n          row,\n          false,\n        );",
+              'disable ruleset resolution during replay',
+          )
+          text = replace_once(
+              text,
+              "export function shouldReplayHistoricalRow(rawMetadata: RawMatchMetadata): boolean {\n  return (\n    rawMetadata.normalizationVersion !== RAW_MATCH_METADATA_NORMALIZATION_VERSION ||\n    rawMetadata.processingVersion !== MATCH_METADATA_PROCESSING_VERSION\n  );\n}",
+              "export function shouldReplayHistoricalRow(rawMetadata: RawMatchMetadata): boolean {\n  return rawMetadata.processingVersion !== MATCH_METADATA_PROCESSING_VERSION;\n}",
+              'processing-only replay decision',
+          )
+          path.write_text(text)
+
+          # Keep endpoint text aligned with the configured rolling window.
+          path = root / 'apps/api/src/deadlock-live/match-timeline-normalization.controller.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "import { RecentMatchSnapshot, RecentMatchesWindowService } from './recent-matches-window.service';",
+              "import {\n  RecentMatchSnapshot,\n  RecentMatchesWindowService,\n  RECENT_MATCH_WINDOW_DAYS,\n} from './recent-matches-window.service';",
+              'timeline controller import',
+          )
+          text = replace_once(
+              text,
+              "      throw new NotFoundException(`Match ${matchId} is not present in the seven-day memory window.`);",
+              "      throw new NotFoundException(\n        `Match ${matchId} is not present in the ${RECENT_MATCH_WINDOW_DAYS}-day memory window.`,\n      );",
+              'timeline controller window message',
+          )
+          path.write_text(text)
+
+          # Tests for the new rolling window and version-independent replay trigger.
+          path = root / 'apps/api/test/recent-matches-window.spec.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "  RECENT_MATCH_REFRESH_INTERVAL_MS,\n  RECENT_MATCH_WINDOW_DAYS,",
+              "  RECENT_MATCH_REFRESH_INTERVAL_MS,\n  RECENT_MATCH_TARGET_COUNT,\n  RECENT_MATCH_WINDOW_DAYS,",
+              'recent test target import',
+          )
+          text = replace_once(
+              text,
+              "  it('uses an exact rolling seven-day cutoff', () => {",
+              "  it('uses an exact rolling fourteen-day cutoff capped at 10,000 matches', () => {",
+              'recent test name',
+          )
+          text = replace_once(
+              text,
+              "    expect(RECENT_MATCH_WINDOW_DAYS).toBe(7);\n    expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);\n    expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-07-05T12:00:00.000Z');",
+              "    expect(RECENT_MATCH_WINDOW_DAYS).toBe(14);\n    expect(RECENT_MATCH_TARGET_COUNT).toBe(10_000);\n    expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);\n    expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-06-28T12:00:00.000Z');",
+              'recent test assertions',
+          )
+          path.write_text(text)
+
+          path = root / 'apps/api/test/historical-match-replay.service.spec.ts'
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "import { RAW_MATCH_METADATA_NORMALIZATION_VERSION } from '../src/deadlock-live/raw-match-metadata-normalizer.service';\n",
+              "",
+              'remove normalization version test import',
+          )
+          text = replace_once(
+              text,
+              "  it('replays rows when either version is stale', () => {\n    expect(\n      shouldReplayHistoricalRow({\n        normalizationVersion: 'old',\n        processingVersion: MATCH_METADATA_PROCESSING_VERSION,\n      } as RawMatchMetadata),\n    ).toBe(true);\n\n    expect(\n      shouldReplayHistoricalRow({\n        normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,\n        processingVersion: 'old',\n      } as RawMatchMetadata),\n    ).toBe(true);\n  });",
+              "  it('replays rows only when the version-independent processing logic is stale', () => {\n    expect(\n      shouldReplayHistoricalRow({\n        normalizationVersion: 'old',\n        processingVersion: MATCH_METADATA_PROCESSING_VERSION,\n      } as RawMatchMetadata),\n    ).toBe(false);\n\n    expect(\n      shouldReplayHistoricalRow({\n        normalizationVersion: 'current-or-old-audit-value',\n        processingVersion: 'old',\n      } as RawMatchMetadata),\n    ).toBe(true);\n  });",
+              'historical replay version test',
+          )
+          text = replace_once(
+              text,
+              "        normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,\n        processingVersion: MATCH_METADATA_PROCESSING_VERSION,",
+              "        normalizationVersion: 'any-audit-version',\n        processingVersion: MATCH_METADATA_PROCESSING_VERSION,",
+              'historical replay skip test',
+          )
+          path.write_text(text)
+
+          retention_test = root / 'apps/api/test/all-heroes-retention.spec.ts'
+          retention_test.write_text("""import {\n  ALL_HEROES_CRAWL_CRON,\n  calculateMissingMatchCount,\n} from '../src/deadlock-live/all-heroes-analysis.service';\nimport { RECENT_MATCH_TARGET_COUNT } from '../src/deadlock-live/recent-matches-window.service';\n\ndescribe('all heroes recent match retention', () => {\n  it('runs six times per day', () => {\n    expect(ALL_HEROES_CRAWL_CRON).toBe('0 0 */4 * * *');\n  });\n\n  it('fills only the global deficit up to 10,000 matches', () => {\n    expect(RECENT_MATCH_TARGET_COUNT).toBe(10_000);\n    expect(calculateMissingMatchCount(0)).toBe(10_000);\n    expect(calculateMissingMatchCount(9_999)).toBe(1);\n    expect(calculateMissingMatchCount(10_000)).toBe(0);\n    expect(calculateMissingMatchCount(12_000)).toBe(0);\n  });\n});\n""")
+          PY
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Run API tests
+        run: yarn workspace @deadlock-live-probe/api test
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Commit validated changes
+        shell: bash
+        run: |
+          git rm .github/workflows/apply-two-week-retention-refactor.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src apps/api/test
+          git commit -m "feat: maintain two-week match window"
+          git push origin HEAD:agent/two-week-match-retention
