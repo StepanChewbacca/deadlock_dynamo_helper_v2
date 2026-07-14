@@ -10,7 +10,7 @@ import {
 
 const STYLE_ID = 'situational-item-marker-styles';
 const FETCH_PATCH_KEY = '__deadlockSituationalFetchPatched';
-const projectedActionsByItemName = new Map<string, LiveBuildRecommendationAction>();
+const projectedActionsByLookupKey = new Map<string, LiveBuildRecommendationAction>();
 let trackedMatchId = '';
 let desktopObserver: MutationObserver | undefined;
 
@@ -61,7 +61,7 @@ export function decorateDesktopSituationalItems(
   initializeDesktopSituationalItems();
   if (snapshot.matchId !== trackedMatchId) {
     trackedMatchId = snapshot.matchId;
-    projectedActionsByItemName.clear();
+    projectedActionsByLookupKey.clear();
   }
 
   const recommendation = snapshot.recommendation;
@@ -133,27 +133,34 @@ function readRequestUrl(input: RequestInfo | URL): string {
 }
 
 function captureAction(value: unknown): void {
-  if (!isAction(value) || !value.isSituational || !value.item?.name) {
+  if (!isAction(value) || !value.item?.name) {
     return;
   }
 
-  projectedActionsByItemName.set(
-    normalizeItemName(value.item.name),
-    value,
-  );
+  const lookupKey = createActionLookupKey(value.type, value.item.name);
+  if (!value.isSituational) {
+    projectedActionsByLookupKey.delete(lookupKey);
+    return;
+  }
+
+  projectedActionsByLookupKey.set(lookupKey, value);
 }
 
 function decorateProjectedBuildRows(): void {
   const heroNames = getHeroNames();
   const rows = document.querySelectorAll('.live-build-phase tbody tr');
   for (const row of rows) {
+    const actionCell = row.children.item(1) as HTMLElement | null;
     const itemCell = row.children.item(2) as HTMLElement | null;
-    if (!itemCell) {
+    if (!actionCell || !itemCell) {
       continue;
     }
 
-    const itemName = readItemCellName(itemCell);
-    const action = projectedActionsByItemName.get(normalizeItemName(itemName));
+    const lookupKey = createActionLookupKey(
+      actionCell.textContent || '',
+      readItemCellName(itemCell),
+    );
+    const action = projectedActionsByLookupKey.get(lookupKey);
     applyActionMarker(itemCell, action, heroNames);
     if (action?.isSituational) {
       row.classList.add('live-build-situational-row');
@@ -232,8 +239,8 @@ function getHeroNames(): HeroNameMap {
   }
 }
 
-function normalizeItemName(value: string): string {
-  return value.trim().toLowerCase();
+function createActionLookupKey(actionType: string, itemName: string): string {
+  return `${actionType.trim().toUpperCase()}:${itemName.trim().toLowerCase()}`;
 }
 
 function isAction(value: unknown): value is LiveBuildRecommendationAction {
