@@ -1,6 +1,8 @@
 import {
   centerWindowOnDisplay,
   OverwolfDisplay,
+  selectPreferredDesktopDisplay,
+  selectPrimaryDisplay,
   selectSecondaryDisplay,
 } from './secondary-monitor';
 
@@ -23,6 +25,12 @@ const secondaryDisplay: OverwolfDisplay = {
 };
 
 describe('secondary monitor positioning', () => {
+  it('selects a usable primary display', () => {
+    expect(selectPrimaryDisplay([secondaryDisplay, primaryDisplay])).toEqual(
+      primaryDisplay,
+    );
+  });
+
   it('selects a usable non-primary display', () => {
     expect(selectSecondaryDisplay([primaryDisplay, secondaryDisplay])).toEqual(
       secondaryDisplay,
@@ -31,6 +39,18 @@ describe('secondary monitor positioning', () => {
 
   it('returns undefined without a secondary display', () => {
     expect(selectSecondaryDisplay([primaryDisplay])).toBeUndefined();
+  });
+
+  it('falls back to the primary display when no secondary display exists', () => {
+    expect(selectPreferredDesktopDisplay([primaryDisplay], true)).toEqual(
+      primaryDisplay,
+    );
+  });
+
+  it('can explicitly select the primary display for recovery', () => {
+    expect(
+      selectPreferredDesktopDisplay([secondaryDisplay, primaryDisplay], false),
+    ).toEqual(primaryDisplay);
   });
 
   it('centers the window on a display to the right', () => {
