@@ -1,15 +1,18 @@
 import {
   ContextualHeroBuildRecommendationAction,
   HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
+  mergeContextualRecommendationCandidatePool,
   rankContextualActions,
 } from '../src/deadlock-live/contextual-hero-build-recommendation.service';
 import { GRAPH_MATCHUP_MODEL_VERSION } from '../src/deadlock-live/hero-build-matchup-statistics.service';
+import { HeroBuildRecommendationAction } from '../src/deadlock-live/hero-build-recommendation.service';
 
 function createAction(
   actionKey: string,
   baseRank: number,
   contextualScore: number,
   isSituational: boolean,
+  wasInBaseBuild = true,
 ): ContextualHeroBuildRecommendationAction {
   return {
     type: 'BUY',
@@ -32,6 +35,7 @@ function createAction(
     contextualScore,
     baseRank,
     contextualRank: baseRank,
+    wasInBaseBuild,
     isSituational,
     wasPromotedByMatchup: false,
     wasInsertedByMatchup: false,
@@ -44,11 +48,59 @@ function createAction(
   };
 }
 
-describe('rankContextualActions', () => {
+function createBaseAction(
+  actionKey: string,
+  itemId: number,
+): HeroBuildRecommendationAction {
+  return {
+    type: 'BUY',
+    sourceActionType: 'BUY',
+    itemId,
+    actionKey,
+    historicalCount: 10,
+    historicalProbability: 0.5,
+    averageGameTimeS: 300,
+    matchedStateKey: 'EMPTY',
+    matchedStateObservationCount: 20,
+    stateDistance: 0,
+    missingItemCount: 0,
+    extraItemCount: 0,
+    matchedBySubset: false,
+    predictedStateKey: `${itemId}x1`,
+    score: 0.5,
+    confidence: 0.5,
+  };
+}
+
+describe('contextual candidate expansion', () => {
   it('evaluates a wider internal candidate pool than the visible build', () => {
     expect(HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT).toBe(100);
   });
 
+  it('adds unique actions found only in nearby graph states', () => {
+    const baseAction = createBaseAction('BUY:1', 1);
+    const nearbyAction = createBaseAction('BUY:25', 25);
+    const candidates = mergeContextualRecommendationCandidatePool(
+      [baseAction],
+      [baseAction, nearbyAction],
+    );
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        action: expect.objectContaining({ actionKey: 'BUY:1' }),
+        baseRank: 1,
+        wasInBaseBuild: true,
+      }),
+      expect.objectContaining({
+        action: expect.objectContaining({ actionKey: 'BUY:25' }),
+        baseRank: 2,
+        wasInBaseBuild: false,
+      }),
+    ]);
+  });
+});
+
+describe('rankContextualActions', () => {
   it('marks a situational action only when matchup scoring moves it ahead of its base rank', () => {
     const ranked = rankContextualActions([
       createAction('BUY:1', 1, 0.55, false),
@@ -62,11 +114,11 @@ describe('rankContextualActions', () => {
     expect(ranked[1].wasPromotedByMatchup).toBe(false);
   });
 
-  it('marks a matchup action as inserted when it enters the visible build from outside it', () => {
+  it('marks a matchup action as inserted when it enters from a nearby graph branch', () => {
     const ranked = rankContextualActions(
       [
         createAction('BUY:1', 1, 0.55, false),
-        createAction('BUY:25', 25, 0.75, true),
+        createAction('BUY:25', 25, 0.75, true, false),
       ],
       20,
     );
@@ -75,6 +127,7 @@ describe('rankContextualActions', () => {
       actionKey: 'BUY:25',
       baseRank: 25,
       contextualRank: 1,
+      wasInBaseBuild: false,
       wasPromotedByMatchup: true,
       wasInsertedByMatchup: true,
     });
