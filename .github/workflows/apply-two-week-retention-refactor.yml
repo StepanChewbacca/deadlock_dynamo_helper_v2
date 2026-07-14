@@ -20,10 +20,23 @@ jobs:
           cache: yarn
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile --ignore-engines
+        run: yarn install --frozen-lockfile --ignore-engines --silent
 
       - name: Run API tests
-        run: yarn workspace @deadlock-live-probe/api test
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test > /tmp/api-tests.log 2>&1
+          status=$?
+          tail -n 250 /tmp/api-tests.log
+          exit $status
 
       - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api build > /tmp/api-build.log 2>&1
+          status=$?
+          tail -n 250 /tmp/api-build.log
+          exit $status
