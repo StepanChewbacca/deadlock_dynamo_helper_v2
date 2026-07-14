@@ -1,10 +1,10 @@
 # Overwolf Deadlock Live Probe Runbook
 
-This guide walk you through starting the Deadlock Live Probe telemetry bridge, loading the Overwolf client, and verifying real-time game telemetry from a Deadlock session.
+This guide walks through starting the Deadlock Live Probe telemetry bridge, loading the Overwolf client, and verifying real-time game telemetry and live build recommendations from a Deadlock session.
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 Before you start, make sure you have the following installed:
 1. **Node.js** (v20+ recommended, works with v18 using `--ignore-engines`)
@@ -14,72 +14,115 @@ Before you start, make sure you have the following installed:
 
 ---
 
-## 🚀 Quick Start Instructions
-
-Follow these steps to run the telemetry bridge locally:
+## Quick Start Instructions
 
 ### 1. Install Dependencies
+
 Run from the root of the workspace to resolve and link workspace packages:
+
 ```bash
 yarn install --ignore-engines
 ```
 
-### 2. Build the Shared Package & Overwolf Client
-Compile common typescript types and build the Overwolf Webpack bundle:
-```bash
-# Build shared package types
-yarn workspace @deadlock-live-probe/shared build
+### 2. Build the Shared Package and Overwolf Client
 
-# Compile Overwolf app bundle (dist/index.js)
-yarn workspace @deadlock-live-probe/overwolf-client dev
+Compile shared types and create the Overwolf Webpack bundle:
+
+```bash
+yarn workspace @deadlock-live-probe/shared build
 ```
 
+```bash
+yarn workspace @deadlock-live-probe/overwolf-client build
+```
+
+The production build also synchronizes `apps/overwolf-client/public` to the configured Windows sideload location.
+
 ### 3. Run the NestJS Ingest API
+
 Launch the NestJS backend on port `3000`:
+
 ```bash
 yarn workspace @deadlock-live-probe/api start:dev
 ```
+
 Verify that the server has booted and is listening on `http://localhost:3000`.
 
 ---
 
-## 🛠️ Loading the Overwolf App (Sideloading)
+## Loading the Overwolf App
 
-To load the client app in Overwolf:
-1. Open the **Overwolf Client** on your desktop.
+1. Open the **Overwolf Client**.
 2. Go to **Settings** > **Support** > **Development Options**.
-3. Click on **Load unpacked extension...**.
-4. Browse to the workspace directory and select the `apps/overwolf-client/public` folder (which contains the `manifest.json` file).
-5. The **Deadlock Live Probe** window should automatically pop up and display a dark UI dashboard showing status `INIT` or `REGISTERING...`.
+3. Click **Load unpacked extension...**.
+4. Select `apps/overwolf-client/public`, which contains `manifest.json`.
+5. Confirm that **Deadlock Live Probe 0.0.2** opens and reaches `REGISTERED` after Deadlock starts.
+6. Reload the unpacked extension after every new Overwolf client build.
 
 ---
 
-## 🎮 Telemetry Verification Flow
+## Telemetry Verification Flow
 
 1. Launch **Deadlock** from Steam.
-2. In the Overwolf app window:
-   - GEP Integration status should change to **REGISTERED** once the game starts.
-   - The connection status dot in the footer will turn green (**NestJS API connected & sending**) once the first telemetry batch is delivered.
-3. Join a **Deadlock Test Lobby** or start a Sandbox Match.
-4. Interact with the game (e.g., spawn, purchase items, farm souls).
-5. Open your web browser and navigate to the Live Ingest Debug page:
-   - **URL:** [http://localhost:3000/deadlock/live/debug](http://localhost:3000/deadlock/live/debug)
-6. Verify the following on the debug page:
-   - **Match ID** is successfully extracted.
-   - **Game Time** updates in real-time.
-   - Roster lists player health, team (Sapphire/Amber), level, and kills/deaths/assists.
-   - Bought items display with timing and highlight in gold if enhanced.
-   - The **Raw Event Log** panel stream updates with live JSON updates.
+2. Confirm that GEP Integration changes to **REGISTERED**.
+3. Confirm that the connection indicator changes to **NestJS API connected & sending** after the first telemetry batch.
+4. Join a test lobby or Sandbox match.
+5. Open `http://localhost:3000/deadlock/live/debug`.
+6. Verify:
+   - Match ID is extracted.
+   - Game time updates.
+   - The local player is identified.
+   - Hero ID and inventory updates are present.
+   - Raw events continue to arrive.
 
 ---
 
-## 📂 Telemetry Storage & Logging
+## Live Build HUD Verification
 
-Raw event batches are captured on the backend and saved to disk as line-separated JSON files (**NDJSON**):
-- **Path:** `apps/api/storage/deadlock-live/{matchId}.ndjson`
-- **Fallback Path:** `apps/api/storage/deadlock-live/unknown.ndjson` (for events received before a match ID is resolved)
+The in-game overlay polls the backend traversal snapshot once per second, but rerenders only when the recommendation lifecycle, `traversalKey`, stale state, selected action, or refresh generation changes.
 
-You can tail these files using standard commands:
+1. Check traversal status:
+
+```bash
+curl -sS https://aboba-telegramovich.duckdns.org/deadlock/live/build-recommendations/status | jq
+```
+
+2. After entering a match and selecting a hero, list tracked recommendations:
+
+```bash
+curl -sS https://aboba-telegramovich.duckdns.org/deadlock/live/build-recommendations | jq '[.[] | {state, matchId, steamId, heroId, inventoryStateKey, gameTimeS, timeBucket, traversalKey, isStale, refreshCount, cacheHitCount, discardedResultCount, lastError}]'
+```
+
+3. In the Overwolf in-game window, verify that the **NEXT BUILD ACTION** panel appears and shows:
+   - `READY`, `REFRESHING`, `WAITING`, or `ERROR` state.
+   - Primary action label such as `Buy Grit`.
+   - Item slot, cost, tier, confidence, typical time, and explanation.
+   - Up to four evidence-filtered alternatives.
+
+4. Without changing inventory, wait for several telemetry batches. `cacheHitCount` should increase while the HUD remains visually stable.
+
+5. Buy or sell an item. Verify that:
+   - `inventoryStateKey` changes.
+   - `traversalKey` changes.
+   - `refreshCount` increases.
+   - The HUD briefly shows `REFRESHING` or `UPDATING` when the previous result is stale.
+   - The new recommendation replaces the previous action.
+
+6. Cross a 30-second game-time boundary without changing inventory. Verify that `timeBucket` and `traversalKey` change and the recommendation refreshes.
+
+7. End the match. Verify that match tracking and the live recommendation panel are cleared.
+
+---
+
+## Telemetry Storage and Logging
+
+Raw event batches are stored as NDJSON:
+
+- `apps/api/storage/deadlock-live/{matchId}.ndjson`
+- `apps/api/storage/deadlock-live/unknown.ndjson` for events received before match ID resolution
+
+Tail the files with:
+
 ```bash
 tail -f apps/api/storage/deadlock-live/*.ndjson
 ```
