@@ -65,7 +65,7 @@ function createSnapshot(
 }
 
 describe('situational item metadata', () => {
-  it('creates a Dynamo warning only for an item promoted by matchup scoring', () => {
+  it('creates a Dynamo warning for a primary item promoted by matchup scoring', () => {
     const warning = createSituationalItemWarning(
       createSnapshot(createAction()),
       { 13: 'Haze' },
@@ -75,6 +75,7 @@ describe('situational item metadata', () => {
       key: 'match-1:BUY:100:13',
       itemName: 'Reactive Barrier',
       enemyHeroName: 'Haze',
+      wasPromotedByMatchup: true,
       wasInsertedByMatchup: false,
       lower95OddsRatio: 1.25,
       matchupObservationCount: 42,
@@ -99,9 +100,23 @@ describe('situational item metadata', () => {
     }))).toBe('95% lower OR x1.25 | n=42 | inserted into build');
   });
 
-  it('does not create a warning when a situational item remains at its base rank', () => {
+  it('creates a warning when a supported primary item remains at base rank', () => {
     const warning = createSituationalItemWarning(
       createSnapshot(createAction({ wasPromotedByMatchup: false })),
+      { 13: 'Haze' },
+    );
+
+    expect(warning).toEqual(expect.objectContaining({
+      wasPromotedByMatchup: false,
+      wasInsertedByMatchup: false,
+      itemName: 'Reactive Barrier',
+      enemyHeroName: 'Haze',
+    }));
+  });
+
+  it('does not create a warning for a primary item without matchup support', () => {
+    const warning = createSituationalItemWarning(
+      createSnapshot(createAction({ isSituational: false })),
       { 13: 'Haze' },
     );
 
