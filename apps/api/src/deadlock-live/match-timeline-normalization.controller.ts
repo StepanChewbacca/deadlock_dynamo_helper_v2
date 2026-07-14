@@ -2,7 +2,11 @@ import { Controller, Get, NotFoundException, Param, ParseIntPipe } from '@nestjs
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
-import { RecentMatchSnapshot, RecentMatchesWindowService } from './recent-matches-window.service';
+import {
+  RecentMatchSnapshot,
+  RECENT_MATCH_WINDOW_DAYS,
+  RecentMatchesWindowService,
+} from './recent-matches-window.service';
 
 @Controller('deadlock/analysis/recent-matches')
 export class MatchTimelineNormalizationController {
@@ -83,7 +87,9 @@ export class MatchTimelineNormalizationController {
     }
 
     if (!match) {
-      throw new NotFoundException(`Match ${matchId} is not present in the seven-day memory window.`);
+      throw new NotFoundException(
+        `Match ${matchId} is not present in the ${RECENT_MATCH_WINDOW_DAYS}-day memory window.`,
+      );
     }
 
     return match;
