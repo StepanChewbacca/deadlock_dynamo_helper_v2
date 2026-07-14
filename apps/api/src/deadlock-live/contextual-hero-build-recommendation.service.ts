@@ -77,14 +77,14 @@ interface ExpandedRecommendationCandidatePool {
 @Injectable()
 export class ContextualHeroBuildRecommendationService extends HeroBuildRecommendationService {
   constructor(
-    private readonly heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
-    private readonly recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
+    private readonly contextualTransitionAggregationService: HeroBuildTransitionAggregationService,
+    private readonly contextualRecipeReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly heroBuildMatchupStatisticsService:
       HeroBuildMatchupStatisticsService,
   ) {
     super(
-      heroBuildTransitionAggregationService,
-      recipeAwareTimelineReconciliationService,
+      contextualTransitionAggregationService,
+      contextualRecipeReconciliationService,
     );
   }
 
@@ -142,10 +142,10 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
   private async recommendExpandedCandidatePool(
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<ExpandedRecommendationCandidatePool> {
-    await this.heroBuildTransitionAggregationService.ensureReady();
+    await this.contextualTransitionAggregationService.ensureReady();
 
-    const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
-    const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(request.heroId);
+    const policyStatus = this.contextualTransitionAggregationService.getStatus();
+    const policy = this.contextualTransitionAggregationService.getHeroPolicy(request.heroId);
     if (!policy) {
       const baseResponse = await super.recommend(request);
       return {
@@ -169,7 +169,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
         } => value.itemCounts !== undefined,
       );
     const recipeResolver = (parentItemId: number): readonly number[] =>
-      this.recipeAwareTimelineReconciliationService.getComponentItemIds(parentItemId);
+      this.contextualRecipeReconciliationService.getComponentItemIds(parentItemId);
     const commonOptions = {
       maxBackoffDistance: HERO_BUILD_MAX_BACKOFF_DISTANCE,
       maxBackoffStates: HERO_BUILD_MAX_BACKOFF_STATES,
