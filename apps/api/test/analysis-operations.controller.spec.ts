@@ -27,11 +27,12 @@ describe('AnalysisOperationsController', () => {
     const controller = createController({ situationalDiagnostics });
 
     await expect(
-      controller.getSituationalExamples('7', '12000'),
+      controller.getSituationalExamples('7', '12000', '8'),
     ).resolves.toEqual({ examples: [] });
     expect(situationalDiagnostics.findExamples).toHaveBeenCalledWith({
       limit: 7,
       maxEvaluatedActions: 12000,
+      maxValidatedStates: 8,
     });
   });
 
