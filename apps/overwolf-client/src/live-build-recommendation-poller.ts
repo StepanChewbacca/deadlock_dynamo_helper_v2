@@ -73,7 +73,7 @@ const DEFAULT_POLL_INTERVAL_MS = 1000;
 
 export class LiveBuildRecommendationPoller {
   private readonly apiBaseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl?: typeof fetch;
   private readonly intervalMs: number;
   private readonly onSnapshot: (snapshot: LiveBuildRecommendationSnapshot) => void;
   private readonly onClear: () => void;
@@ -87,7 +87,7 @@ export class LiveBuildRecommendationPoller {
 
   constructor(options: LiveBuildRecommendationPollerOptions) {
     this.apiBaseUrl = options.apiBaseUrl.replace(/\/$/, '');
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl;
     this.intervalMs = options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.onSnapshot = options.onSnapshot;
     this.onClear = options.onClear;
@@ -165,8 +165,17 @@ export class LiveBuildRecommendationPoller {
     return this.inFlight;
   }
 
+  private request(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const injectedFetch = this.fetchImpl;
+    if (injectedFetch) {
+      return injectedFetch(input, init);
+    }
+
+    return window.fetch(input, init);
+  }
+
   private async fetchSnapshot(requestedMatchId: string): Promise<void> {
-    const response = await this.fetchImpl(
+    const response = await this.request(
       `${this.apiBaseUrl}/deadlock/live/matches/${encodeURIComponent(requestedMatchId)}/build-recommendation`,
       {
         method: 'GET',
