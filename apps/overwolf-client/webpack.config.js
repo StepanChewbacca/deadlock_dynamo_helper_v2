@@ -2,7 +2,7 @@ const path = require('path');
 
 module.exports = {
   entry: {
-    index: ['./src/bind-overwolf-fetch.ts', './src/live-build-hud-entry.ts', './src/index.ts'],
+    index: ['./src/live-build-hud-entry.ts', './src/index.ts'],
     dynamo_warning: './src/dynamo_warning.ts',
   },
   output: {
