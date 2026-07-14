@@ -65,16 +65,19 @@ export function describeMatchupDiagnostics(
     return `Matchup funnel: ${evaluated} evaluated, 0 statistically supported. No situational item exists for this state.`;
   }
 
-  if (!Number.isFinite(promoted) || Number(promoted) <= 0) {
-    return `Matchup funnel: ${evaluated} evaluated, ${situational} supported, 0 promoted. No warning can fire in this state.`;
-  }
-
   const primary = snapshot.recommendation.action;
-  if (primary.isSituational && primary.wasPromotedByMatchup) {
-    return `Warning-ready: ${evaluated} evaluated, ${situational} supported, ${promoted} promoted, ${inserted ?? 0} inserted.`;
+  if (primary.isSituational) {
+    const promotion = primary.wasPromotedByMatchup
+      ? `${promoted ?? 0} promoted, ${inserted ?? 0} inserted`
+      : 'primary already ranked first before matchup scoring';
+    return `Warning-ready: ${evaluated} evaluated, ${situational} supported, ${promotion}.`;
   }
 
-  return `Matchup funnel: ${evaluated} evaluated, ${situational} supported, ${promoted} promoted, but the primary action is not matchup-promoted.`;
+  if (!Number.isFinite(promoted) || Number(promoted) <= 0) {
+    return `Matchup funnel: ${evaluated} evaluated, ${situational} supported, 0 promoted, and the primary action is not situational.`;
+  }
+
+  return `Matchup funnel: ${evaluated} evaluated, ${situational} supported, ${promoted} promoted, but the primary action is not situational.`;
 }
 
 function createFullRouteSnapshot(
