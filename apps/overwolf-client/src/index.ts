@@ -100,7 +100,7 @@ function initializeBackgroundWindow(): void {
   mainWindow.overlayMenuActive = false;
 
   restoreInGameOverlayWindow();
-  registerOverlayHotkey();
+  registerWindowHotkeys(mainWindow);
   preloadDynamoWarningWindow(mainWindow);
 
   const customFetch = async (
@@ -169,14 +169,45 @@ function restoreInGameOverlayWindow(): void {
   });
 }
 
-function registerOverlayHotkey(): void {
+function registerWindowHotkeys(mainWindow: any): void {
   ow.settings?.hotkeys?.onPressed?.addListener((info: any) => {
-    if (info?.name !== 'toggle_overlay') {
+    if (info?.name === 'toggle_overlay') {
+      ui.logConsole('Hotkey toggle_overlay pressed.');
+      toggleInGameOverlayWindow();
       return;
     }
 
-    ui.logConsole('Hotkey toggle_overlay pressed.');
-    toggleInGameOverlayWindow();
+    if (info?.name === 'show_desktop_build') {
+      ui.logConsole('Hotkey show_desktop_build pressed.');
+      showDesktopBuildWindow(mainWindow, true);
+      return;
+    }
+
+    if (info?.name === 'reset_desktop_build') {
+      ui.logConsole('Hotkey reset_desktop_build pressed.');
+      showDesktopBuildWindow(mainWindow, false);
+    }
+  });
+}
+
+function showDesktopBuildWindow(
+  mainWindow: any,
+  preferSecondary: boolean,
+): void {
+  if (typeof mainWindow.showDesktopBuildWindow === 'function') {
+    mainWindow.showDesktopBuildWindow(preferSecondary);
+    return;
+  }
+
+  ow.windows.obtainDeclaredWindow('desktop', (result: any) => {
+    if (!isSuccessfulOverwolfResult(result) || !result.window?.id) {
+      ui.logConsole('Failed to obtain the desktop build window.');
+      return;
+    }
+
+    ow.windows.restore(result.window.id, () => {
+      ow.windows.bringToFront?.(result.window.id);
+    });
   });
 }
 
