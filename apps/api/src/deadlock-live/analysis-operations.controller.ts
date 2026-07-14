@@ -55,12 +55,17 @@ export class AnalysisOperationsController {
   async getSituationalExamples(
     @Query('limit') limit?: string,
     @Query('maxEvaluatedActions') maxEvaluatedActions?: string,
+    @Query('maxValidatedStates') maxValidatedStates?: string,
   ) {
     return this.situationalRecommendationDiagnosticsService.findExamples({
       limit: parseOptionalPositiveInteger(limit, 'limit'),
       maxEvaluatedActions: parseOptionalPositiveInteger(
         maxEvaluatedActions,
         'maxEvaluatedActions',
+      ),
+      maxValidatedStates: parseOptionalPositiveInteger(
+        maxValidatedStates,
+        'maxValidatedStates',
       ),
     });
   }
