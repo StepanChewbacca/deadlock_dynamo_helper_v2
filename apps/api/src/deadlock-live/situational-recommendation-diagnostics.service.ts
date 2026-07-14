@@ -1,0 +1,403 @@
+import { Injectable } from '@nestjs/common';
+import {
+  ContextualHeroBuildRecommendationAction,
+  ContextualHeroBuildRecommendationResponse,
+  HeroBuildContextualRecommendationRequest,
+} from './contextual-hero-build-recommendation.service';
+import { canonicalHeroId } from './hero-id-aliases';
+import {
+  GraphMatchupEvidence,
+  HeroBuildMatchupStatisticsService,
+} from './hero-build-matchup-statistics.service';
+import {
+  HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
+  HeroBuildRecommendationService,
+  parseInventoryStateKey,
+} from './hero-build-recommendation.service';
+import {
+  HeroBuildPolicyNextAction,
+  HeroBuildTransitionAggregationService,
+} from './hero-build-transition-aggregation.service';
+import { RecentMatchesWindowService } from './recent-matches-window.service';
+
+export const SITUATIONAL_DIAGNOSTIC_DEFAULT_LIMIT = 10;
+export const SITUATIONAL_DIAGNOSTIC_MAX_LIMIT = 50;
+export const SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_EVALUATED_ACTIONS = 5_000;
+export const SITUATIONAL_DIAGNOSTIC_MAX_EVALUATED_ACTIONS = 50_000;
+export const SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES = 200;
+
+interface RawSituationalCandidate {
+  heroId: number;
+  enemyHeroId: number;
+  stateKey: string;
+  itemIds: number[];
+  action: HeroBuildPolicyNextAction;
+  evidence: GraphMatchupEvidence;
+}
+
+export interface SituationalRecommendationDiagnosticExample {
+  heroId: number;
+  enemyHeroId: number;
+  stateKey: string;
+  itemIds: number[];
+  gameTimeS: number;
+  itemId?: number;
+  actionKey: string;
+  actionType: ContextualHeroBuildRecommendationAction['type'];
+  baseRank: number;
+  contextualRank: number;
+  wasInBaseBuild: boolean;
+  wasPromotedByMatchup: boolean;
+  wasInsertedByMatchup: boolean;
+  isPrimaryRecommendation: boolean;
+  wouldTriggerWarning: boolean;
+  lower95OddsRatio: number;
+  interactionOddsRatio: number;
+  matchupObservationCount: number;
+  evaluatedCandidateCount: number;
+  situationalCandidateCount: number;
+  promotedSituationalCandidateCount: number;
+  insertedSituationalCandidateCount: number;
+  requestBody: HeroBuildContextualRecommendationRequest;
+}
+
+export interface SituationalRecommendationDiagnosticResult {
+  generatedAt: string;
+  sourceMatchCount: number;
+  sourceHeroCount: number;
+  policyActionOptionCount: number;
+  evaluatedActionCount: number;
+  scanTruncated: boolean;
+  rawPositiveSignalCount: number;
+  validatedStateEnemyCount: number;
+  visibleSituationalExampleCount: number;
+  warningExampleCount: number;
+  examples: SituationalRecommendationDiagnosticExample[];
+}
+
+export interface SituationalRecommendationDiagnosticOptions {
+  limit?: number;
+  maxEvaluatedActions?: number;
+}
+
+@Injectable()
+export class SituationalRecommendationDiagnosticsService {
+  constructor(
+    private readonly heroBuildTransitionAggregationService:
+      HeroBuildTransitionAggregationService,
+    private readonly heroBuildMatchupStatisticsService:
+      HeroBuildMatchupStatisticsService,
+    private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
+    private readonly recentMatchesWindowService: RecentMatchesWindowService,
+  ) {}
+
+  async findExamples(
+    options: SituationalRecommendationDiagnosticOptions = {},
+  ): Promise<SituationalRecommendationDiagnosticResult> {
+    const limit = normalizePositiveInteger(
+      options.limit,
+      SITUATIONAL_DIAGNOSTIC_DEFAULT_LIMIT,
+      SITUATIONAL_DIAGNOSTIC_MAX_LIMIT,
+    );
+    const maxEvaluatedActions = normalizePositiveInteger(
+      options.maxEvaluatedActions,
+      SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_EVALUATED_ACTIONS,
+      SITUATIONAL_DIAGNOSTIC_MAX_EVALUATED_ACTIONS,
+    );
+
+    await this.heroBuildTransitionAggregationService.ensureReady();
+
+    const sourceMatches = this.recentMatchesWindowService.getMatches();
+    const heroIds = collectHeroIds(sourceMatches);
+    const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
+    const rawCandidates: RawSituationalCandidate[] = [];
+    let rawPositiveSignalCount = 0;
+    let evaluatedActionCount = 0;
+
+    scan:
+    for (const heroId of heroIds) {
+      const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(heroId);
+      if (!policy) {
+        continue;
+      }
+
+      const enemyHeroIds = heroIds.filter((enemyHeroId) => enemyHeroId !== heroId);
+      const states = [...policy.statesByKey.values()].sort(
+        (left, right) => right.observationCount - left.observationCount,
+      );
+
+      for (const state of states) {
+        const itemIds = expandInventoryStateKey(state.stateKey);
+        if (!itemIds) {
+          continue;
+        }
+
+        const actions = [...state.nextActions].sort(
+          (left, right) => right.count - left.count,
+        );
+        for (const action of actions) {
+          if (evaluatedActionCount >= maxEvaluatedActions) {
+            break scan;
+          }
+          evaluatedActionCount += 1;
+
+          const evaluation = await this.heroBuildMatchupStatisticsService.evaluate({
+            heroId,
+            stateKey: state.stateKey,
+            actionKey: action.actionKey,
+            enemyHeroIds,
+          });
+
+          for (const evidence of evaluation.evidence) {
+            if (evidence.lower95InteractionOddsRatio <= 1) {
+              continue;
+            }
+            rawPositiveSignalCount += 1;
+            rawCandidates.push({
+              heroId,
+              enemyHeroId: evidence.enemyHeroId,
+              stateKey: state.stateKey,
+              itemIds,
+              action,
+              evidence,
+            });
+          }
+
+          trimRawCandidates(rawCandidates, limit);
+        }
+      }
+    }
+
+    rawCandidates.sort(compareRawCandidates);
+    const validationCandidates = deduplicateStateEnemyCandidates(rawCandidates).slice(
+      0,
+      SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES,
+    );
+    const examples: SituationalRecommendationDiagnosticExample[] = [];
+
+    for (const candidate of validationCandidates) {
+      const requestBody: HeroBuildContextualRecommendationRequest = {
+        heroId: candidate.heroId,
+        itemIds: [...candidate.itemIds],
+        gameTimeS: Math.max(0, Math.round(candidate.action.averageGameTimeS)),
+        enemyHeroIds: [candidate.enemyHeroId],
+        limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
+      };
+      const response = await this.heroBuildRecommendationService.recommend(
+        requestBody,
+      ) as ContextualHeroBuildRecommendationResponse;
+      const visibleActions = [response.action, ...response.alternatives];
+      const situationalAction = response.action.isSituational
+        ? response.action
+        : visibleActions.find((action) => action.isSituational);
+
+      if (!situationalAction) {
+        continue;
+      }
+
+      examples.push(
+        createDiagnosticExample(
+          candidate,
+          requestBody,
+          response,
+          situationalAction,
+        ),
+      );
+    }
+
+    const uniqueExamples = deduplicateExamples(examples).sort(compareExamples);
+    const selectedExamples = uniqueExamples.slice(0, limit);
+
+    return {
+      generatedAt: new Date().toISOString(),
+      sourceMatchCount: sourceMatches.length,
+      sourceHeroCount: heroIds.length,
+      policyActionOptionCount: policyStatus.actionOptionCount,
+      evaluatedActionCount,
+      scanTruncated: evaluatedActionCount < policyStatus.actionOptionCount,
+      rawPositiveSignalCount,
+      validatedStateEnemyCount: validationCandidates.length,
+      visibleSituationalExampleCount: uniqueExamples.length,
+      warningExampleCount: uniqueExamples.filter(
+        (example) => example.wouldTriggerWarning,
+      ).length,
+      examples: selectedExamples,
+    };
+  }
+}
+
+function collectHeroIds(
+  matches: ReturnType<RecentMatchesWindowService['getMatches']>,
+): number[] {
+  const heroIds = matches.flatMap((match) =>
+    match.players
+      .map((player) => player.heroId)
+      .filter((heroId) => Number.isSafeInteger(heroId) && heroId > 0)
+      .map(canonicalHeroId),
+  );
+  return [...new Set(heroIds)].sort((left, right) => left - right);
+}
+
+function expandInventoryStateKey(stateKey: string): number[] | undefined {
+  const itemCounts = parseInventoryStateKey(stateKey);
+  if (!itemCounts) {
+    return undefined;
+  }
+
+  const itemIds: number[] = [];
+  for (const [itemId, count] of [...itemCounts.entries()].sort(
+    ([leftItemId], [rightItemId]) => leftItemId - rightItemId,
+  )) {
+    for (let index = 0; index < count; index += 1) {
+      itemIds.push(itemId);
+    }
+  }
+  return itemIds;
+}
+
+function trimRawCandidates(
+  candidates: RawSituationalCandidate[],
+  requestedLimit: number,
+): void {
+  const retainedLimit = Math.min(
+    SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES * 4,
+    Math.max(100, requestedLimit * 20),
+  );
+  if (candidates.length <= retainedLimit * 2) {
+    return;
+  }
+  candidates.sort(compareRawCandidates);
+  candidates.splice(retainedLimit);
+}
+
+function deduplicateStateEnemyCandidates(
+  candidates: readonly RawSituationalCandidate[],
+): RawSituationalCandidate[] {
+  const result: RawSituationalCandidate[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.heroId}:${candidate.enemyHeroId}:${candidate.stateKey}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(candidate);
+  }
+  return result;
+}
+
+function createDiagnosticExample(
+  candidate: RawSituationalCandidate,
+  requestBody: HeroBuildContextualRecommendationRequest,
+  response: ContextualHeroBuildRecommendationResponse,
+  action: ContextualHeroBuildRecommendationAction,
+): SituationalRecommendationDiagnosticExample {
+  const isPrimaryRecommendation = action.actionKey === response.action.actionKey;
+  return {
+    heroId: candidate.heroId,
+    enemyHeroId: candidate.enemyHeroId,
+    stateKey: candidate.stateKey,
+    itemIds: [...candidate.itemIds],
+    gameTimeS: requestBody.gameTimeS,
+    itemId: action.itemId,
+    actionKey: action.actionKey,
+    actionType: action.type,
+    baseRank: action.baseRank,
+    contextualRank: action.contextualRank,
+    wasInBaseBuild: action.wasInBaseBuild,
+    wasPromotedByMatchup: action.wasPromotedByMatchup,
+    wasInsertedByMatchup: action.wasInsertedByMatchup,
+    isPrimaryRecommendation,
+    wouldTriggerWarning:
+      isPrimaryRecommendation &&
+      action.isSituational &&
+      action.wasPromotedByMatchup,
+    lower95OddsRatio: action.situationalLower95OddsRatio ?? 1,
+    interactionOddsRatio: action.situationalInteractionOddsRatio ?? 1,
+    matchupObservationCount: action.matchupObservationCount,
+    evaluatedCandidateCount: response.evaluatedCandidateCount,
+    situationalCandidateCount: response.situationalCandidateCount,
+    promotedSituationalCandidateCount:
+      response.promotedSituationalCandidateCount,
+    insertedSituationalCandidateCount:
+      response.insertedSituationalCandidateCount,
+    requestBody: {
+      ...requestBody,
+      itemIds: [...requestBody.itemIds],
+      enemyHeroIds: [...(requestBody.enemyHeroIds ?? [])],
+    },
+  };
+}
+
+function deduplicateExamples(
+  examples: readonly SituationalRecommendationDiagnosticExample[],
+): SituationalRecommendationDiagnosticExample[] {
+  const result: SituationalRecommendationDiagnosticExample[] = [];
+  const seen = new Set<string>();
+  for (const example of examples) {
+    const key = [
+      example.heroId,
+      example.enemyHeroId,
+      example.stateKey,
+      example.actionKey,
+    ].join(':');
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(example);
+  }
+  return result;
+}
+
+function compareRawCandidates(
+  left: RawSituationalCandidate,
+  right: RawSituationalCandidate,
+): number {
+  if (
+    left.evidence.lower95InteractionOddsRatio !==
+    right.evidence.lower95InteractionOddsRatio
+  ) {
+    return (
+      right.evidence.lower95InteractionOddsRatio -
+      left.evidence.lower95InteractionOddsRatio
+    );
+  }
+  return (
+    right.evidence.matchupObservationCount -
+    left.evidence.matchupObservationCount
+  );
+}
+
+function compareExamples(
+  left: SituationalRecommendationDiagnosticExample,
+  right: SituationalRecommendationDiagnosticExample,
+): number {
+  if (left.wouldTriggerWarning !== right.wouldTriggerWarning) {
+    return left.wouldTriggerWarning ? -1 : 1;
+  }
+  if (left.isPrimaryRecommendation !== right.isPrimaryRecommendation) {
+    return left.isPrimaryRecommendation ? -1 : 1;
+  }
+  if (left.wasInsertedByMatchup !== right.wasInsertedByMatchup) {
+    return left.wasInsertedByMatchup ? -1 : 1;
+  }
+  if (left.wasPromotedByMatchup !== right.wasPromotedByMatchup) {
+    return left.wasPromotedByMatchup ? -1 : 1;
+  }
+  if (left.lower95OddsRatio !== right.lower95OddsRatio) {
+    return right.lower95OddsRatio - left.lower95OddsRatio;
+  }
+  return right.matchupObservationCount - left.matchupObservationCount;
+}
+
+function normalizePositiveInteger(
+  value: number | undefined,
+  fallback: number,
+  maximum: number,
+): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
+    return fallback;
+  }
+  return Math.min(Number(value), maximum);
+}
