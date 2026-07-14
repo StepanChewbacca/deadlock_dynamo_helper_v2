@@ -178,29 +178,42 @@ function applyActionMarker(
     return;
   }
 
-  container
-    .querySelectorAll(':scope > .situational-item-marker')
-    .forEach((node) => node.remove());
-
+  const existing = container.querySelector(
+    ':scope > .situational-item-marker',
+  ) as HTMLElement | null;
   if (!action?.isSituational) {
+    existing?.remove();
     return;
   }
 
   const badgeText = createSituationalBadgeText(action, heroNames);
   if (!badgeText) {
+    existing?.remove();
     return;
   }
 
+  const evidenceText = createSituationalEvidenceText(action) || '';
+  const markerKey = [
+    action.actionKey,
+    badgeText,
+    evidenceText,
+    action.wasPromotedByMatchup ? 'promoted' : 'situational',
+  ].join('|');
+  if (existing?.dataset.markerKey === markerKey) {
+    return;
+  }
+
+  existing?.remove();
   const marker = document.createElement('span');
   marker.className = action.wasPromotedByMatchup
     ? 'situational-item-marker situational-item-promoted'
     : 'situational-item-marker';
+  marker.dataset.markerKey = markerKey;
 
   const badge = document.createElement('strong');
   badge.textContent = badgeText;
   marker.append(badge);
 
-  const evidenceText = createSituationalEvidenceText(action);
   if (evidenceText) {
     const evidence = document.createElement('span');
     evidence.textContent = evidenceText;
