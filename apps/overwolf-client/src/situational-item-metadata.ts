@@ -10,6 +10,7 @@ export interface SituationalItemWarning {
   itemName: string;
   enemyHeroId: number;
   enemyHeroName: string;
+  wasInsertedByMatchup: boolean;
   lower95OddsRatio?: number;
   matchupObservationCount?: number;
 }
@@ -40,6 +41,7 @@ export function createSituationalItemWarning(
     itemName: action.item.name,
     enemyHeroId,
     enemyHeroName: resolveHeroName(enemyHeroId, heroNames),
+    wasInsertedByMatchup: Boolean(action.wasInsertedByMatchup),
     lower95OddsRatio: finitePositive(action.situationalLower95OddsRatio),
     matchupObservationCount: safeNonNegativeInteger(
       action.matchupObservationCount,
@@ -83,7 +85,9 @@ export function createSituationalEvidenceText(
     parts.push(`n=${observationCount}`);
   }
 
-  if (action.wasPromotedByMatchup) {
+  if (action.wasInsertedByMatchup) {
+    parts.push('inserted into build');
+  } else if (action.wasPromotedByMatchup) {
     parts.push('promoted in build');
   }
 
