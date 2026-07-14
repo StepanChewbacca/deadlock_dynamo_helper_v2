@@ -57,7 +57,7 @@ export class AnalysisOperationsController {
     @Query('maxEvaluatedActions') maxEvaluatedActions?: string,
     @Query('maxValidatedStates') maxValidatedStates?: string,
   ) {
-    return this.situationalRecommendationDiagnosticsService.findExamples({
+    const result = await this.situationalRecommendationDiagnosticsService.findExamples({
       limit: parseOptionalPositiveInteger(limit, 'limit'),
       maxEvaluatedActions: parseOptionalPositiveInteger(
         maxEvaluatedActions,
@@ -68,6 +68,18 @@ export class AnalysisOperationsController {
         'maxValidatedStates',
       ),
     });
+    const examples = result.examples.map((example) => ({
+      ...example,
+      wouldTriggerWarning: example.isPrimaryRecommendation,
+    }));
+
+    return {
+      ...result,
+      warningExampleCount: examples.filter(
+        (example) => example.wouldTriggerWarning,
+      ).length,
+      examples,
+    };
   }
 
   @Get('raw-matches/replay/status')
