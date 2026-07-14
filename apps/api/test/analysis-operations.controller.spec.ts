@@ -22,17 +22,60 @@ describe('AnalysisOperationsController', () => {
 
   it('delegates situational example discovery with parsed limits', async () => {
     const situationalDiagnostics = {
-      findExamples: jest.fn().mockResolvedValue({ examples: [] }),
+      findExamples: jest.fn().mockResolvedValue({
+        warningExampleCount: 0,
+        examples: [],
+      }),
     };
     const controller = createController({ situationalDiagnostics });
 
     await expect(
       controller.getSituationalExamples('7', '12000', '8'),
-    ).resolves.toEqual({ examples: [] });
+    ).resolves.toEqual({
+      warningExampleCount: 0,
+      examples: [],
+    });
     expect(situationalDiagnostics.findExamples).toHaveBeenCalledWith({
       limit: 7,
       maxEvaluatedActions: 12000,
       maxValidatedStates: 8,
+    });
+  });
+
+  it('marks a primary supported item as warning-ready without rank promotion', async () => {
+    const situationalDiagnostics = {
+      findExamples: jest.fn().mockResolvedValue({
+        warningExampleCount: 0,
+        examples: [
+          {
+            actionKey: 'BUY:100',
+            isPrimaryRecommendation: true,
+            wasPromotedByMatchup: false,
+            wouldTriggerWarning: false,
+          },
+          {
+            actionKey: 'BUY:200',
+            isPrimaryRecommendation: false,
+            wasPromotedByMatchup: true,
+            wouldTriggerWarning: false,
+          },
+        ],
+      }),
+    };
+    const controller = createController({ situationalDiagnostics });
+
+    await expect(controller.getSituationalExamples()).resolves.toEqual({
+      warningExampleCount: 1,
+      examples: [
+        expect.objectContaining({
+          actionKey: 'BUY:100',
+          wouldTriggerWarning: true,
+        }),
+        expect.objectContaining({
+          actionKey: 'BUY:200',
+          wouldTriggerWarning: false,
+        }),
+      ],
     });
   });
 
