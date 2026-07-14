@@ -1,4 +1,4 @@
-import { SituationalItemWarning } from './situational-item-metadata';
+import type { SituationalItemWarning } from './situational-item-metadata';
 
 const ow = (window as any).overwolf;
 
