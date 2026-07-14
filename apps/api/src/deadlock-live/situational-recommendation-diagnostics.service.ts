@@ -16,6 +16,7 @@ import {
 } from './hero-build-recommendation.service';
 import {
   HeroBuildPolicyNextAction,
+  HeroBuildPolicyState,
   HeroBuildTransitionAggregationService,
 } from './hero-build-transition-aggregation.service';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
@@ -34,6 +35,25 @@ interface RawSituationalCandidate {
   itemIds: number[];
   action: HeroBuildPolicyNextAction;
   evidence: GraphMatchupEvidence;
+}
+
+interface HeroScanCursor {
+  heroId: number;
+  enemyHeroIds: number[];
+  states: HeroBuildPolicyState[];
+  stateIndex: number;
+  actionIndex: number;
+  currentState?: HeroBuildPolicyState;
+  currentItemIds: number[];
+  currentActions: HeroBuildPolicyNextAction[];
+}
+
+interface HeroScanAction {
+  heroId: number;
+  enemyHeroIds: number[];
+  state: HeroBuildPolicyState;
+  itemIds: number[];
+  action: HeroBuildPolicyNextAction;
 }
 
 export interface SituationalRecommendationDiagnosticExample {
@@ -68,6 +88,7 @@ export interface SituationalRecommendationDiagnosticResult {
   sourceHeroCount: number;
   policyActionOptionCount: number;
   evaluatedActionCount: number;
+  evaluatedHeroCount: number;
   scanTruncated: boolean;
   rawPositiveSignalCount: number;
   validatedStateEnemyCount: number;
@@ -120,61 +141,59 @@ export class SituationalRecommendationDiagnosticsService {
     const heroIds = collectHeroIds(sourceMatches);
     const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
     const rawCandidates: RawSituationalCandidate[] = [];
+    const evaluatedHeroIds = new Set<number>();
     let rawPositiveSignalCount = 0;
     let evaluatedActionCount = 0;
+    let activeCursors = createHeroScanCursors(
+      heroIds,
+      this.heroBuildTransitionAggregationService,
+    );
 
-    scan:
-    for (const heroId of heroIds) {
-      const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(heroId);
-      if (!policy) {
-        continue;
-      }
+    while (
+      evaluatedActionCount < maxEvaluatedActions &&
+      activeCursors.length > 0
+    ) {
+      const nextActiveCursors: HeroScanCursor[] = [];
 
-      const enemyHeroIds = heroIds.filter((enemyHeroId) => enemyHeroId !== heroId);
-      const states = [...policy.statesByKey.values()].sort(
-        (left, right) => right.observationCount - left.observationCount,
-      );
+      for (const cursor of activeCursors) {
+        if (evaluatedActionCount >= maxEvaluatedActions) {
+          break;
+        }
 
-      for (const state of states) {
-        const itemIds = expandInventoryStateKey(state.stateKey);
-        if (!itemIds) {
+        const scanAction = takeNextHeroScanAction(cursor);
+        if (!scanAction) {
           continue;
         }
+        nextActiveCursors.push(cursor);
+        evaluatedActionCount += 1;
+        evaluatedHeroIds.add(scanAction.heroId);
 
-        const actions = [...state.nextActions].sort(
-          (left, right) => right.count - left.count,
-        );
-        for (const action of actions) {
-          if (evaluatedActionCount >= maxEvaluatedActions) {
-            break scan;
+        const evaluation = await this.heroBuildMatchupStatisticsService.evaluate({
+          heroId: scanAction.heroId,
+          stateKey: scanAction.state.stateKey,
+          actionKey: scanAction.action.actionKey,
+          enemyHeroIds: scanAction.enemyHeroIds,
+        });
+
+        for (const evidence of evaluation.evidence) {
+          if (evidence.lower95InteractionOddsRatio <= 1) {
+            continue;
           }
-          evaluatedActionCount += 1;
-
-          const evaluation = await this.heroBuildMatchupStatisticsService.evaluate({
-            heroId,
-            stateKey: state.stateKey,
-            actionKey: action.actionKey,
-            enemyHeroIds,
+          rawPositiveSignalCount += 1;
+          rawCandidates.push({
+            heroId: scanAction.heroId,
+            enemyHeroId: evidence.enemyHeroId,
+            stateKey: scanAction.state.stateKey,
+            itemIds: [...scanAction.itemIds],
+            action: scanAction.action,
+            evidence,
           });
-
-          for (const evidence of evaluation.evidence) {
-            if (evidence.lower95InteractionOddsRatio <= 1) {
-              continue;
-            }
-            rawPositiveSignalCount += 1;
-            rawCandidates.push({
-              heroId,
-              enemyHeroId: evidence.enemyHeroId,
-              stateKey: state.stateKey,
-              itemIds,
-              action,
-              evidence,
-            });
-          }
-
-          trimRawCandidates(rawCandidates, limit, maxValidatedStates);
         }
+
+        trimRawCandidates(rawCandidates, limit, maxValidatedStates);
       }
+
+      activeCursors = nextActiveCursors;
     }
 
     rawCandidates.sort(compareRawCandidates);
@@ -229,6 +248,7 @@ export class SituationalRecommendationDiagnosticsService {
       sourceHeroCount: heroIds.length,
       policyActionOptionCount: policyStatus.actionOptionCount,
       evaluatedActionCount,
+      evaluatedHeroCount: evaluatedHeroIds.size,
       scanTruncated: evaluatedActionCount < policyStatus.actionOptionCount,
       rawPositiveSignalCount,
       validatedStateEnemyCount,
@@ -241,6 +261,78 @@ export class SituationalRecommendationDiagnosticsService {
       examples: selectedExamples,
     };
   }
+}
+
+function createHeroScanCursors(
+  heroIds: readonly number[],
+  aggregationService: Pick<HeroBuildTransitionAggregationService, 'getHeroPolicy'>,
+): HeroScanCursor[] {
+  const cursors: HeroScanCursor[] = [];
+
+  for (const heroId of heroIds) {
+    const policy = aggregationService.getHeroPolicy(heroId);
+    if (!policy) {
+      continue;
+    }
+
+    cursors.push({
+      heroId,
+      enemyHeroIds: heroIds.filter((enemyHeroId) => enemyHeroId !== heroId),
+      states: [...policy.statesByKey.values()].sort(
+        (left, right) => right.observationCount - left.observationCount,
+      ),
+      stateIndex: 0,
+      actionIndex: 0,
+      currentItemIds: [],
+      currentActions: [],
+    });
+  }
+
+  return cursors;
+}
+
+function takeNextHeroScanAction(
+  cursor: HeroScanCursor,
+): HeroScanAction | undefined {
+  while (cursor.actionIndex >= cursor.currentActions.length) {
+    const state = cursor.states[cursor.stateIndex];
+    if (!state) {
+      return undefined;
+    }
+    cursor.stateIndex += 1;
+
+    const itemIds = expandInventoryStateKey(state.stateKey);
+    if (!itemIds) {
+      continue;
+    }
+
+    const actions = [...state.nextActions].sort(
+      (left, right) => right.count - left.count,
+    );
+    if (actions.length === 0) {
+      continue;
+    }
+
+    cursor.currentState = state;
+    cursor.currentItemIds = itemIds;
+    cursor.currentActions = actions;
+    cursor.actionIndex = 0;
+  }
+
+  const state = cursor.currentState;
+  const action = cursor.currentActions[cursor.actionIndex];
+  if (!state || !action) {
+    return undefined;
+  }
+  cursor.actionIndex += 1;
+
+  return {
+    heroId: cursor.heroId,
+    enemyHeroIds: [...cursor.enemyHeroIds],
+    state,
+    itemIds: [...cursor.currentItemIds],
+    action,
+  };
 }
 
 function collectHeroIds(
