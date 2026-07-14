@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   calculateMissingRecentMatchCount,
   RECENT_MATCH_CRAWL_CRON,
@@ -15,5 +17,14 @@ describe('recent match crawler', () => {
     expect(calculateMissingRecentMatchCount(9_999)).toBe(1);
     expect(calculateMissingRecentMatchCount(10_000)).toBe(0);
     expect(calculateMissingRecentMatchCount(12_000)).toBe(0);
+  });
+
+  it('does not restrict discovery to only the maximum average badge', () => {
+    const source = readFileSync(
+      resolve(__dirname, '../src/deadlock-live/recent-match-crawler.service.ts'),
+      'utf8',
+    );
+
+    expect(source).not.toContain('min_average_badge');
   });
 });
