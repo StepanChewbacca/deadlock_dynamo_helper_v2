@@ -51,6 +51,7 @@ import { ReferenceDataImportService } from './reference-data-import.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
 import { RulesetResolverService } from './ruleset-resolver.service';
 import { RulesetWindowManifestService } from './ruleset-window-manifest.service';
+import { SituationalRecommendationDiagnosticsService } from './situational-recommendation-diagnostics.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
@@ -97,6 +98,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       useClass: ContextualHeroBuildRecommendationService,
     },
     HeroBuildRecommendationPresentationService,
+    SituationalRecommendationDiagnosticsService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
@@ -128,6 +130,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildMatchupStatisticsService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
+    SituationalRecommendationDiagnosticsService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
