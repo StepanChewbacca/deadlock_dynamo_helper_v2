@@ -32,8 +32,10 @@ function createAction(
       evidenceLevel: 'OBSERVED',
       text: 'Observed from this state.',
     },
+    wasInBaseBuild: true,
     isSituational: true,
     wasPromotedByMatchup: true,
+    wasInsertedByMatchup: false,
     situationalAgainstHeroId: 13,
     situationalLower95OddsRatio: 1.25,
     matchupObservationCount: 42,
@@ -73,9 +75,28 @@ describe('situational item metadata', () => {
       key: 'match-1:BUY:100:13',
       itemName: 'Reactive Barrier',
       enemyHeroName: 'Haze',
+      wasInsertedByMatchup: false,
       lower95OddsRatio: 1.25,
       matchupObservationCount: 42,
     }));
+  });
+
+  it('preserves whether Dynamo inserted an item absent from the base build', () => {
+    const warning = createSituationalItemWarning(
+      createSnapshot(createAction({
+        wasInBaseBuild: false,
+        wasInsertedByMatchup: true,
+      })),
+      { 13: 'Haze' },
+    );
+
+    expect(warning).toEqual(expect.objectContaining({
+      wasInsertedByMatchup: true,
+    }));
+    expect(createSituationalEvidenceText(createAction({
+      wasInBaseBuild: false,
+      wasInsertedByMatchup: true,
+    }))).toBe('95% lower OR x1.25 | n=42 | inserted into build');
   });
 
   it('does not create a warning when a situational item remains at its base rank', () => {
