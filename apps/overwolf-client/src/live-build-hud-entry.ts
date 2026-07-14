@@ -13,6 +13,7 @@ import {
   createSituationalItemWarning,
   SituationalItemWarning,
 } from './situational-item-metadata';
+import { decorateLiveBuildRecommendation } from './situational-item-ui';
 
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
 const MATCH_INFO_REFRESH_MS = 2000;
@@ -41,12 +42,15 @@ function initializeInGameHud(): void {
   ) => {
     disableLegacyBuildGuide();
     showLiveBuildRecommendation(snapshot);
+    decorateLiveBuildRecommendation(snapshot);
     resizeOverlayToContent();
   };
 
   mainWindow.inGameLiveBuildRecommendationClear = () => {
     disableLegacyBuildGuide();
-    showLiveBuildRecommendation(createWaitingSnapshot(''));
+    const waiting = createWaitingSnapshot('');
+    showLiveBuildRecommendation(waiting);
+    decorateLiveBuildRecommendation(waiting);
     resizeOverlayToContent();
   };
 
@@ -56,11 +60,10 @@ function initializeInGameHud(): void {
     }
   };
 
-  if (mainWindow.latestLiveBuildRecommendation) {
-    showLiveBuildRecommendation(mainWindow.latestLiveBuildRecommendation);
-  } else {
-    showLiveBuildRecommendation(createWaitingSnapshot(''));
-  }
+  const initialSnapshot = mainWindow.latestLiveBuildRecommendation
+    ?? createWaitingSnapshot('');
+  showLiveBuildRecommendation(initialSnapshot);
+  decorateLiveBuildRecommendation(initialSnapshot);
   resizeOverlayToContent();
 }
 
