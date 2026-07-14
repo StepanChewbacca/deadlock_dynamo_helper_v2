@@ -3,6 +3,11 @@ export interface DesktopBuildRowIdentity {
   itemName: string;
 }
 
+interface NormalizedDesktopBuildRowIdentity {
+  action: string;
+  itemName: string;
+}
+
 const ROOT_SELECTOR = '#live-build-desktop-root';
 const PHASE_SELECTOR = '.live-build-phase';
 const EMPTY_ROW_CLASS = 'live-build-empty-phase';
@@ -91,24 +96,38 @@ export function deduplicateDesktopBuildRows(): void {
 export function selectUniqueBuildRowIndexes(
   rows: readonly DesktopBuildRowIdentity[],
 ): number[] {
+  const normalizedRows = rows.map(normalizeRowIdentity);
   const seenAcquisitionItems = new Set<string>();
   const indexes: number[] = [];
 
-  for (const [index, row] of rows.entries()) {
-    const action = normalizeIdentityPart(row.action).toUpperCase();
-    const itemName = normalizeIdentityPart(row.itemName);
-    const isAcquisition = action === 'BUY' || action === 'UPGRADE';
+  for (const [index, row] of normalizedRows.entries()) {
+    if (row.action === 'SELL' && row.itemName) {
+      const previousIndex = indexes.at(-1);
+      const previousRow = previousIndex === undefined
+        ? undefined
+        : normalizedRows[previousIndex];
 
-    if (!isAcquisition || !itemName) {
+      if (
+        previousRow &&
+        isAcquisitionAction(previousRow.action) &&
+        previousRow.itemName === row.itemName
+      ) {
+        indexes.pop();
+        seenAcquisitionItems.delete(row.itemName);
+        continue;
+      }
+    }
+
+    if (!isAcquisitionAction(row.action) || !row.itemName) {
       indexes.push(index);
       continue;
     }
 
-    if (seenAcquisitionItems.has(itemName)) {
+    if (seenAcquisitionItems.has(row.itemName)) {
       continue;
     }
 
-    seenAcquisitionItems.add(itemName);
+    seenAcquisitionItems.add(row.itemName);
     indexes.push(index);
   }
 
@@ -183,6 +202,19 @@ function updateBuildActionSummary(root: Element, count: number): void {
     }
     return;
   }
+}
+
+function normalizeRowIdentity(
+  row: DesktopBuildRowIdentity,
+): NormalizedDesktopBuildRowIdentity {
+  return {
+    action: normalizeIdentityPart(row.action).toUpperCase(),
+    itemName: normalizeIdentityPart(row.itemName),
+  };
+}
+
+function isAcquisitionAction(action: string): boolean {
+  return action === 'BUY' || action === 'UPGRADE';
 }
 
 function normalizeIdentityPart(value: string): string {
