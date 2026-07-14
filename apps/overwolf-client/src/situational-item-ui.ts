@@ -1,12 +1,12 @@
-import {
+import type {
   LiveBuildRecommendationAction,
   LiveBuildRecommendationSnapshot,
 } from './live-build-recommendation-poller';
 import {
   createSituationalBadgeText,
   createSituationalEvidenceText,
-  HeroNameMap,
 } from './situational-item-metadata';
+import type { HeroNameMap } from './situational-item-metadata';
 
 const STYLE_ID = 'situational-item-marker-styles';
 const FETCH_PATCH_KEY = '__deadlockSituationalFetchPatched';
