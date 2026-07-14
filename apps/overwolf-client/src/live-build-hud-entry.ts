@@ -9,10 +9,8 @@ import {
   LiveBuildRecommendationSnapshot,
 } from './live-build-recommendation-poller';
 import { showLiveBuildRecommendation } from './live-build-recommendation-ui';
-import {
-  createSituationalItemWarning,
-  SituationalItemWarning,
-} from './situational-item-metadata';
+import { createSituationalItemWarning } from './situational-item-metadata';
+import type { SituationalItemWarning } from './situational-item-metadata';
 import { decorateLiveBuildRecommendation } from './situational-item-ui';
 
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
