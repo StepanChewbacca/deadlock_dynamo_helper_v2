@@ -1,10 +1,11 @@
+import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 import type { SituationalItemWarning } from './situational-item-metadata';
 
 const ow = (window as any).overwolf;
 
 if (ow?.windows) {
   ow.windows.getCurrentWindow((result: any) => {
-    if (!result?.success || !result.window) {
+    if (!isSuccessfulOverwolfResult(result) || !result.window) {
       return;
     }
 
