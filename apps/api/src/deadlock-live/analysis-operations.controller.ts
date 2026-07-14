@@ -1,5 +1,4 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
-import { AllHeroesAnalysisService, RecommendBuildDto } from './all-heroes-analysis.service';
 import {
   HistoricalMatchReplayService,
   ReplayHistoricalMatchesDto,
@@ -8,20 +7,19 @@ import {
   NormalizeRawMatchMetadataDto,
   RawMatchMetadataNormalizerService,
 } from './raw-match-metadata-normalizer.service';
+import { RecentMatchCrawlerService } from './recent-match-crawler.service';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
 import {
   ResolvePendingRulesetsDto,
   RulesetResolverService,
 } from './ruleset-resolver.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
-import { SituationalRecommendationDto, SituationalRecommendationService } from './situational-recommendation.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
 @Controller('deadlock/analysis')
-export class AllHeroesAnalysisController {
+export class AnalysisOperationsController {
   constructor(
-    private readonly service: AllHeroesAnalysisService,
-    private readonly situationalRecommendationService: SituationalRecommendationService,
+    private readonly recentMatchCrawlerService: RecentMatchCrawlerService,
     private readonly storedMatchReprocessingService: StoredMatchReprocessingService,
     private readonly recentMatchesWindowService: RecentMatchesWindowService,
     private readonly rulesetResolverService: RulesetResolverService,
@@ -30,24 +28,14 @@ export class AllHeroesAnalysisController {
     private readonly historicalMatchReplayService: HistoricalMatchReplayService,
   ) {}
 
-  @Get('heroes')
-  async getHeroesSummary() {
-    return this.service.getHeroesSummary();
-  }
-
-  @Get('hero/:heroId')
-  async getHeroBuilds(@Param('heroId', ParseIntPipe) heroId: number) {
-    return this.service.getHeroBuilds(heroId);
-  }
-
   @Get('crawl/progress')
   getCrawlProgress() {
-    return this.service.getProgress();
+    return this.recentMatchCrawlerService.getProgress();
   }
 
   @Post('crawl/start')
-  startCrawl() {
-    this.service.startCrawling();
+  async startCrawl() {
+    await this.recentMatchCrawlerService.startCrawling();
     return { success: true, message: 'Background crawl initiated.' };
   }
 
@@ -91,15 +79,5 @@ export class AllHeroesAnalysisController {
     const result = await this.storedMatchReprocessingService.reprocess(matchId);
     await this.recentMatchesWindowService.refresh();
     return result;
-  }
-
-  @Post('recommend')
-  async recommendBuild(@Body() dto: RecommendBuildDto) {
-    return this.service.recommendBuild(dto);
-  }
-
-  @Post('situational/recommend')
-  async recommendSituational(@Body() dto: SituationalRecommendationDto) {
-    return this.situationalRecommendationService.recommend(dto);
   }
 }

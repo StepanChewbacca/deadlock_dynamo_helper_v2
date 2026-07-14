@@ -12,7 +12,6 @@ import { MatchPlayerSkillUpgrade } from '../deadlock-live/entities/match-player-
 import { MatchPlayer } from '../deadlock-live/entities/match-player.entity';
 import { Match } from '../deadlock-live/entities/match.entity';
 import { RawMatchMetadata } from '../deadlock-live/entities/raw-match-metadata.entity';
-import { ShadowModeDecision } from '../deadlock-live/entities/shadow-mode-decision.entity';
 
 export const DATABASE_ENTITIES = [
   Match,
@@ -24,7 +23,6 @@ export const DATABASE_ENTITIES = [
   ItemComponent,
   CrawlerRun,
   CrawlerState,
-  ShadowModeDecision,
   RawMatchMetadata,
   GameRuleset,
   ItemCatalogVersion,

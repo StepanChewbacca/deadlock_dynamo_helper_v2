@@ -1,62 +1,82 @@
+import type { SituationalItemWarning } from './situational-item-metadata';
+
 const ow = (window as any).overwolf;
 
-if (ow && ow.windows) {
+if (ow?.windows) {
   ow.windows.getCurrentWindow((result: any) => {
-    if (result && result.status === 'success' && result.window) {
-      const windowId = result.window.id;
-      const card = document.querySelector('.popup-card') as HTMLElement;
-      const dragHandle = document.querySelector('.popup-drag-handle') as HTMLElement;
-      const textEl = document.querySelector('.popup-text') as HTMLElement;
-      const titleEl = document.querySelector('.popup-title') as HTMLElement;
-
-      const updateUI = () => {
-        const mainWindow = ow.windows.getMainWindow() as any;
-        const isMenuOpen = !!(mainWindow && mainWindow.overlayMenuActive);
-        const isWarningActive = !!(mainWindow && mainWindow.warningActive);
-
-        // Disable click-through in menu mode to allow dragging, enable in gameplay to not block clicks.
-        if (ow.windows.setWindowMouseInputPassThrough) {
-          ow.windows.setWindowMouseInputPassThrough(windowId, !isMenuOpen);
-        }
-
-        if (card) {
-          if (isMenuOpen) {
-            // Show placeholder/helper card during Ctrl+Tab configuration
-            card.style.display = 'flex';
-            card.style.opacity = '0.75';
-            card.style.border = '2px dashed #ff6b4a';
-            if (titleEl) titleEl.textContent = 'Настройка предупреждения';
-            if (textEl) textEl.textContent = 'Зажмите карточку мышкой и перетащите в нужное место (Ctrl+Tab)';
-          } else if (isWarningActive) {
-            // Show active death warning popup
-            card.style.display = 'flex';
-            card.style.opacity = '1';
-            card.style.border = '2px solid #ef4444';
-            if (titleEl) titleEl.textContent = 'Внимание от Динамо';
-            if (textEl) textEl.textContent = 'Ты умираешь как мусор, играй аккуратно!';
-          } else {
-            // Hide card during normal gameplay
-            card.style.display = 'none';
-          }
-        }
-      };
-
-      // Dragging the dedicated handle moves the Overwolf window without changing card layout.
-      if (dragHandle) {
-        dragHandle.addEventListener('mousedown', (event: MouseEvent) => {
-          event.preventDefault();
-          ow.windows.dragMove(windowId);
-        });
-      }
-
-      // Initial update
-      updateUI();
-
-      // Register the update handler on the main background window
-      const mainWindow = ow.windows.getMainWindow() as any;
-      if (mainWindow) {
-        mainWindow.updateWarningUI = updateUI;
-      }
+    if (!result?.success || !result.window) {
+      return;
     }
+
+    const windowId = result.window.id;
+    const card = document.querySelector('.popup-card') as HTMLElement | null;
+    const dragHandle = document.querySelector('.popup-drag-handle') as HTMLElement | null;
+    const textElement = document.querySelector('.popup-text') as HTMLElement | null;
+    const titleElement = document.querySelector('.popup-title') as HTMLElement | null;
+
+    const updateUI = (): void => {
+      const mainWindow = ow.windows.getMainWindow() as any;
+      const isMenuOpen = Boolean(mainWindow?.overlayMenuActive);
+      const warning = mainWindow?.situationalItemWarning as
+        | SituationalItemWarning
+        | undefined;
+
+      ow.windows.setWindowMouseInputPassThrough?.(windowId, !isMenuOpen);
+
+      if (!card) {
+        return;
+      }
+
+      if (isMenuOpen) {
+        card.style.display = 'flex';
+        card.style.opacity = '0.75';
+        card.style.border = '2px dashed #ff6b4a';
+        if (titleElement) {
+          titleElement.textContent = 'Настройка предупреждения';
+        }
+        if (textElement) {
+          textElement.textContent =
+            'Зажмите карточку мышкой и перетащите её в нужное место (Ctrl+Tab)';
+        }
+        return;
+      }
+
+      if (warning) {
+        card.style.display = 'flex';
+        card.style.opacity = '1';
+        card.style.border = '2px solid #ff6b4a';
+        if (titleElement) {
+          titleElement.textContent = 'Внимание от Динамо';
+        }
+        if (textElement) {
+          textElement.textContent = createWarningText(warning);
+        }
+        return;
+      }
+
+      card.style.display = 'none';
+    };
+
+    dragHandle?.addEventListener('mousedown', (event: MouseEvent) => {
+      event.preventDefault();
+      ow.windows.dragMove(windowId);
+    });
+
+    const mainWindow = ow.windows.getMainWindow() as any;
+    mainWindow.updateWarningUI = updateUI;
+    updateUI();
   });
+}
+
+function createWarningText(warning: SituationalItemWarning): string {
+  const details: string[] = [];
+  if (Number.isFinite(warning.lower95OddsRatio)) {
+    details.push(`нижняя граница эффекта x${warning.lower95OddsRatio!.toFixed(2)}`);
+  }
+  if (Number.isSafeInteger(warning.matchupObservationCount)) {
+    details.push(`наблюдений: ${warning.matchupObservationCount}`);
+  }
+
+  const evidence = details.length > 0 ? ` (${details.join(', ')})` : '';
+  return `Ситуативный предмет «${warning.itemName}» поднят в билд против ${warning.enemyHeroName}${evidence}.`;
 }

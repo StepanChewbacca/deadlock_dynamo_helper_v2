@@ -4,12 +4,18 @@ import {
   showLiveBuildDesktop as showBaseDesktop,
   showLiveBuildDesktopError as showBaseDesktopError,
 } from './live-build-desktop-table-ui';
+import {
+  decorateDesktopSituationalItems,
+  initializeDesktopSituationalItems,
+} from './situational-item-ui';
 
 const STYLE_ID = 'live-build-full-route-overrides';
 
 export function showLiveBuildDesktop(snapshot: LiveBuildRecommendationSnapshot): void {
   injectOverrides();
+  initializeDesktopSituationalItems();
   showBaseDesktop(createFullRouteSnapshot(snapshot));
+  decorateDesktopSituationalItems(snapshot);
 }
 
 export function showLiveBuildDesktopError(message: string): void {

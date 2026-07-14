@@ -1,4 +1,6 @@
 import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import { canonicalHeroId } from './hero-id-aliases';
+import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
   filterHeroBuildRecommendationAlternatives,
   HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
@@ -10,21 +12,22 @@ import { HeroBuildRecommendationPresentationService } from './hero-build-recomme
 import {
   HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
-  HeroBuildRecommendationRequest,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
+import { LiveMatchStateService } from './live-match-state.service';
 
 export class RecommendHeroBuildDto {
   heroId!: number;
   itemIds!: number[];
   gameTimeS!: number;
+  enemyHeroIds?: number[];
   limit?: number;
   minAlternativeHistoricalCount?: number;
   minAlternativeConfidence?: number;
 }
 
 interface ValidatedRecommendHeroBuildRequest {
-  recommendationRequest: HeroBuildRecommendationRequest;
+  recommendationRequest: HeroBuildContextualRecommendationRequest;
   alternativeFilter: HeroBuildAlternativeFilterOptions;
 }
 
@@ -34,21 +37,66 @@ export class HeroBuildRecommendationController {
     private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
     private readonly heroBuildRecommendationPresentationService:
       HeroBuildRecommendationPresentationService,
+    private readonly liveMatchStateService: LiveMatchStateService,
   ) {}
 
   @Post()
   async recommend(@Body() dto: RecommendHeroBuildDto) {
     const validated = validateRequest(dto);
-    const response = await this.heroBuildRecommendationService.recommend({
+    const enemyHeroIds =
+      validated.recommendationRequest.enemyHeroIds ??
+      this.resolveLiveEnemyHeroIds(validated.recommendationRequest.heroId);
+    const contextualRequest: HeroBuildContextualRecommendationRequest = {
       ...validated.recommendationRequest,
+      enemyHeroIds,
       limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
-    });
+    };
+    const response = await this.heroBuildRecommendationService.recommend(
+      contextualRequest,
+    );
     const filtered = filterHeroBuildRecommendationAlternatives(
       response,
       validated.alternativeFilter,
     );
 
     return this.heroBuildRecommendationPresentationService.present(filtered);
+  }
+
+  private resolveLiveEnemyHeroIds(heroId: number): number[] {
+    const canonicalRequestedHeroId = canonicalHeroId(heroId);
+    const states = this.liveMatchStateService
+      .getAllStates()
+      .sort(
+        (left, right) =>
+          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
+      );
+
+    for (const state of states) {
+      const players = Object.values(state.playersBySteamId);
+      const localPlayer = players.find(
+        (player) =>
+          player.isLocal === true &&
+          Number.isSafeInteger(player.heroId) &&
+          canonicalHeroId(Number(player.heroId)) === canonicalRequestedHeroId,
+      );
+      if (!localPlayer || localPlayer.teamId === undefined) {
+        continue;
+      }
+
+      return [...new Set(
+        players
+          .filter(
+            (player) =>
+              player.teamId !== undefined &&
+              player.teamId !== localPlayer.teamId &&
+              Number.isSafeInteger(player.heroId) &&
+              Number(player.heroId) > 0,
+          )
+          .map((player) => Number(player.heroId)),
+      )].sort((left, right) => left - right);
+    }
+
+    return [];
   }
 }
 
@@ -99,11 +147,14 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
     );
   }
 
+  const enemyHeroIds = validateEnemyHeroIds(dto.enemyHeroIds);
+
   return {
     recommendationRequest: {
       heroId: dto.heroId,
       itemIds: [...dto.itemIds],
       gameTimeS: dto.gameTimeS,
+      enemyHeroIds,
     },
     alternativeFilter: {
       limit: dto.limit ?? HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
@@ -115,4 +166,23 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
         HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
     },
   };
+}
+
+function validateEnemyHeroIds(value: number[] | undefined): number[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new BadRequestException('enemyHeroIds must be an array.');
+  }
+
+  for (const heroId of value) {
+    if (!Number.isSafeInteger(heroId) || heroId <= 0) {
+      throw new BadRequestException(
+        'Every enemyHeroIds value must be a positive safe integer.',
+      );
+    }
+  }
+
+  return [...new Set(value)].sort((left, right) => left - right);
 }
