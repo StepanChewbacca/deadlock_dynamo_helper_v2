@@ -78,8 +78,8 @@ describe('MatchTimelineNormalizationService', () => {
 
     expect(timeline.actions.map((action) => action.type)).toEqual(['BUY', 'BUY']);
     expect(timeline.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      'MISSING_PURCHASE_TIME',
       'SOLD_BEFORE_PURCHASE',
+      'MISSING_PURCHASE_TIME',
     ]);
   });
 });
