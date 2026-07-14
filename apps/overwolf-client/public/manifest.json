@@ -3,10 +3,10 @@
   "type": "WebApp",
   "meta": {
     "name": "Deadlock Live Probe",
-    "version": "0.0.5",
+    "version": "0.1.0",
     "minimum-overwolf-version": "0.197.0",
     "author": "Antigravity",
-    "description": "Telemetry probe and live next-action build overlay for Deadlock",
+    "description": "Telemetry probe and full live build overlay for Deadlock",
     "icon": "icon.png"
   },
   "data": {
