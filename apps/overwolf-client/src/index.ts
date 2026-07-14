@@ -1,6 +1,7 @@
 import { LiveEventBuffer } from './overwolf/live-event-buffer';
-import { setRequiredFeatures } from './overwolf/set-required-features';
 import { listenOverwolfEvents } from './overwolf/listen-overwolf-events';
+import { setRequiredFeatures } from './overwolf/set-required-features';
+import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 import * as ui from './ui';
 
 const clientId = `client-${Math.random().toString(36).substring(2, 8)}`;
@@ -9,7 +10,12 @@ const ow = (window as any).overwolf;
 
 if (ow?.windows) {
   ow.windows.getCurrentWindow((windowResult: any) => {
-    const currentWindowName = windowResult?.window?.name;
+    if (!isSuccessfulOverwolfResult(windowResult) || !windowResult.window) {
+      ui.logConsole('Failed to resolve the current Overwolf window.');
+      return;
+    }
+
+    const currentWindowName = windowResult.window.name;
     if (currentWindowName === 'in_game') {
       initializeInGameWindow(windowResult.window.id);
       return;
@@ -93,6 +99,8 @@ function initializeBackgroundWindow(): void {
   mainWindow.heroNamesMap = mainWindow.heroNamesMap || {};
   mainWindow.overlayMenuActive = false;
 
+  restoreInGameOverlayWindow();
+  registerOverlayHotkey();
   preloadDynamoWarningWindow(mainWindow);
 
   const customFetch = async (
@@ -148,9 +156,58 @@ function initializeBackgroundWindow(): void {
   void register();
 }
 
+function restoreInGameOverlayWindow(): void {
+  ow.windows.obtainDeclaredWindow('in_game', (result: any) => {
+    if (!isSuccessfulOverwolfResult(result) || !result.window?.id) {
+      ui.logConsole('Failed to obtain the in_game overlay window.');
+      return;
+    }
+
+    ow.windows.restore(result.window.id, () => {
+      ui.logConsole('In-game HUD overlay auto-launched.');
+    });
+  });
+}
+
+function registerOverlayHotkey(): void {
+  ow.settings?.hotkeys?.onPressed?.addListener((info: any) => {
+    if (info?.name !== 'toggle_overlay') {
+      return;
+    }
+
+    ui.logConsole('Hotkey toggle_overlay pressed.');
+    toggleInGameOverlayWindow();
+  });
+}
+
+function toggleInGameOverlayWindow(): void {
+  ow.windows.obtainDeclaredWindow('in_game', (result: any) => {
+    if (!isSuccessfulOverwolfResult(result) || !result.window?.id) {
+      ui.logConsole('Failed to obtain the in_game overlay window for toggling.');
+      return;
+    }
+
+    const windowId = result.window.id;
+    ow.windows.getWindowState(windowId, (stateResult: any) => {
+      if (!isSuccessfulOverwolfResult(stateResult)) {
+        ui.logConsole('Failed to read the in_game overlay window state.');
+        return;
+      }
+
+      const state = stateResult.window_state ?? stateResult.windowState;
+      if (state === 'minimized' || state === 'closed' || state === 'hidden') {
+        ow.windows.restore(windowId);
+        return;
+      }
+
+      ow.windows.minimize(windowId);
+    });
+  });
+}
+
 function preloadDynamoWarningWindow(mainWindow: any): void {
   ow.windows.obtainDeclaredWindow('dynamo_warning', (result: any) => {
-    if (!result?.success || !result.window?.id) {
+    if (!isSuccessfulOverwolfResult(result) || !result.window?.id) {
       return;
     }
 
@@ -163,7 +220,7 @@ function preloadDynamoWarningWindow(mainWindow: any): void {
 
 function restoreHeroNamesFromGep(mainWindow: any): void {
   ow.games.events.getInfo((result: any) => {
-    if (!result?.success || !result.res?.roster) {
+    if (!isSuccessfulOverwolfResult(result) || !result.res?.roster) {
       return;
     }
 
