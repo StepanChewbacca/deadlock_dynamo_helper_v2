@@ -79,8 +79,11 @@ export function createWarningText(warning: SituationalItemWarning): string {
   }
 
   const evidence = details.length > 0 ? ` (${details.join(', ')})` : '';
-  const change = warning.wasInsertedByMatchup
-    ? 'добавлен в билд'
-    : 'поднят в билде';
-  return `Ситуативный предмет «${warning.itemName}» ${change} против ${warning.enemyHeroName}${evidence}.`;
+  if (warning.wasInsertedByMatchup) {
+    return `Ситуативный предмет «${warning.itemName}» добавлен в билд против ${warning.enemyHeroName}${evidence}.`;
+  }
+  if (warning.wasPromotedByMatchup) {
+    return `Ситуативный предмет «${warning.itemName}» поднят в билде против ${warning.enemyHeroName}${evidence}.`;
+  }
+  return `Рекомендуемый предмет «${warning.itemName}» особенно эффективен против ${warning.enemyHeroName}${evidence}.`;
 }
