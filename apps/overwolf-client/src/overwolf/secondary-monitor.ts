@@ -13,12 +13,31 @@ export interface WindowPosition {
   y: number;
 }
 
+export function selectPrimaryDisplay(
+  displays: readonly OverwolfDisplay[],
+): OverwolfDisplay | undefined {
+  return displays.find(
+    (display) => display.is_primary && isUsableDisplay(display),
+  );
+}
+
 export function selectSecondaryDisplay(
   displays: readonly OverwolfDisplay[],
 ): OverwolfDisplay | undefined {
   return displays.find(
     (display) => !display.is_primary && isUsableDisplay(display),
   );
+}
+
+export function selectPreferredDesktopDisplay(
+  displays: readonly OverwolfDisplay[],
+  preferSecondary: boolean,
+): OverwolfDisplay | undefined {
+  if (preferSecondary) {
+    return selectSecondaryDisplay(displays) ?? selectPrimaryDisplay(displays);
+  }
+
+  return selectPrimaryDisplay(displays) ?? selectSecondaryDisplay(displays);
 }
 
 export function centerWindowOnDisplay(
