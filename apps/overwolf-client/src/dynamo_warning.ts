@@ -68,7 +68,7 @@ if (ow?.windows) {
   });
 }
 
-function createWarningText(warning: SituationalItemWarning): string {
+export function createWarningText(warning: SituationalItemWarning): string {
   const details: string[] = [];
   if (Number.isFinite(warning.lower95OddsRatio)) {
     details.push(`нижняя граница эффекта x${warning.lower95OddsRatio!.toFixed(2)}`);
@@ -78,5 +78,8 @@ function createWarningText(warning: SituationalItemWarning): string {
   }
 
   const evidence = details.length > 0 ? ` (${details.join(', ')})` : '';
-  return `Ситуативный предмет «${warning.itemName}» поднят в билд против ${warning.enemyHeroName}${evidence}.`;
+  const change = warning.wasInsertedByMatchup
+    ? 'добавлен в билд'
+    : 'поднят в билде';
+  return `Ситуативный предмет «${warning.itemName}» ${change} против ${warning.enemyHeroName}${evidence}.`;
 }
