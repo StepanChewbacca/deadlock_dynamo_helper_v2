@@ -1,7 +1,7 @@
 import {
   centerWindowOnDisplay,
   OverwolfDisplay,
-  selectSecondaryDisplay,
+  selectPreferredDesktopDisplay,
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
@@ -15,10 +15,11 @@ function updateDesktopVersion(): void {
   }
 }
 
-function moveDesktopWindowToSecondaryMonitor(): void {
+export function showDesktopBuildWindow(preferSecondary = true): void {
   if (
     typeof ow?.windows?.getCurrentWindow !== 'function' ||
     typeof ow?.windows?.changePosition !== 'function' ||
+    typeof ow?.windows?.restore !== 'function' ||
     typeof ow?.utils?.getMonitorsList !== 'function'
   ) {
     return;
@@ -33,49 +34,63 @@ function moveDesktopWindowToSecondaryMonitor(): void {
       return;
     }
 
+    const desktopWindow = windowResult.window;
     ow.utils.getMonitorsList((monitorsResult: any) => {
       if (
         !isSuccessfulOverwolfResult(monitorsResult) ||
         !Array.isArray(monitorsResult.displays)
       ) {
         console.warn('Failed to get the monitor list for desktop positioning.');
+        restoreDesktopWindow(desktopWindow.id);
         return;
       }
 
-      const secondaryDisplay = selectSecondaryDisplay(
+      const targetDisplay = selectPreferredDesktopDisplay(
         monitorsResult.displays as OverwolfDisplay[],
+        preferSecondary,
       );
-      if (!secondaryDisplay) {
-        console.info(
-          'No secondary monitor detected. Keeping the desktop client in its current position.',
-        );
+      if (!targetDisplay) {
+        console.warn('No usable monitor detected for desktop positioning.');
+        restoreDesktopWindow(desktopWindow.id);
         return;
       }
 
       const position = centerWindowOnDisplay(
-        secondaryDisplay,
-        windowResult.window.width,
-        windowResult.window.height,
+        targetDisplay,
+        desktopWindow.width,
+        desktopWindow.height,
       );
 
       ow.windows.changePosition(
-        windowResult.window.id,
+        desktopWindow.id,
         position.x,
         position.y,
         (moveResult: any) => {
           if (!isSuccessfulOverwolfResult(moveResult)) {
-            console.warn('Failed to move the desktop client to the secondary monitor.');
-            return;
+            console.warn('Failed to move the desktop build window.');
           }
 
-          console.info(
-            `Desktop client moved to secondary monitor ${secondaryDisplay.name || secondaryDisplay.id || ''} at ${position.x},${position.y}.`,
-          );
+          restoreDesktopWindow(desktopWindow.id);
         },
       );
     });
   });
 }
+
+function restoreDesktopWindow(windowId: string): void {
+  ow.windows.restore(windowId, (restoreResult: any) => {
+    if (!isSuccessfulOverwolfResult(restoreResult)) {
+      console.warn('Failed to restore the desktop build window.');
+      return;
+    }
+
+    if (typeof ow.windows.bringToFront === 'function') {
+      ow.windows.bringToFront(windowId);
+    }
+  });
+}
+
+(window as any).showDesktopBuildWindow = showDesktopBuildWindow;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', updateDesktopVersion, { once: true });
@@ -83,4 +98,4 @@ if (document.readyState === 'loading') {
   updateDesktopVersion();
 }
 
-moveDesktopWindowToSecondaryMonitor();
+setTimeout(() => showDesktopBuildWindow(true), 250);
