@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
-import { canonicalHeroId } from './all-heroes-analysis.service';
+import { canonicalHeroId } from './hero-id-aliases';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
   filterHeroBuildRecommendationAlternatives,
