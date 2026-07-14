@@ -9,9 +9,14 @@ import {
   LiveBuildRecommendationSnapshot,
 } from './live-build-recommendation-poller';
 import { showLiveBuildRecommendation } from './live-build-recommendation-ui';
+import {
+  createSituationalItemWarning,
+  SituationalItemWarning,
+} from './situational-item-metadata';
 
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
 const MATCH_INFO_REFRESH_MS = 2000;
+const SITUATIONAL_WARNING_DURATION_MS = 15_000;
 
 const ow = (window as any).overwolf;
 
@@ -63,8 +68,44 @@ function initializeBackgroundTraversal(): void {
   const mainWindow = ow.windows.getMainWindow() as any;
   mainWindow.latestLiveBuildRecommendation =
     mainWindow.latestLiveBuildRecommendation ?? null;
+  mainWindow.situationalItemWarning = undefined;
 
   let currentMatchId = '';
+  let warningTimer: ReturnType<typeof setTimeout> | undefined;
+  const shownWarningKeys = new Set<string>();
+
+  const clearSituationalWarning = (): void => {
+    if (warningTimer) {
+      clearTimeout(warningTimer);
+      warningTimer = undefined;
+    }
+    mainWindow.situationalItemWarning = undefined;
+    mainWindow.updateWarningUI?.();
+  };
+
+  const showSituationalWarning = (
+    warning: SituationalItemWarning,
+  ): void => {
+    if (shownWarningKeys.has(warning.key)) {
+      return;
+    }
+
+    shownWarningKeys.add(warning.key);
+    mainWindow.situationalItemWarning = warning;
+    mainWindow.updateWarningUI?.();
+
+    if (warningTimer) {
+      clearTimeout(warningTimer);
+    }
+    warningTimer = setTimeout(() => {
+      if (mainWindow.situationalItemWarning?.key === warning.key) {
+        mainWindow.situationalItemWarning = undefined;
+        mainWindow.updateWarningUI?.();
+      }
+      warningTimer = undefined;
+    }, SITUATIONAL_WARNING_DURATION_MS);
+  };
+
   exposeCurrentMatchId(mainWindow, currentMatchId);
   showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
 
@@ -76,10 +117,19 @@ function initializeBackgroundTraversal(): void {
       if (typeof mainWindow.inGameLiveBuildRecommendationUpdate === 'function') {
         mainWindow.inGameLiveBuildRecommendationUpdate(snapshot);
       }
+
+      const warning = createSituationalItemWarning(
+        snapshot,
+        mainWindow.heroNamesMap || {},
+      );
+      if (warning) {
+        showSituationalWarning(warning);
+      }
     },
     onClear: () => {
       mainWindow.latestLiveBuildRecommendation = null;
       clearLiveBuildDesktop();
+      clearSituationalWarning();
       if (typeof mainWindow.inGameLiveBuildRecommendationClear === 'function') {
         mainWindow.inGameLiveBuildRecommendationClear();
       }
@@ -99,6 +149,9 @@ function initializeBackgroundTraversal(): void {
     }
 
     currentMatchId = normalizedMatchId;
+    shownWarningKeys.clear();
+    clearSituationalWarning();
+
     if (currentMatchId) {
       showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
     } else {
@@ -242,6 +295,7 @@ function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot
     state: 'WAITING_FOR_BACKEND',
     matchId,
     itemIds: [],
+    enemyHeroIds: [],
     isStale: false,
     refreshCount: 0,
     cacheHitCount: 0,
