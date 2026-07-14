@@ -10,6 +10,7 @@ export interface SituationalItemWarning {
   itemName: string;
   enemyHeroId: number;
   enemyHeroName: string;
+  wasPromotedByMatchup: boolean;
   wasInsertedByMatchup: boolean;
   lower95OddsRatio?: number;
   matchupObservationCount?: number;
@@ -25,8 +26,7 @@ export function createSituationalItemWarning(
   const enemyHeroId = Number(action?.situationalAgainstHeroId);
   if (
     snapshot.state !== 'READY' ||
-    !action?.wasPromotedByMatchup ||
-    !action.isSituational ||
+    !action?.isSituational ||
     !action.item ||
     !Number.isSafeInteger(enemyHeroId) ||
     enemyHeroId <= 0
@@ -41,6 +41,7 @@ export function createSituationalItemWarning(
     itemName: action.item.name,
     enemyHeroId,
     enemyHeroName: resolveHeroName(enemyHeroId, heroNames),
+    wasPromotedByMatchup: Boolean(action.wasPromotedByMatchup),
     wasInsertedByMatchup: Boolean(action.wasInsertedByMatchup),
     lower95OddsRatio: finitePositive(action.situationalLower95OddsRatio),
     matchupObservationCount: safeNonNegativeInteger(
