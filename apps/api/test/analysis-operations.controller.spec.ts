@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { AnalysisOperationsController } from '../src/deadlock-live/analysis-operations.controller';
 
 describe('AnalysisOperationsController', () => {
@@ -17,6 +18,29 @@ describe('AnalysisOperationsController', () => {
       message: 'Background crawl initiated.',
     });
     expect(crawler.startCrawling).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates situational example discovery with parsed limits', async () => {
+    const situationalDiagnostics = {
+      findExamples: jest.fn().mockResolvedValue({ examples: [] }),
+    };
+    const controller = createController({ situationalDiagnostics });
+
+    await expect(
+      controller.getSituationalExamples('7', '12000'),
+    ).resolves.toEqual({ examples: [] });
+    expect(situationalDiagnostics.findExamples).toHaveBeenCalledWith({
+      limit: 7,
+      maxEvaluatedActions: 12000,
+    });
+  });
+
+  it('rejects invalid situational diagnostic limits', async () => {
+    const controller = createController();
+
+    await expect(controller.getSituationalExamples('0')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('refreshes the in-memory match window after reprocessing a match', async () => {
@@ -41,6 +65,7 @@ function createController(overrides: {
   crawler?: Record<string, jest.Mock>;
   reprocessing?: Record<string, jest.Mock>;
   recentWindow?: Record<string, jest.Mock>;
+  situationalDiagnostics?: Record<string, jest.Mock>;
 } = {}): AnalysisOperationsController {
   return new AnalysisOperationsController(
     (overrides.crawler ?? {}) as any,
@@ -50,5 +75,6 @@ function createController(overrides: {
     {} as any,
     {} as any,
     {} as any,
+    (overrides.situationalDiagnostics ?? {}) as any,
   );
 }
