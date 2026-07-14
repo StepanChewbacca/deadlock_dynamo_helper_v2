@@ -28,7 +28,7 @@ jobs:
           set +e
           yarn workspace @deadlock-live-probe/api test > /tmp/api-tests.log 2>&1
           status=$?
-          tail -n 250 /tmp/api-tests.log
+          tail -n 80 /tmp/api-tests.log
           exit $status
 
       - name: Build API
@@ -38,5 +38,15 @@ jobs:
           set +e
           yarn workspace @deadlock-live-probe/api build > /tmp/api-build.log 2>&1
           status=$?
-          tail -n 250 /tmp/api-build.log
+          tail -n 80 /tmp/api-build.log
           exit $status
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-validation-logs
+          path: |
+            /tmp/api-tests.log
+            /tmp/api-build.log
+          if-no-files-found: warn
