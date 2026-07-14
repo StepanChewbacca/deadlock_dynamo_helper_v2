@@ -1,4 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
+import { CanonicalBuildSequenceService } from '../src/deadlock-live/canonical-build-sequence.service';
+import { InventoryTimelineReplayService } from '../src/deadlock-live/inventory-timeline-replay.service';
 import { MatchTimelineNormalizationController } from '../src/deadlock-live/match-timeline-normalization.controller';
 import { MatchTimelineNormalizationService } from '../src/deadlock-live/match-timeline-normalization.service';
 import {
@@ -15,6 +17,8 @@ describe('MatchTimelineNormalizationController', () => {
     winningTeam: 0,
     players: [],
   };
+  const inventoryTimelineReplayService = {} as InventoryTimelineReplayService;
+  const canonicalBuildSequenceService = {} as CanonicalBuildSequenceService;
 
   it('waits for the initial memory window refresh before returning a timeline', async () => {
     let ready = false;
@@ -32,6 +36,8 @@ describe('MatchTimelineNormalizationController', () => {
     const controller = new MatchTimelineNormalizationController(
       recentMatchesWindowService,
       matchTimelineNormalizationService,
+      inventoryTimelineReplayService,
+      canonicalBuildSequenceService,
     );
 
     await expect(controller.getMatchTimelines(match.matchId)).resolves.toEqual({
@@ -50,6 +56,8 @@ describe('MatchTimelineNormalizationController', () => {
     const controller = new MatchTimelineNormalizationController(
       recentMatchesWindowService,
       matchTimelineNormalizationService,
+      inventoryTimelineReplayService,
+      canonicalBuildSequenceService,
     );
 
     await expect(controller.getMatchTimelines(match.matchId)).rejects.toBeInstanceOf(NotFoundException);
