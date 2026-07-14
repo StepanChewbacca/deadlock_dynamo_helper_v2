@@ -5,6 +5,7 @@ import { AllHeroesAnalysisFacadeService } from './all-heroes-analysis-facade.ser
 import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
+import { ContextualHeroBuildRecommendationService } from './contextual-hero-build-recommendation.service';
 import { DebugPageController } from './debug-page.controller';
 import { CrawlerRun } from './entities/crawler-run.entity';
 import { CrawlerState } from './entities/crawler-state.entity';
@@ -23,6 +24,7 @@ import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
 import { HeroAnalysisController } from './hero-analysis.controller';
 import { HeroAnalysisService } from './hero-analysis.service';
+import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
 import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
 import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
@@ -97,7 +99,11 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     HeroBuildTransitionAggregationService,
-    HeroBuildRecommendationService,
+    HeroBuildMatchupStatisticsService,
+    {
+      provide: HeroBuildRecommendationService,
+      useClass: ContextualHeroBuildRecommendationService,
+    },
     HeroBuildRecommendationPresentationService,
     RawEventLogService,
     RecentLiveEventsService,
@@ -133,6 +139,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     HeroBuildTransitionAggregationService,
+    HeroBuildMatchupStatisticsService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     RawEventLogService,
