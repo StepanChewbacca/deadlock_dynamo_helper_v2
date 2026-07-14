@@ -16,16 +16,17 @@ interface Deferred<T> {
 }
 
 describe('live build recommendation traversal', () => {
-  it('canonicalizes duplicate inventory items and creates a 30-second time bucket', () => {
+  it('canonicalizes inventory and enemy roster into the traversal key', () => {
     const state = createState(59, [200, 100, 200]);
     const localPlayer = state.playersBySteamId.local;
 
     const input = createTraversalInput(state, localPlayer);
 
     expect(input.itemIds).toEqual([100, 200, 200]);
+    expect(input.enemyHeroIds).toEqual([13]);
     expect(input.inventoryStateKey).toBe('100x1|200x2');
     expect(input.timeBucket).toBe(1);
-    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2:1');
+    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2:13:1');
   });
 
   it('serves repeated observations from the traversal cache within the same time bucket', async () => {
@@ -37,9 +38,13 @@ describe('live build recommendation traversal', () => {
     await harness.service.waitForIdle('match-1');
 
     expect(harness.recommend).toHaveBeenCalledTimes(1);
+    expect(harness.recommend).toHaveBeenCalledWith(
+      expect.objectContaining({ enemyHeroIds: [13] }),
+    );
     expect(harness.present).toHaveBeenCalledTimes(1);
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'READY',
+      enemyHeroIds: [13],
       inventoryStateKey: '100x1',
       timeBucket: 0,
       refreshCount: 1,
@@ -60,6 +65,7 @@ describe('live build recommendation traversal', () => {
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'READY',
       itemIds: [100, 200],
+      enemyHeroIds: [13],
       inventoryStateKey: '100x1|200x1',
       refreshCount: 2,
     });
@@ -99,6 +105,7 @@ describe('live build recommendation traversal', () => {
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'READY',
       itemIds: [100, 200],
+      enemyHeroIds: [13],
       inventoryStateKey: '100x1|200x1',
       refreshCount: 1,
       discardedResultCount: 1,
@@ -118,6 +125,7 @@ describe('live build recommendation traversal', () => {
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'WAITING_FOR_LOCAL_PLAYER',
       itemIds: [],
+      enemyHeroIds: [],
       refreshCount: 0,
       isStale: false,
     });
@@ -156,7 +164,7 @@ function createHarness(recommend = createRecommendMock()) {
 }
 
 function createRecommendMock() {
-  return jest.fn(async (request: { itemIds: number[] }) =>
+  return jest.fn(async (request: { itemIds: number[]; enemyHeroIds?: number[] }) =>
     createRecommendation(request.itemIds),
   );
 }
@@ -172,12 +180,21 @@ function createState(gameTimeSec: number, itemIds: number[]): MinimalMatchState 
         playerName: 'Local Player',
         isLocal: true,
         heroId: 72,
+        teamId: 1,
         items: itemIds.map((itemId) => ({
           id: itemId,
           name: `Item ${itemId}`,
           className: `item_${itemId}`,
           enhanced: false,
         })),
+      },
+      enemy: {
+        steamId: 'enemy',
+        playerName: 'Enemy Player',
+        isLocal: false,
+        heroId: 13,
+        teamId: 2,
+        items: [],
       },
     },
   };
