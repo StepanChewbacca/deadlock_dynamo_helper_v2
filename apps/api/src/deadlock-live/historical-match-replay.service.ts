@@ -68,11 +68,10 @@ export class HistoricalMatchReplayService {
       }
 
       try {
-        const normalization = await this.rawMatchMetadataNormalizerService.normalizeRawMetadata(
-          row,
-          dto.resolveRuleset !== false,
-        );
-        const reprocessing = await this.storedMatchReprocessingService.reprocessRawMetadata(row);
+        const normalization =
+          await this.rawMatchMetadataNormalizerService.normalizeRawMetadata(row, false);
+        const reprocessing =
+          await this.storedMatchReprocessingService.reprocessRawMetadata(row);
         results.push({
           status: 'replayed',
           matchId,
@@ -85,7 +84,7 @@ export class HistoricalMatchReplayService {
           status: 'failed',
           matchId,
           rawMetadataId: row.id,
-          error: (error as Error).message,
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
@@ -101,6 +100,7 @@ export class HistoricalMatchReplayService {
       hasMore: rows.length === limit,
       normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,
       processingVersion: MATCH_METADATA_PROCESSING_VERSION,
+      rulesetResolutionUsed: false,
       results,
     };
   }
@@ -129,8 +129,7 @@ export class HistoricalMatchReplayService {
             WHERE "processingVersion" = $2
           ) AS "replayedLatestMatches",
           COUNT(*) FILTER (
-            WHERE "normalizationVersion" IS DISTINCT FROM $1
-               OR "processingVersion" IS DISTINCT FROM $2
+            WHERE "processingVersion" IS DISTINCT FROM $2
           ) AS "pendingLatestMatches",
           MAX("normalizedAt") AS "lastNormalizedAt",
           MAX("lastProcessedAt") AS "lastProcessedAt"
@@ -150,15 +149,13 @@ export class HistoricalMatchReplayService {
       lastProcessedAt: row.lastProcessedAt,
       normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,
       processingVersion: MATCH_METADATA_PROCESSING_VERSION,
+      rulesetResolutionUsed: false,
     };
   }
 }
 
 export function shouldReplayHistoricalRow(rawMetadata: RawMatchMetadata): boolean {
-  return (
-    rawMetadata.normalizationVersion !== RAW_MATCH_METADATA_NORMALIZATION_VERSION ||
-    rawMetadata.processingVersion !== MATCH_METADATA_PROCESSING_VERSION
-  );
+  return rawMetadata.processingVersion !== MATCH_METADATA_PROCESSING_VERSION;
 }
 
 export function normalizeReplayLimit(value: number | undefined): number {

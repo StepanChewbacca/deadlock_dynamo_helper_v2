@@ -7,7 +7,8 @@ import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
 
-export const RECENT_MATCH_WINDOW_DAYS = 7;
+export const RECENT_MATCH_WINDOW_DAYS = 14;
+export const RECENT_MATCH_TARGET_COUNT = 10_000;
 export const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;
 export const RECENT_MATCH_QUERY_BATCH_SIZE = 500;
 
@@ -57,6 +58,7 @@ export interface RecentMatchSnapshot {
 
 export interface RecentMatchesWindowStatus {
   windowDays: number;
+  targetMatchCount: number;
   refreshIntervalMs: number;
   cutoff: Date;
   matchCount: number;
@@ -125,7 +127,10 @@ export class RecentMatchesWindowService implements OnModuleInit {
     return match ? cloneMatchSnapshot(match) : undefined;
   }
 
-  getPlayersByHeroIds(heroIds: number[], limit = Number.MAX_SAFE_INTEGER): RecentMatchPlayerSnapshot[] {
+  getPlayersByHeroIds(
+    heroIds: number[],
+    limit = Number.MAX_SAFE_INTEGER,
+  ): RecentMatchPlayerSnapshot[] {
     if (heroIds.length === 0 || limit <= 0) {
       return [];
     }
@@ -169,24 +174,35 @@ export class RecentMatchesWindowService implements OnModuleInit {
 
     return {
       windowDays: RECENT_MATCH_WINDOW_DAYS,
+      targetMatchCount: RECENT_MATCH_TARGET_COUNT,
       refreshIntervalMs: RECENT_MATCH_REFRESH_INTERVAL_MS,
       cutoff: getRecentMatchCutoff(now),
       matchCount: matches.length,
       playerCount: matches.reduce((total, match) => total + match.players.length, 0),
       itemEventCount: matches.reduce(
         (total, match) =>
-          total + match.players.reduce((playerTotal, player) => playerTotal + player.itemPurchases.length, 0),
+          total +
+          match.players.reduce(
+            (playerTotal, player) => playerTotal + player.itemPurchases.length,
+            0,
+          ),
         0,
       ),
       skillEventCount: matches.reduce(
         (total, match) =>
-          total + match.players.reduce((playerTotal, player) => playerTotal + player.skillUpgrades.length, 0),
+          total +
+          match.players.reduce(
+            (playerTotal, player) => playerTotal + player.skillUpgrades.length,
+            0,
+          ),
         0,
       ),
       lastRefreshDurationMs: this.lastRefreshDurationMs,
       lastRefreshedAt: cloneDate(this.lastRefreshedAt),
-      oldestMatchStartTime: startTimes.length > 0 ? new Date(Math.min(...startTimes)) : undefined,
-      newestMatchStartTime: startTimes.length > 0 ? new Date(Math.max(...startTimes)) : undefined,
+      oldestMatchStartTime:
+        startTimes.length > 0 ? new Date(Math.min(...startTimes)) : undefined,
+      newestMatchStartTime:
+        startTimes.length > 0 ? new Date(Math.max(...startTimes)) : undefined,
       lastError: this.lastError,
     };
   }
@@ -205,7 +221,8 @@ export class RecentMatchesWindowService implements OnModuleInit {
     try {
       const matches = await this.matchRepository.find({
         where: { startTime: MoreThanOrEqual(cutoff) },
-        order: { startTime: 'DESC' },
+        order: { startTime: 'DESC', matchId: 'DESC' },
+        take: RECENT_MATCH_TARGET_COUNT,
       });
 
       const matchIds = matches.map((match) => Number(match.matchId));
@@ -262,7 +279,11 @@ export class RecentMatchesWindowService implements OnModuleInit {
 
       const status = this.getStatus(now);
       this.logger.log(
-        `Loaded ${status.matchCount} matches, ${status.playerCount} players, ${status.itemEventCount} item events and ${status.skillEventCount} skill events from the last ${RECENT_MATCH_WINDOW_DAYS} days into memory in ${status.lastRefreshDurationMs} ms.`,
+        `Loaded ${status.matchCount}/${RECENT_MATCH_TARGET_COUNT} matches, ` +
+          `${status.playerCount} players, ${status.itemEventCount} item events and ` +
+          `${status.skillEventCount} skill events from the last ` +
+          `${RECENT_MATCH_WINDOW_DAYS} days into memory in ` +
+          `${status.lastRefreshDurationMs} ms.`,
       );
       return status;
     } catch (error) {
@@ -347,7 +368,9 @@ function toRecentMatchItemSnapshot(item: MatchPlayerItem): RecentMatchItemSnapsh
   };
 }
 
-function toRecentMatchSkillSnapshot(skill: MatchPlayerSkillUpgrade): RecentMatchSkillSnapshot {
+function toRecentMatchSkillSnapshot(
+  skill: MatchPlayerSkillUpgrade,
+): RecentMatchSkillSnapshot {
   return {
     id: Number(skill.id),
     abilityId: Number(skill.abilityId),

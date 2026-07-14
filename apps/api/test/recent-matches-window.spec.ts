@@ -7,21 +7,26 @@ import {
   getRecentMatchCutoff,
   RECENT_MATCH_QUERY_BATCH_SIZE,
   RECENT_MATCH_REFRESH_INTERVAL_MS,
+  RECENT_MATCH_TARGET_COUNT,
   RECENT_MATCH_WINDOW_DAYS,
   toRecentMatchSnapshot,
 } from '../src/deadlock-live/recent-matches-window.service';
 
 describe('recent matches window', () => {
-  it('uses an exact rolling seven-day cutoff', () => {
+  it('uses an exact rolling fourteen-day cutoff capped at 10,000 matches', () => {
     const now = new Date('2026-07-12T12:00:00.000Z');
 
-    expect(RECENT_MATCH_WINDOW_DAYS).toBe(7);
+    expect(RECENT_MATCH_WINDOW_DAYS).toBe(14);
+    expect(RECENT_MATCH_TARGET_COUNT).toBe(10_000);
     expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);
-    expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-07-05T12:00:00.000Z');
+    expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-06-28T12:00:00.000Z');
   });
 
   it('splits database identifiers into bounded batches', () => {
-    const values = Array.from({ length: RECENT_MATCH_QUERY_BATCH_SIZE * 2 + 1 }, (_, index) => index + 1);
+    const values = Array.from(
+      { length: RECENT_MATCH_QUERY_BATCH_SIZE * 2 + 1 },
+      (_, index) => index + 1,
+    );
 
     const batches = chunkValues(values, RECENT_MATCH_QUERY_BATCH_SIZE);
 
@@ -45,8 +50,18 @@ describe('recent matches window', () => {
       purchaseTimeS: 120,
       slotOrder: 1,
     });
-    const secondSkill = createSkill({ id: 22, abilityId: 4, upgradeOrder: 1, upgradeTimeS: 240 });
-    const firstSkill = createSkill({ id: 21, abilityId: 1, upgradeOrder: 0, upgradeTimeS: 90 });
+    const secondSkill = createSkill({
+      id: 22,
+      abilityId: 4,
+      upgradeOrder: 1,
+      upgradeTimeS: 240,
+    });
+    const firstSkill = createSkill({
+      id: 21,
+      abilityId: 1,
+      upgradeOrder: 0,
+      upgradeTimeS: 90,
+    });
 
     const player = Object.assign(new MatchPlayer(), {
       id: 7,
@@ -75,9 +90,15 @@ describe('recent matches window', () => {
 
     expect(snapshot.matchId).toBe(91825430);
     expect(snapshot.players).toHaveLength(1);
-    expect(snapshot.players[0].itemPurchases.map((item) => item.itemId)).toEqual([100, 200]);
+    expect(snapshot.players[0].itemPurchases.map((item) => item.itemId)).toEqual([
+      100,
+      200,
+    ]);
     expect(snapshot.players[0].itemPurchases[1].soldTimeS).toBe(700);
-    expect(snapshot.players[0].skillUpgrades.map((skill) => skill.abilityId)).toEqual([1, 4]);
+    expect(snapshot.players[0].skillUpgrades.map((skill) => skill.abilityId)).toEqual([
+      1,
+      4,
+    ]);
     expect(Object.keys(snapshot)).not.toContain('clientVersion');
     expect(Object.keys(snapshot)).not.toContain('rulesetId');
     expect(Object.keys(snapshot)).not.toContain('catalogVersionId');
@@ -100,7 +121,9 @@ function createItem(values: Partial<MatchPlayerItem>): MatchPlayerItem {
   });
 }
 
-function createSkill(values: Partial<MatchPlayerSkillUpgrade>): MatchPlayerSkillUpgrade {
+function createSkill(
+  values: Partial<MatchPlayerSkillUpgrade>,
+): MatchPlayerSkillUpgrade {
   return Object.assign(new MatchPlayerSkillUpgrade(), {
     id: 0,
     matchPlayerId: 7,

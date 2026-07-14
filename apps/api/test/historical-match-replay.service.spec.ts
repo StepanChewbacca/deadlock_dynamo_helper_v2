@@ -3,30 +3,31 @@ import {
   normalizeReplayLimit,
   shouldReplayHistoricalRow,
 } from '../src/deadlock-live/historical-match-replay.service';
-import { RAW_MATCH_METADATA_NORMALIZATION_VERSION } from '../src/deadlock-live/raw-match-metadata-normalizer.service';
 import { MATCH_METADATA_PROCESSING_VERSION } from '../src/deadlock-live/stored-match-reprocessing.service';
 
 describe('HistoricalMatchReplayService helpers', () => {
-  it('replays rows when either version is stale', () => {
+  it('ignores audit normalization versions when processing is current', () => {
     expect(
       shouldReplayHistoricalRow({
-        normalizationVersion: 'old',
+        normalizationVersion: 'old-audit-version',
         processingVersion: MATCH_METADATA_PROCESSING_VERSION,
       } as RawMatchMetadata),
-    ).toBe(true);
+    ).toBe(false);
+  });
 
+  it('replays rows when the version-independent processing logic is stale', () => {
     expect(
       shouldReplayHistoricalRow({
-        normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,
-        processingVersion: 'old',
+        normalizationVersion: 'any-audit-version',
+        processingVersion: 'old-processing-version',
       } as RawMatchMetadata),
     ).toBe(true);
   });
 
-  it('skips rows already processed by current versions', () => {
+  it('skips rows already processed by the current version-independent logic', () => {
     expect(
       shouldReplayHistoricalRow({
-        normalizationVersion: RAW_MATCH_METADATA_NORMALIZATION_VERSION,
+        normalizationVersion: 'any-audit-version',
         processingVersion: MATCH_METADATA_PROCESSING_VERSION,
       } as RawMatchMetadata),
     ).toBe(false);

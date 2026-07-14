@@ -1,37 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AllHeroesAnalysisController } from './all-heroes-analysis.controller';
+import { AllHeroesAnalysisFacadeService } from './all-heroes-analysis-facade.service';
+import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
-import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
-import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
-import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
-import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
-import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
-import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
-import { LiveMatchStateService } from './live-match-state.service';
-import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
-import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
-import { RawEventLogService } from './raw-event-log.service';
-import { RecentLiveEventsService } from './recent-live-events.service';
-import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
-import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
-import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
-import { RecentMatchRosterRepairService } from './recent-match-roster-repair.service';
-import { RecentMatchesWindowController } from './recent-matches-window.controller';
-import { RecentMatchesWindowService } from './recent-matches-window.service';
-import { LiveIngestController } from './live-ingest.controller';
 import { DebugPageController } from './debug-page.controller';
-import { HeroAnalysisService } from './hero-analysis.service';
-import { HeroAnalysisController } from './hero-analysis.controller';
-import { IngestStatusController } from './ingest-status.controller';
-import { IngestStatusService } from './ingest-status.service';
-import { AllHeroesAnalysisService } from './all-heroes-analysis.service';
-import { AllHeroesAnalysisController } from './all-heroes-analysis.controller';
-import { HistoricalCatalogBackfillService } from './historical-catalog-backfill.service';
-import { HistoricalMatchReplayService } from './historical-match-replay.service';
-import { RawMatchMetadataNormalizerService } from './raw-match-metadata-normalizer.service';
-import { RulesetWindowManifestService } from './ruleset-window-manifest.service';
-import { SituationalRecommendationService } from './situational-recommendation.service';
 import { CrawlerRun } from './entities/crawler-run.entity';
 import { CrawlerState } from './entities/crawler-state.entity';
 import { GameRuleset } from './entities/game-ruleset.entity';
@@ -41,19 +15,47 @@ import { ItemCatalogRecipe } from './entities/item-catalog-recipe.entity';
 import { ItemCatalogVersion } from './entities/item-catalog-version.entity';
 import { ItemComponent } from './entities/item-component.entity';
 import { Item } from './entities/item.entity';
-import { Match } from './entities/match.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
-import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
+import { MatchPlayer } from './entities/match-player.entity';
+import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
-import { ReferenceDataImportService } from './reference-data-import.service';
-import { ReferenceDataController } from './reference-data.controller';
 import { ShadowModeDecision } from './entities/shadow-mode-decision.entity';
-import { RawMatchMetadataService } from './raw-match-metadata.service';
-import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
+import { HeroAnalysisController } from './hero-analysis.controller';
+import { HeroAnalysisService } from './hero-analysis.service';
+import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
+import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
+import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
+import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
+import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
+import { HistoricalCatalogBackfillService } from './historical-catalog-backfill.service';
+import { HistoricalMatchReplayService } from './historical-match-replay.service';
+import { IngestStatusController } from './ingest-status.controller';
+import { IngestStatusService } from './ingest-status.service';
+import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
+import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { ItemCatalogImportService } from './item-catalog-import.service';
-import { RulesetResolverService } from './ruleset-resolver.service';
+import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
+import { LiveIngestController } from './live-ingest.controller';
+import { LiveMatchStateService } from './live-match-state.service';
+import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
+import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
+import { RawEventLogService } from './raw-event-log.service';
+import { RawMatchMetadataNormalizerService } from './raw-match-metadata-normalizer.service';
+import { RawMatchMetadataService } from './raw-match-metadata.service';
+import { RecentLiveEventsService } from './recent-live-events.service';
+import { RecentMatchCrawlerService } from './recent-match-crawler.service';
+import { RecentMatchRosterRepairService } from './recent-match-roster-repair.service';
+import { RecentMatchesWindowController } from './recent-matches-window.controller';
+import { RecentMatchesWindowService } from './recent-matches-window.service';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+import { ReferenceDataController } from './reference-data.controller';
+import { ReferenceDataImportService } from './reference-data-import.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
+import { RulesetResolverService } from './ruleset-resolver.service';
+import { RulesetWindowManifestService } from './ruleset-window-manifest.service';
+import { SituationalRecommendationService } from './situational-recommendation.service';
+import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
 @Module({
@@ -100,6 +102,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
+    RecentMatchCrawlerService,
     RecentMatchRosterRepairService,
     RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,
@@ -115,7 +118,10 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HistoricalCatalogBackfillService,
     RulesetWindowManifestService,
     VersionedRecipeGraphService,
-    AllHeroesAnalysisService,
+    {
+      provide: AllHeroesAnalysisService,
+      useClass: AllHeroesAnalysisFacadeService,
+    },
     SituationalRecommendationService,
     ReferenceDataImportService,
     IngestStatusService,
@@ -132,6 +138,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,
+    RecentMatchCrawlerService,
     RecentMatchRosterRepairService,
     RecipeAwareTimelineReconciliationService,
     MatchTimelineNormalizationService,

@@ -1,11 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { isAbilityItem, mapAbilityToSkillNumber } from './hero-abilities';
-import { ItemCatalogItem } from './entities/item-catalog-item.entity';
-import {
-  getCatalogContentVersionId,
-  ItemCatalogVersion,
-} from './entities/item-catalog-version.entity';
 import { Item } from './entities/item.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
@@ -14,7 +9,8 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { RawMatchMetadataService } from './raw-match-metadata.service';
 
-export const MATCH_METADATA_PROCESSING_VERSION = 'match-metadata-v2';
+export const MATCH_METADATA_PROCESSING_VERSION =
+  'match-metadata-v3-version-independent';
 
 interface ParsedBuildItem {
   itemId: number;
@@ -39,9 +35,7 @@ interface ParsedPlayerItems {
 
 interface KnownItemCatalog {
   itemIds: Set<number>;
-  source: 'VERSIONED_CATALOG' | 'LEGACY_ITEMS';
-  catalogVersionId?: number;
-  contentCatalogVersionId?: number;
+  source: 'ITEMS_REFERENCE';
 }
 
 export interface StoredMatchReprocessingResult {
@@ -52,8 +46,6 @@ export interface StoredMatchReprocessingResult {
   skillEventsProcessed: number;
   unknownItemEventsSkipped: number;
   itemCatalogSource: KnownItemCatalog['source'];
-  catalogVersionId?: number;
-  contentCatalogVersionId?: number;
   processingVersion: string;
 }
 
@@ -119,7 +111,7 @@ export class StoredMatchReprocessingService {
       throw new Error(`Raw metadata for match ${matchId} does not contain players`);
     }
 
-    const knownItems = await this.loadKnownItems(manager, rawMetadata.resolvedCatalogVersionId);
+    const knownItems = await this.loadKnownItems(manager);
     const matchRepository = manager.getRepository(Match);
     const matchPlayerRepository = manager.getRepository(MatchPlayer);
     const matchPlayerItemRepository = manager.getRepository(MatchPlayerItem);
@@ -240,51 +232,21 @@ export class StoredMatchReprocessingService {
       skillEventsProcessed,
       unknownItemEventsSkipped,
       itemCatalogSource: knownItems.source,
-      catalogVersionId: knownItems.catalogVersionId,
-      contentCatalogVersionId: knownItems.contentCatalogVersionId,
     };
   }
 
-  private async loadKnownItems(
-    manager: EntityManager,
-    resolvedCatalogVersionId: number | undefined,
-  ): Promise<KnownItemCatalog> {
-    if (resolvedCatalogVersionId) {
-      const catalog = await manager.getRepository(ItemCatalogVersion).findOne({
-        where: { id: resolvedCatalogVersionId },
-      });
-      const contentCatalogVersionId = catalog
-        ? getCatalogContentVersionId(catalog)
-        : resolvedCatalogVersionId;
-      const catalogItems = await manager.getRepository(ItemCatalogItem).find({
-        where: { catalogVersionId: contentCatalogVersionId },
-      });
-      const itemIds = new Set(
-        catalogItems
-          .filter((item) => item.itemType === 'upgrade')
-          .map((item) => Number(item.itemId)),
-      );
-      if (itemIds.size > 0) {
-        return {
-          itemIds,
-          source: 'VERSIONED_CATALOG',
-          catalogVersionId: resolvedCatalogVersionId,
-          contentCatalogVersionId,
-        };
-      }
-    }
-
+  private async loadKnownItems(manager: EntityManager): Promise<KnownItemCatalog> {
     const itemRows = await manager.getRepository(Item).find();
     return {
       itemIds: new Set(itemRows.map((item) => Number(item.itemId))),
-      source: 'LEGACY_ITEMS',
+      source: 'ITEMS_REFERENCE',
     };
   }
 
   private parseItems(
     playerPayload: Record<string, unknown>,
     heroId: number,
-    knownItemIds: Set<number>,
+    knownItemIds: ReadonlySet<number>,
   ): ParsedPlayerItems {
     const buildItems: ParsedBuildItem[] = [];
     const skillItems: ParsedSkillItem[] = [];
