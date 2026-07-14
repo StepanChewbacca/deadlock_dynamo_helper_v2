@@ -31,11 +31,13 @@ function initializeInGameHud(): void {
     snapshot: LiveBuildRecommendationSnapshot,
   ) => {
     showLiveBuildRecommendation(snapshot);
+    syncLegacyEmptyState(true);
     resizeOverlayToContent();
   };
 
   mainWindow.inGameLiveBuildRecommendationClear = () => {
     hideLiveBuildRecommendation();
+    syncLegacyEmptyState(false);
     resizeOverlayToContent();
   };
 
@@ -47,6 +49,7 @@ function initializeInGameHud(): void {
 
   if (mainWindow.latestLiveBuildRecommendation) {
     showLiveBuildRecommendation(mainWindow.latestLiveBuildRecommendation);
+    syncLegacyEmptyState(true);
     resizeOverlayToContent();
   }
 }
@@ -108,15 +111,14 @@ function restoreMatchIdFromGep(setMatchId: (matchId: string) => void): void {
       return;
     }
 
-    const matchInfo = result.res.match_info;
-    const matchId = readString(matchInfo?.match_id);
-    if (matchId) {
-      setMatchId(matchId);
+    const lifecycle = extractMatchLifecycle(result.res);
+    if (lifecycle.ended) {
+      setMatchId('');
+      return;
     }
 
-    const matchState = readString(matchInfo?.match_state);
-    if (matchState?.toLowerCase() === 'ended') {
-      setMatchId('');
+    if (lifecycle.matchId) {
+      setMatchId(lifecycle.matchId);
     }
   });
 }
@@ -125,39 +127,36 @@ function registerMatchLifecycleListeners(
   setMatchId: (matchId: string) => void,
 ): void {
   ow.games?.events?.onInfoUpdates2?.addListener((update: any) => {
-    const info = update?.info;
-    if (!info || typeof info !== 'object') {
+    const lifecycle = extractMatchLifecycle(update?.info);
+    if (lifecycle.ended) {
+      setMatchId('');
       return;
     }
 
-    const matchInfo = info.match_info;
-    const matchId = readString(matchInfo?.match_id);
-    if (matchId) {
-      setMatchId(matchId);
-    }
-
-    const matchState = readString(matchInfo?.match_state);
-    if (matchState?.toLowerCase() === 'ended') {
-      setMatchId('');
+    if (lifecycle.matchId) {
+      setMatchId(lifecycle.matchId);
     }
   });
 
   ow.games?.events?.onNewEvents?.addListener((eventBatch: any) => {
     const events = Array.isArray(eventBatch?.events) ? eventBatch.events : [];
+    let nextMatchId = '';
+    let ended = false;
+
     for (const event of events) {
       if (event?.name === 'match_id') {
-        const matchId = readString(event.data);
-        if (matchId) {
-          setMatchId(matchId);
-        }
+        nextMatchId = readString(event.data) ?? nextMatchId;
       }
 
       if (event?.name === 'match_state') {
-        const matchState = readString(event.data);
-        if (matchState?.toLowerCase() === 'ended') {
-          setMatchId('');
-        }
+        ended = readString(event.data)?.toLowerCase() === 'ended' || ended;
       }
+    }
+
+    if (ended) {
+      setMatchId('');
+    } else if (nextMatchId) {
+      setMatchId(nextMatchId);
     }
   });
 }
@@ -174,6 +173,29 @@ export function readString(value: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function extractMatchLifecycle(value: unknown): {
+  matchId?: string;
+  ended: boolean;
+} {
+  if (!isRecord(value)) {
+    return { ended: false };
+  }
+
+  let matchId = readString(value.match_id);
+  let ended = readString(value.match_state)?.toLowerCase() === 'ended';
+
+  for (const nested of Object.values(value)) {
+    if (!isRecord(nested)) {
+      continue;
+    }
+
+    matchId = readString(nested.match_id) ?? matchId;
+    ended = readString(nested.match_state)?.toLowerCase() === 'ended' || ended;
+  }
+
+  return { matchId, ended };
 }
 
 function parseJsonValue(value: unknown): unknown {
@@ -193,9 +215,29 @@ function parseJsonValue(value: unknown): unknown {
   }
 }
 
+function syncLegacyEmptyState(hasLiveSnapshot: boolean): void {
+  const empty = document.getElementById('guide-empty');
+  if (!empty) {
+    return;
+  }
+
+  if (hasLiveSnapshot) {
+    empty.style.display = 'none';
+    return;
+  }
+
+  const active = document.getElementById('guide-active');
+  const hasActiveGuide = active ? window.getComputedStyle(active).display !== 'none' : false;
+  empty.style.display = hasActiveGuide ? 'none' : 'flex';
+}
+
 function resizeOverlayToContent(): void {
   const resize = (window as any).ensureOverlayHeight;
   if (typeof resize === 'function') {
     resize();
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
