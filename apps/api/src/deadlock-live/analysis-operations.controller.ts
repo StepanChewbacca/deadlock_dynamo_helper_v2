@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   HistoricalMatchReplayService,
   ReplayHistoricalMatchesDto,
@@ -14,6 +23,7 @@ import {
   RulesetResolverService,
 } from './ruleset-resolver.service';
 import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.service';
+import { SituationalRecommendationDiagnosticsService } from './situational-recommendation-diagnostics.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 
 @Controller('deadlock/analysis')
@@ -26,6 +36,8 @@ export class AnalysisOperationsController {
     private readonly rulesetResolutionRefreshService: RulesetResolutionRefreshService,
     private readonly rawMatchMetadataNormalizerService: RawMatchMetadataNormalizerService,
     private readonly historicalMatchReplayService: HistoricalMatchReplayService,
+    private readonly situationalRecommendationDiagnosticsService:
+      SituationalRecommendationDiagnosticsService,
   ) {}
 
   @Get('crawl/progress')
@@ -37,6 +49,20 @@ export class AnalysisOperationsController {
   async startCrawl() {
     await this.recentMatchCrawlerService.startCrawling();
     return { success: true, message: 'Background crawl initiated.' };
+  }
+
+  @Get('situational/examples')
+  async getSituationalExamples(
+    @Query('limit') limit?: string,
+    @Query('maxEvaluatedActions') maxEvaluatedActions?: string,
+  ) {
+    return this.situationalRecommendationDiagnosticsService.findExamples({
+      limit: parseOptionalPositiveInteger(limit, 'limit'),
+      maxEvaluatedActions: parseOptionalPositiveInteger(
+        maxEvaluatedActions,
+        'maxEvaluatedActions',
+      ),
+    });
   }
 
   @Get('raw-matches/replay/status')
@@ -80,4 +106,19 @@ export class AnalysisOperationsController {
     await this.recentMatchesWindowService.refresh();
     return result;
   }
+}
+
+function parseOptionalPositiveInteger(
+  value: string | undefined,
+  fieldName: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new BadRequestException(`${fieldName} must be a positive integer.`);
+  }
+  return parsed;
 }
