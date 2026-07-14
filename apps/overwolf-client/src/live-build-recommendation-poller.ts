@@ -35,8 +35,10 @@ export interface LiveBuildRecommendationAction {
   contextualScore?: number;
   baseRank?: number;
   contextualRank?: number;
+  wasInBaseBuild?: boolean;
   isSituational?: boolean;
   wasPromotedByMatchup?: boolean;
+  wasInsertedByMatchup?: boolean;
   situationalAgainstHeroId?: number;
   situationalInteractionOddsRatio?: number;
   situationalLower95OddsRatio?: number;
@@ -241,6 +243,7 @@ export function createLiveBuildRecommendationPresentationKey(
     snapshot.recommendation?.mode ?? '',
     snapshot.recommendation?.action.actionKey ?? '',
     snapshot.recommendation?.action.wasPromotedByMatchup ? 'promoted' : 'base',
+    snapshot.recommendation?.action.wasInsertedByMatchup ? 'inserted' : 'existing',
   ].join('|');
 }
 
