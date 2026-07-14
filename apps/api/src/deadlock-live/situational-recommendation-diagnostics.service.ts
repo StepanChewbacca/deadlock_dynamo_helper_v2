@@ -22,9 +22,10 @@ import { RecentMatchesWindowService } from './recent-matches-window.service';
 
 export const SITUATIONAL_DIAGNOSTIC_DEFAULT_LIMIT = 10;
 export const SITUATIONAL_DIAGNOSTIC_MAX_LIMIT = 50;
-export const SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_EVALUATED_ACTIONS = 5_000;
+export const SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_EVALUATED_ACTIONS = 500;
 export const SITUATIONAL_DIAGNOSTIC_MAX_EVALUATED_ACTIONS = 50_000;
-export const SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES = 200;
+export const SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_VALIDATED_STATES = 12;
+export const SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES = 50;
 
 interface RawSituationalCandidate {
   heroId: number;
@@ -70,6 +71,8 @@ export interface SituationalRecommendationDiagnosticResult {
   scanTruncated: boolean;
   rawPositiveSignalCount: number;
   validatedStateEnemyCount: number;
+  validationCandidateCount: number;
+  validationTruncated: boolean;
   visibleSituationalExampleCount: number;
   warningExampleCount: number;
   examples: SituationalRecommendationDiagnosticExample[];
@@ -78,6 +81,7 @@ export interface SituationalRecommendationDiagnosticResult {
 export interface SituationalRecommendationDiagnosticOptions {
   limit?: number;
   maxEvaluatedActions?: number;
+  maxValidatedStates?: number;
 }
 
 @Injectable()
@@ -103,6 +107,11 @@ export class SituationalRecommendationDiagnosticsService {
       options.maxEvaluatedActions,
       SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_EVALUATED_ACTIONS,
       SITUATIONAL_DIAGNOSTIC_MAX_EVALUATED_ACTIONS,
+    );
+    const maxValidatedStates = normalizePositiveInteger(
+      options.maxValidatedStates,
+      SITUATIONAL_DIAGNOSTIC_DEFAULT_MAX_VALIDATED_STATES,
+      SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES,
     );
 
     await this.heroBuildTransitionAggregationService.ensureReady();
@@ -163,19 +172,20 @@ export class SituationalRecommendationDiagnosticsService {
             });
           }
 
-          trimRawCandidates(rawCandidates, limit);
+          trimRawCandidates(rawCandidates, limit, maxValidatedStates);
         }
       }
     }
 
     rawCandidates.sort(compareRawCandidates);
-    const validationCandidates = deduplicateStateEnemyCandidates(rawCandidates).slice(
-      0,
-      SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES,
-    );
+    const allValidationCandidates = deduplicateStateEnemyCandidates(rawCandidates);
+    const validationCandidates = allValidationCandidates.slice(0, maxValidatedStates);
     const examples: SituationalRecommendationDiagnosticExample[] = [];
+    let validatedStateEnemyCount = 0;
+    let warningExampleCount = 0;
 
     for (const candidate of validationCandidates) {
+      validatedStateEnemyCount += 1;
       const requestBody: HeroBuildContextualRecommendationRequest = {
         heroId: candidate.heroId,
         itemIds: [...candidate.itemIds],
@@ -195,14 +205,19 @@ export class SituationalRecommendationDiagnosticsService {
         continue;
       }
 
-      examples.push(
-        createDiagnosticExample(
-          candidate,
-          requestBody,
-          response,
-          situationalAction,
-        ),
+      const example = createDiagnosticExample(
+        candidate,
+        requestBody,
+        response,
+        situationalAction,
       );
+      examples.push(example);
+      if (example.wouldTriggerWarning) {
+        warningExampleCount += 1;
+      }
+      if (warningExampleCount >= limit) {
+        break;
+      }
     }
 
     const uniqueExamples = deduplicateExamples(examples).sort(compareExamples);
@@ -216,7 +231,9 @@ export class SituationalRecommendationDiagnosticsService {
       evaluatedActionCount,
       scanTruncated: evaluatedActionCount < policyStatus.actionOptionCount,
       rawPositiveSignalCount,
-      validatedStateEnemyCount: validationCandidates.length,
+      validatedStateEnemyCount,
+      validationCandidateCount: allValidationCandidates.length,
+      validationTruncated: validatedStateEnemyCount < allValidationCandidates.length,
       visibleSituationalExampleCount: uniqueExamples.length,
       warningExampleCount: uniqueExamples.filter(
         (example) => example.wouldTriggerWarning,
@@ -258,10 +275,11 @@ function expandInventoryStateKey(stateKey: string): number[] | undefined {
 function trimRawCandidates(
   candidates: RawSituationalCandidate[],
   requestedLimit: number,
+  maxValidatedStates: number,
 ): void {
   const retainedLimit = Math.min(
-    SITUATIONAL_DIAGNOSTIC_MAX_VALIDATED_STATES * 4,
-    Math.max(100, requestedLimit * 20),
+    maxValidatedStates * 4,
+    Math.max(40, requestedLimit * 10),
   );
   if (candidates.length <= retainedLimit * 2) {
     return;
