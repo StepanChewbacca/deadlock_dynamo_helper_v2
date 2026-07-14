@@ -1,11 +1,9 @@
+import { disableLegacyBuildGuide } from './disable-legacy-build-guide';
 import {
   LiveBuildRecommendationPoller,
   LiveBuildRecommendationSnapshot,
 } from './live-build-recommendation-poller';
-import {
-  hideLiveBuildRecommendation,
-  showLiveBuildRecommendation,
-} from './live-build-recommendation-ui';
+import { showLiveBuildRecommendation } from './live-build-recommendation-ui';
 
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
 const MATCH_INFO_REFRESH_MS = 2000;
@@ -26,18 +24,19 @@ if (ow?.windows) {
 
 function initializeInGameHud(): void {
   const mainWindow = ow.windows.getMainWindow() as any;
+  disableLegacyBuildGuide();
 
   mainWindow.inGameLiveBuildRecommendationUpdate = (
     snapshot: LiveBuildRecommendationSnapshot,
   ) => {
+    disableLegacyBuildGuide();
     showLiveBuildRecommendation(snapshot);
-    syncLegacyEmptyState(true);
     resizeOverlayToContent();
   };
 
   mainWindow.inGameLiveBuildRecommendationClear = () => {
-    hideLiveBuildRecommendation();
-    syncLegacyEmptyState(false);
+    disableLegacyBuildGuide();
+    showLiveBuildRecommendation(createWaitingSnapshot(''));
     resizeOverlayToContent();
   };
 
@@ -49,9 +48,10 @@ function initializeInGameHud(): void {
 
   if (mainWindow.latestLiveBuildRecommendation) {
     showLiveBuildRecommendation(mainWindow.latestLiveBuildRecommendation);
-    syncLegacyEmptyState(true);
-    resizeOverlayToContent();
+  } else {
+    showLiveBuildRecommendation(createWaitingSnapshot(''));
   }
+  resizeOverlayToContent();
 }
 
 function initializeBackgroundTraversal(): void {
@@ -60,6 +60,7 @@ function initializeBackgroundTraversal(): void {
     mainWindow.latestLiveBuildRecommendation ?? null;
 
   let currentMatchId = '';
+  exposeCurrentMatchId(mainWindow, currentMatchId);
 
   const poller = new LiveBuildRecommendationPoller({
     apiBaseUrl: API_BASE_URL,
@@ -82,6 +83,8 @@ function initializeBackgroundTraversal(): void {
 
   const setCurrentMatchId = (matchId: string): void => {
     const normalizedMatchId = matchId.trim();
+    exposeCurrentMatchId(mainWindow, normalizedMatchId);
+
     if (normalizedMatchId === currentMatchId) {
       return;
     }
@@ -215,20 +218,22 @@ function parseJsonValue(value: unknown): unknown {
   }
 }
 
-function syncLegacyEmptyState(hasLiveSnapshot: boolean): void {
-  const empty = document.getElementById('guide-empty');
-  if (!empty) {
-    return;
-  }
+function exposeCurrentMatchId(mainWindow: any, matchId: string): void {
+  (globalThis as any).__deadlockLiveMatchId = matchId;
+  mainWindow.__deadlockLiveMatchId = matchId;
+}
 
-  if (hasLiveSnapshot) {
-    empty.style.display = 'none';
-    return;
-  }
-
-  const active = document.getElementById('guide-active');
-  const hasActiveGuide = active ? window.getComputedStyle(active).display !== 'none' : false;
-  empty.style.display = hasActiveGuide ? 'none' : 'flex';
+function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot {
+  return {
+    state: 'WAITING_FOR_BACKEND',
+    matchId,
+    itemIds: [],
+    isStale: false,
+    refreshCount: 0,
+    cacheHitCount: 0,
+    discardedResultCount: 0,
+    lastObservedAt: new Date().toISOString(),
+  };
 }
 
 function resizeOverlayToContent(): void {

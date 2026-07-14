@@ -1,6 +1,7 @@
 import { OverwolfLiveBatchDto, OverwolfLiveEventDto } from '@deadlock-live-probe/shared';
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+type MatchIdProvider = () => string | undefined;
 
 export class LiveEventBuffer {
   private readonly events: OverwolfLiveEventDto[] = [];
@@ -11,10 +12,15 @@ export class LiveEventBuffer {
     private readonly apiBaseUrl: string,
     private readonly fetchImpl: FetchLike = fetch,
     private readonly flushDelayMs = 1000,
+    private readonly matchIdProvider: MatchIdProvider = readCurrentMatchId,
   ) {}
 
   push(event: OverwolfLiveEventDto): void {
-    this.events.push(event);
+    const providedMatchId = this.matchIdProvider()?.trim();
+    const eventMatchId = event.matchId?.trim();
+    const matchId = eventMatchId || providedMatchId;
+
+    this.events.push(matchId ? { ...event, matchId } : event);
 
     if (this.timerId) {
       return;
@@ -47,5 +53,23 @@ export class LiveEventBuffer {
     } catch (err) {
       console.error('Failed to flush event batch:', err);
     }
+  }
+}
+
+function readCurrentMatchId(): string | undefined {
+  const globalMatchId = (globalThis as any).__deadlockLiveMatchId;
+  if (typeof globalMatchId === 'string' && globalMatchId.trim()) {
+    return globalMatchId.trim();
+  }
+
+  try {
+    const ow = (globalThis as any).overwolf;
+    const mainWindow = ow?.windows?.getMainWindow?.();
+    const mainWindowMatchId = mainWindow?.__deadlockLiveMatchId;
+    return typeof mainWindowMatchId === 'string' && mainWindowMatchId.trim()
+      ? mainWindowMatchId.trim()
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
