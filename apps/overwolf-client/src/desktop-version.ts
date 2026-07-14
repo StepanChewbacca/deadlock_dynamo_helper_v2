@@ -1,4 +1,4 @@
-const DESKTOP_VERSION = 'v0.1.0';
+const DESKTOP_VERSION = 'v0.1.1';
 
 function updateDesktopVersion(): void {
   const versionTag = document.querySelector('.version-tag');
