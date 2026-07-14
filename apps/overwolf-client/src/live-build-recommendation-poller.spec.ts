@@ -8,7 +8,9 @@ describe('LiveBuildRecommendationPoller', () => {
   it('fetches the encoded match endpoint and emits a ready snapshot', async () => {
     const snapshot = createSnapshot();
     const emitted = deferred<LiveBuildRecommendationSnapshot>();
-    const fetchImpl = jest.fn(async () => createResponse(snapshot));
+    const fetchImpl = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => createResponse(snapshot),
+    );
     const poller = new LiveBuildRecommendationPoller({
       apiBaseUrl: 'https://example.test/',
       fetchImpl: fetchImpl as typeof fetch,
@@ -29,10 +31,12 @@ describe('LiveBuildRecommendationPoller', () => {
 
   it('does not emit again when only cache counters change', async () => {
     let snapshot = createSnapshot();
-    const onSnapshot = jest.fn();
+    const onSnapshot = jest.fn<(snapshot: LiveBuildRecommendationSnapshot) => void>();
     const firstEmission = deferred<LiveBuildRecommendationSnapshot>();
     onSnapshot.mockImplementationOnce(firstEmission.resolve);
-    const fetchImpl = jest.fn(async () => createResponse(snapshot));
+    const fetchImpl = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => createResponse(snapshot),
+    );
     const poller = new LiveBuildRecommendationPoller({
       apiBaseUrl: 'https://example.test',
       fetchImpl: fetchImpl as typeof fetch,
@@ -55,10 +59,12 @@ describe('LiveBuildRecommendationPoller', () => {
 
   it('emits lifecycle transitions even when the traversal key is unchanged', async () => {
     let snapshot = createSnapshot();
-    const onSnapshot = jest.fn();
+    const onSnapshot = jest.fn<(snapshot: LiveBuildRecommendationSnapshot) => void>();
     const firstEmission = deferred<LiveBuildRecommendationSnapshot>();
     onSnapshot.mockImplementationOnce(firstEmission.resolve);
-    const fetchImpl = jest.fn(async () => createResponse(snapshot));
+    const fetchImpl = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => createResponse(snapshot),
+    );
     const poller = new LiveBuildRecommendationPoller({
       apiBaseUrl: 'https://example.test',
       fetchImpl: fetchImpl as typeof fetch,
@@ -86,11 +92,13 @@ describe('LiveBuildRecommendationPoller', () => {
 
   it('emits a waiting snapshot for an empty backend response', async () => {
     const emitted = deferred<LiveBuildRecommendationSnapshot>();
-    const fetchImpl = jest.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => '',
-    } as Response));
+    const fetchImpl = jest.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+        ok: true,
+        status: 200,
+        text: async () => '',
+      } as Response),
+    );
     const poller = new LiveBuildRecommendationPoller({
       apiBaseUrl: 'https://example.test',
       fetchImpl: fetchImpl as typeof fetch,
