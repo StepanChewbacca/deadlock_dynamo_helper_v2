@@ -102,7 +102,9 @@ export function selectUniqueBuildRowIndexes(
 
   for (const [index, row] of normalizedRows.entries()) {
     if (row.action === 'SELL' && row.itemName) {
-      const previousIndex = indexes.at(-1);
+      const previousIndex = indexes.length > 0
+        ? indexes[indexes.length - 1]
+        : undefined;
       const previousRow = previousIndex === undefined
         ? undefined
         : normalizedRows[previousIndex];
