@@ -1,5 +1,10 @@
 import { disableLegacyBuildGuide } from './disable-legacy-build-guide';
 import {
+  clearLiveBuildDesktop,
+  showLiveBuildDesktop,
+  showLiveBuildDesktopError,
+} from './live-build-desktop-ui';
+import {
   LiveBuildRecommendationPoller,
   LiveBuildRecommendationSnapshot,
 } from './live-build-recommendation-poller';
@@ -61,22 +66,26 @@ function initializeBackgroundTraversal(): void {
 
   let currentMatchId = '';
   exposeCurrentMatchId(mainWindow, currentMatchId);
+  showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
 
   const poller = new LiveBuildRecommendationPoller({
     apiBaseUrl: API_BASE_URL,
     onSnapshot: (snapshot) => {
       mainWindow.latestLiveBuildRecommendation = snapshot;
+      showLiveBuildDesktop(snapshot);
       if (typeof mainWindow.inGameLiveBuildRecommendationUpdate === 'function') {
         mainWindow.inGameLiveBuildRecommendationUpdate(snapshot);
       }
     },
     onClear: () => {
       mainWindow.latestLiveBuildRecommendation = null;
+      clearLiveBuildDesktop();
       if (typeof mainWindow.inGameLiveBuildRecommendationClear === 'function') {
         mainWindow.inGameLiveBuildRecommendationClear();
       }
     },
     onError: (error) => {
+      showLiveBuildDesktopError(error.message);
       console.warn(`Live build recommendation polling failed: ${error.message}`);
     },
   });
@@ -90,6 +99,11 @@ function initializeBackgroundTraversal(): void {
     }
 
     currentMatchId = normalizedMatchId;
+    if (currentMatchId) {
+      showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
+    } else {
+      clearLiveBuildDesktop();
+    }
     poller.setMatchId(currentMatchId);
     console.log(
       currentMatchId

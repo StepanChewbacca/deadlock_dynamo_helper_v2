@@ -73,7 +73,7 @@ const DEFAULT_POLL_INTERVAL_MS = 1000;
 
 export class LiveBuildRecommendationPoller {
   private readonly apiBaseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl?: typeof fetch;
   private readonly intervalMs: number;
   private readonly onSnapshot: (snapshot: LiveBuildRecommendationSnapshot) => void;
   private readonly onClear: () => void;
@@ -87,7 +87,7 @@ export class LiveBuildRecommendationPoller {
 
   constructor(options: LiveBuildRecommendationPollerOptions) {
     this.apiBaseUrl = options.apiBaseUrl.replace(/\/$/, '');
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl;
     this.intervalMs = options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.onSnapshot = options.onSnapshot;
     this.onClear = options.onClear;
@@ -166,13 +166,14 @@ export class LiveBuildRecommendationPoller {
   }
 
   private async fetchSnapshot(requestedMatchId: string): Promise<void> {
-    const response = await this.fetchImpl(
-      `${this.apiBaseUrl}/deadlock/live/matches/${encodeURIComponent(requestedMatchId)}/build-recommendation`,
-      {
-        method: 'GET',
-        cache: 'no-store',
-      },
-    );
+    const url = `${this.apiBaseUrl}/deadlock/live/matches/${encodeURIComponent(requestedMatchId)}/build-recommendation`;
+    const init: RequestInit = {
+      method: 'GET',
+      cache: 'no-store',
+    };
+    const response = this.fetchImpl
+      ? await this.fetchImpl(url, init)
+      : await window.fetch(url, init);
 
     if (requestedMatchId !== this.matchId) {
       return;
