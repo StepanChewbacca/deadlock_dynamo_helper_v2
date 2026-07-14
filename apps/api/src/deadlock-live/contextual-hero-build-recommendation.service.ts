@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { canonicalHeroId } from './all-heroes-analysis.service';
+import { canonicalHeroId } from './hero-id-aliases';
 import {
   GraphMatchupEvidence,
   GRAPH_MATCHUP_MODEL_VERSION,
