@@ -31,12 +31,19 @@ export interface HeroBuildContextualRecommendationRequest
   enemyHeroIds?: number[];
 }
 
+export interface ContextualRecommendationCandidateSource {
+  action: HeroBuildRecommendationAction;
+  baseRank: number;
+  wasInBaseBuild: boolean;
+}
+
 export type ContextualHeroBuildRecommendationAction =
   HeroBuildRecommendationAction & {
     baseScore: number;
     contextualScore: number;
     baseRank: number;
     contextualRank: number;
+    wasInBaseBuild: boolean;
     isSituational: boolean;
     wasPromotedByMatchup: boolean;
     wasInsertedByMatchup: boolean;
@@ -62,6 +69,11 @@ export type ContextualHeroBuildRecommendationResponse = Omit<
   alternatives: ContextualHeroBuildRecommendationAction[];
 };
 
+interface ExpandedRecommendationCandidatePool {
+  baseResponse: HeroBuildRecommendationResponse;
+  candidates: ContextualRecommendationCandidateSource[];
+}
+
 @Injectable()
 export class ContextualHeroBuildRecommendationService extends HeroBuildRecommendationService {
   constructor(
@@ -80,16 +92,17 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<ContextualHeroBuildRecommendationResponse> {
     const requestedLimit = normalizeRecommendationLimit(request.limit);
-    const baseResponse = await this.recommendExpandedCandidatePool(request);
+    const pool = await this.recommendExpandedCandidatePool(request);
+    const baseResponse = pool.baseResponse;
     const enemyHeroIds = normalizeEnemyHeroIds(request.enemyHeroIds ?? []);
-    const sourceActions = [baseResponse.action, ...baseResponse.alternatives];
     const contextualActions = await Promise.all(
-      sourceActions.map((action, index) =>
+      pool.candidates.map((candidate) =>
         this.contextualizeAction(
           request.heroId,
           enemyHeroIds,
-          action,
-          index + 1,
+          candidate.action,
+          candidate.baseRank,
+          candidate.wasInBaseBuild,
         ),
       ),
     );
@@ -128,13 +141,17 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
 
   private async recommendExpandedCandidatePool(
     request: HeroBuildContextualRecommendationRequest,
-  ): Promise<HeroBuildRecommendationResponse> {
+  ): Promise<ExpandedRecommendationCandidatePool> {
     await this.heroBuildTransitionAggregationService.ensureReady();
 
     const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
     const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(request.heroId);
     if (!policy) {
-      return super.recommend(request);
+      const baseResponse = await super.recommend(request);
+      return {
+        baseResponse,
+        candidates: createBaseCandidateSources(baseResponse),
+      };
     }
 
     const requestedStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
@@ -151,26 +168,50 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
           itemCounts: ReadonlyMap<number, number>;
         } => value.itemCounts !== undefined,
       );
-    const response = recommendFromPolicy(
+    const recipeResolver = (parentItemId: number): readonly number[] =>
+      this.recipeAwareTimelineReconciliationService.getComponentItemIds(parentItemId);
+    const commonOptions = {
+      maxBackoffDistance: HERO_BUILD_MAX_BACKOFF_DISTANCE,
+      maxBackoffStates: HERO_BUILD_MAX_BACKOFF_STATES,
+      limit: HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
+    };
+    const baseResponse = recommendFromPolicy(
       request,
       requestedStateKey,
       policy,
       parsedStates,
-      (parentItemId) =>
-        this.recipeAwareTimelineReconciliationService.getComponentItemIds(parentItemId),
+      recipeResolver,
       {
+        ...commonOptions,
         minExactObservations: HERO_BUILD_MIN_EXACT_OBSERVATIONS,
-        maxBackoffDistance: HERO_BUILD_MAX_BACKOFF_DISTANCE,
-        maxBackoffStates: HERO_BUILD_MAX_BACKOFF_STATES,
-        limit: HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
       },
     );
+    const nearbyResponse = recommendFromPolicy(
+      request,
+      requestedStateKey,
+      policy,
+      parsedStates,
+      recipeResolver,
+      {
+        ...commonOptions,
+        minExactObservations: Number.MAX_SAFE_INTEGER,
+      },
+    );
+    const policyLastRefreshedAt = policyStatus.lastRefreshedAt
+      ? new Date(policyStatus.lastRefreshedAt)
+      : undefined;
+    const responseWithVersion = {
+      ...baseResponse,
+      policyLastRefreshedAt,
+    };
 
     return {
-      ...response,
-      policyLastRefreshedAt: policyStatus.lastRefreshedAt
-        ? new Date(policyStatus.lastRefreshedAt)
-        : undefined,
+      baseResponse: responseWithVersion,
+      candidates: mergeContextualRecommendationCandidatePool(
+        [baseResponse.action, ...baseResponse.alternatives],
+        [nearbyResponse.action, ...nearbyResponse.alternatives],
+        HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
+      ),
     };
   }
 
@@ -179,6 +220,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     enemyHeroIds: number[],
     action: HeroBuildRecommendationAction,
     baseRank: number,
+    wasInBaseBuild: boolean,
   ): Promise<ContextualHeroBuildRecommendationAction> {
     if (
       enemyHeroIds.length === 0 ||
@@ -186,7 +228,11 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       action.itemId === undefined ||
       action.sourceActionType === undefined
     ) {
-      return createUnchangedContextualAction(action, baseRank);
+      return createUnchangedContextualAction(
+        action,
+        baseRank,
+        wasInBaseBuild,
+      );
     }
 
     const evaluation = await this.heroBuildMatchupStatisticsService.evaluate({
@@ -212,6 +258,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       contextualScore,
       baseRank,
       contextualRank: baseRank,
+      wasInBaseBuild,
       isSituational: conservativeInteractionLogOdds > 0,
       wasPromotedByMatchup: false,
       wasInsertedByMatchup: false,
@@ -232,6 +279,44 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       matchupEvidence: evaluation.evidence,
     };
   }
+}
+
+export function mergeContextualRecommendationCandidatePool(
+  baseActions: readonly HeroBuildRecommendationAction[],
+  nearbyActions: readonly HeroBuildRecommendationAction[],
+  limit = HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
+): ContextualRecommendationCandidateSource[] {
+  const candidates: ContextualRecommendationCandidateSource[] = [];
+  const seenActionKeys = new Set<string>();
+
+  for (const action of baseActions) {
+    if (seenActionKeys.has(action.actionKey)) {
+      continue;
+    }
+    seenActionKeys.add(action.actionKey);
+    candidates.push({
+      action: { ...action },
+      baseRank: candidates.length + 1,
+      wasInBaseBuild: true,
+    });
+  }
+
+  for (const action of nearbyActions) {
+    if (seenActionKeys.has(action.actionKey) || action.type === 'HOLD') {
+      continue;
+    }
+    seenActionKeys.add(action.actionKey);
+    candidates.push({
+      action: { ...action },
+      baseRank: candidates.length + 1,
+      wasInBaseBuild: false,
+    });
+    if (candidates.length >= limit) {
+      break;
+    }
+  }
+
+  return candidates.slice(0, limit);
 }
 
 export function applyConservativeMatchupOdds(
@@ -266,15 +351,26 @@ export function rankContextualActions(
           action.isSituational && contextualRank < action.baseRank,
         wasInsertedByMatchup:
           action.isSituational &&
-          action.baseRank > visibleLimit &&
+          (!action.wasInBaseBuild || action.baseRank > visibleLimit) &&
           contextualRank <= visibleLimit,
       };
     });
 }
 
+function createBaseCandidateSources(
+  response: HeroBuildRecommendationResponse,
+): ContextualRecommendationCandidateSource[] {
+  return [response.action, ...response.alternatives].map((action, index) => ({
+    action: { ...action },
+    baseRank: index + 1,
+    wasInBaseBuild: true,
+  }));
+}
+
 function createUnchangedContextualAction(
   action: HeroBuildRecommendationAction,
   baseRank: number,
+  wasInBaseBuild: boolean,
 ): ContextualHeroBuildRecommendationAction {
   return {
     ...action,
@@ -282,6 +378,7 @@ function createUnchangedContextualAction(
     contextualScore: action.score,
     baseRank,
     contextualRank: baseRank,
+    wasInBaseBuild,
     isSituational: false,
     wasPromotedByMatchup: false,
     wasInsertedByMatchup: false,
