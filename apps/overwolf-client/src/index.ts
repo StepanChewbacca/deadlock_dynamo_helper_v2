@@ -193,6 +193,10 @@ function storeHeroName(payload: any, mainWindow: any): void {
   }
 
   mainWindow.heroNamesMap[heroId] = heroName;
+  if (mainWindow.situationalItemWarning?.enemyHeroId === heroId) {
+    mainWindow.situationalItemWarning.enemyHeroName = heroName;
+    mainWindow.updateWarningUI?.();
+  }
 }
 
 function parsePayload(value: unknown): any {
