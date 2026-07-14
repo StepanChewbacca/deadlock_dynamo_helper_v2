@@ -49,7 +49,7 @@ describe('match roster preservation', () => {
 });
 
 function createRawMetadata(id: number, playerCount: number): RawMatchMetadata {
-  return {
+  return Object.assign(new RawMatchMetadata(), {
     id,
     matchId: 93405163,
     fetchedAt: new Date(`2026-07-12T${String(id).padStart(2, '0')}:00:00.000Z`),
@@ -60,5 +60,5 @@ function createRawMetadata(id: number, playerCount: number): RawMatchMetadata {
         })),
       },
     },
-  } as RawMatchMetadata;
+  });
 }
