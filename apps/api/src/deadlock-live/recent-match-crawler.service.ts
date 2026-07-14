@@ -25,7 +25,6 @@ const API_BASE_URL = 'https://api.deadlock-api.com';
 const REQUEST_DELAY_MS = 2_000;
 const RATE_LIMIT_WAIT_MS = 60_000;
 const RETENTION_DELETE_BATCH_SIZE = 500;
-const MIN_BADGE = 116;
 
 export const RECENT_MATCH_CRAWL_CRON = '0 0 */4 * * *';
 
@@ -229,13 +228,20 @@ export class RecentMatchCrawlerService implements OnModuleInit {
       await this.recentMatchesWindowService.refresh();
 
       const finalMatchCount = this.recentMatchesWindowService.getStatus().matchCount;
-      this.progress.status =
-        `Crawl finished successfully: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
-        `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`;
+      const windowIsFull = finalMatchCount >= RECENT_MATCH_TARGET_COUNT;
+      this.progress.status = windowIsFull
+        ? `Crawl finished successfully: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
+          `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`
+        : `Crawl finished with partial window: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
+          `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days. ` +
+          `The source returned ${newMatchIds.length} new candidates.`;
       this.logger.log(
         `${this.progress.status} Removed ${removedAfterCrawl} matches after processing.`,
       );
-      await this.finalizeCrawlerRun('completed');
+      await this.finalizeCrawlerRun(
+        'completed',
+        windowIsFull ? undefined : this.progress.status,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Crawl aborted: ${message}`);
@@ -262,7 +268,6 @@ export class RecentMatchCrawlerService implements OnModuleInit {
         const response = await axios.get(`${API_BASE_URL}/v1/matches/metadata`, {
           ...getDeadlockApiRequestConfig(),
           params: {
-            min_average_badge: MIN_BADGE,
             min_unix_timestamp: Math.floor(cutoff.getTime() / 1000),
             order_by: 'match_id',
             order_direction: 'desc',
@@ -544,7 +549,9 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     state.currentMatchId = currentMatchId ?? null;
     state.status = this.progress.status;
     state.lastError =
-      state.status.startsWith('Failed') || state.status.startsWith('Crawl aborted')
+      state.status.startsWith('Failed') ||
+      state.status.startsWith('Crawl aborted') ||
+      state.status.startsWith('Crawl finished with partial window')
         ? state.status
         : null;
     if (!state.isCrawling && state.status.startsWith('Crawl finished successfully')) {
