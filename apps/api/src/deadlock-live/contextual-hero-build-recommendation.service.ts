@@ -6,13 +6,25 @@ import {
   HeroBuildMatchupStatisticsService,
 } from './hero-build-matchup-statistics.service';
 import {
+  HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
+  HERO_BUILD_MAX_BACKOFF_DISTANCE,
+  HERO_BUILD_MAX_BACKOFF_STATES,
+  HERO_BUILD_MIN_EXACT_OBSERVATIONS,
   HeroBuildRecommendationAction,
   HeroBuildRecommendationRequest,
   HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
+  normalizeRecommendationLimit,
+  parseInventoryStateKey,
+  recommendFromPolicy,
 } from './hero-build-recommendation.service';
-import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
+import {
+  createInventoryStateKeyFromItemIds,
+  HeroBuildTransitionAggregationService,
+} from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+
+export const HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT = 100;
 
 export interface HeroBuildContextualRecommendationRequest
   extends HeroBuildRecommendationRequest {
@@ -27,6 +39,7 @@ export type ContextualHeroBuildRecommendationAction =
     contextualRank: number;
     isSituational: boolean;
     wasPromotedByMatchup: boolean;
+    wasInsertedByMatchup: boolean;
     situationalAgainstHeroId?: number;
     situationalInteractionOddsRatio?: number;
     situationalLower95OddsRatio?: number;
@@ -41,8 +54,10 @@ export type ContextualHeroBuildRecommendationResponse = Omit<
 > & {
   enemyHeroIds: number[];
   matchupModelVersion: typeof GRAPH_MATCHUP_MODEL_VERSION;
+  evaluatedCandidateCount: number;
   situationalCandidateCount: number;
   promotedSituationalCandidateCount: number;
+  insertedSituationalCandidateCount: number;
   action: ContextualHeroBuildRecommendationAction;
   alternatives: ContextualHeroBuildRecommendationAction[];
 };
@@ -50,8 +65,8 @@ export type ContextualHeroBuildRecommendationResponse = Omit<
 @Injectable()
 export class ContextualHeroBuildRecommendationService extends HeroBuildRecommendationService {
   constructor(
-    heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
-    recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
+    private readonly heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
+    private readonly recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly heroBuildMatchupStatisticsService:
       HeroBuildMatchupStatisticsService,
   ) {
@@ -64,7 +79,8 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
   async recommend(
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<ContextualHeroBuildRecommendationResponse> {
-    const baseResponse = await super.recommend(request);
+    const requestedLimit = normalizeRecommendationLimit(request.limit);
+    const baseResponse = await this.recommendExpandedCandidatePool(request);
     const enemyHeroIds = normalizeEnemyHeroIds(request.enemyHeroIds ?? []);
     const sourceActions = [baseResponse.action, ...baseResponse.alternatives];
     const contextualActions = await Promise.all(
@@ -77,9 +93,13 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
         ),
       ),
     );
-    const rankedActions = rankContextualActions(contextualActions);
-    const action = rankedActions[0];
-    const alternatives = rankedActions.slice(1);
+    const rankedActions = rankContextualActions(
+      contextualActions,
+      requestedLimit,
+    );
+    const selectedActions = rankedActions.slice(0, requestedLimit);
+    const action = selectedActions[0];
+    const alternatives = selectedActions.slice(1);
 
     return {
       ...baseResponse,
@@ -91,14 +111,66 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       observationCount: action.matchedStateObservationCount,
       enemyHeroIds,
       matchupModelVersion: GRAPH_MATCHUP_MODEL_VERSION,
+      evaluatedCandidateCount: rankedActions.length,
       situationalCandidateCount: rankedActions.filter(
         (candidate) => candidate.isSituational,
       ).length,
       promotedSituationalCandidateCount: rankedActions.filter(
         (candidate) => candidate.wasPromotedByMatchup,
       ).length,
+      insertedSituationalCandidateCount: rankedActions.filter(
+        (candidate) => candidate.wasInsertedByMatchup,
+      ).length,
       action,
       alternatives,
+    };
+  }
+
+  private async recommendExpandedCandidatePool(
+    request: HeroBuildContextualRecommendationRequest,
+  ): Promise<HeroBuildRecommendationResponse> {
+    await this.heroBuildTransitionAggregationService.ensureReady();
+
+    const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
+    const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(request.heroId);
+    if (!policy) {
+      return super.recommend(request);
+    }
+
+    const requestedStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
+    const parsedStates = [...policy.statesByKey.values()]
+      .map((state) => ({
+        state,
+        itemCounts: parseInventoryStateKey(state.stateKey),
+      }))
+      .filter(
+        (
+          value,
+        ): value is {
+          state: typeof value.state;
+          itemCounts: ReadonlyMap<number, number>;
+        } => value.itemCounts !== undefined,
+      );
+    const response = recommendFromPolicy(
+      request,
+      requestedStateKey,
+      policy,
+      parsedStates,
+      (parentItemId) =>
+        this.recipeAwareTimelineReconciliationService.getComponentItemIds(parentItemId),
+      {
+        minExactObservations: HERO_BUILD_MIN_EXACT_OBSERVATIONS,
+        maxBackoffDistance: HERO_BUILD_MAX_BACKOFF_DISTANCE,
+        maxBackoffStates: HERO_BUILD_MAX_BACKOFF_STATES,
+        limit: HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
+      },
+    );
+
+    return {
+      ...response,
+      policyLastRefreshedAt: policyStatus.lastRefreshedAt
+        ? new Date(policyStatus.lastRefreshedAt)
+        : undefined,
     };
   }
 
@@ -142,6 +214,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       contextualRank: baseRank,
       isSituational: conservativeInteractionLogOdds > 0,
       wasPromotedByMatchup: false,
+      wasInsertedByMatchup: false,
       situationalAgainstHeroId:
         conservativeInteractionLogOdds > 0
           ? bestEvidence?.enemyHeroId
@@ -180,6 +253,7 @@ export function applyConservativeMatchupOdds(
 
 export function rankContextualActions(
   actions: readonly ContextualHeroBuildRecommendationAction[],
+  visibleLimit = HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
 ): ContextualHeroBuildRecommendationAction[] {
   return [...actions]
     .sort(compareContextualActions)
@@ -190,6 +264,10 @@ export function rankContextualActions(
         contextualRank,
         wasPromotedByMatchup:
           action.isSituational && contextualRank < action.baseRank,
+        wasInsertedByMatchup:
+          action.isSituational &&
+          action.baseRank > visibleLimit &&
+          contextualRank <= visibleLimit,
       };
     });
 }
@@ -206,6 +284,7 @@ function createUnchangedContextualAction(
     contextualRank: baseRank,
     isSituational: false,
     wasPromotedByMatchup: false,
+    wasInsertedByMatchup: false,
     matchupObservationCount: 0,
     matchupModelVersion: GRAPH_MATCHUP_MODEL_VERSION,
     matchupEvidence: [],
