@@ -3,7 +3,7 @@ import {
   clearLiveBuildDesktop,
   showLiveBuildDesktop,
   showLiveBuildDesktopError,
-} from './live-build-desktop-ui';
+} from './live-build-desktop-full-build-ui';
 import {
   LiveBuildRecommendationPoller,
   LiveBuildRecommendationSnapshot,
