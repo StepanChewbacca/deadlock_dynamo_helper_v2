@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MinimalMatchState, MinimalPlayerState } from '@deadlock-live-probe/shared';
+import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
   filterHeroBuildRecommendationAlternatives,
   HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
@@ -36,6 +37,7 @@ export interface LiveBuildRecommendationTraversalInput {
   steamId: string;
   heroId: number;
   itemIds: number[];
+  enemyHeroIds: number[];
   inventoryStateKey: string;
   gameTimeS: number;
   timeBucket: number;
@@ -48,6 +50,7 @@ export interface LiveBuildRecommendationTraversalSnapshot {
   steamId?: string;
   heroId?: number;
   itemIds: number[];
+  enemyHeroIds: number[];
   inventoryStateKey?: string;
   gameTimeS?: number;
   timeBucket?: number;
@@ -136,6 +139,7 @@ export class LiveBuildRecommendationTraversalService {
       steamId: input.steamId,
       heroId: input.heroId,
       itemIds: [...input.itemIds],
+      enemyHeroIds: [...input.enemyHeroIds],
       inventoryStateKey: input.inventoryStateKey,
       gameTimeS: input.gameTimeS,
       timeBucket: input.timeBucket,
@@ -202,6 +206,7 @@ export class LiveBuildRecommendationTraversalService {
         state: 'WAITING_FOR_LOCAL_PLAYER',
         matchId,
         itemIds: [],
+        enemyHeroIds: [],
         isStale: false,
         refreshCount: 0,
         cacheHitCount: 0,
@@ -230,6 +235,7 @@ export class LiveBuildRecommendationTraversalService {
       matchId: runtime.matchId,
       steamId,
       itemIds: [],
+      enemyHeroIds: [],
       isStale: false,
       refreshCount: runtime.snapshot.refreshCount,
       cacheHitCount: runtime.snapshot.cacheHitCount,
@@ -267,12 +273,16 @@ export class LiveBuildRecommendationTraversalService {
       runtime.snapshot.lastError = undefined;
 
       try {
-        const recommendation = await this.heroBuildRecommendationService.recommend({
+        const recommendationRequest: HeroBuildContextualRecommendationRequest = {
           heroId: input.heroId,
           itemIds: [...input.itemIds],
+          enemyHeroIds: [...input.enemyHeroIds],
           gameTimeS: input.gameTimeS,
           limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
-        });
+        };
+        const recommendation = await this.heroBuildRecommendationService.recommend(
+          recommendationRequest,
+        );
         const filtered = filterHeroBuildRecommendationAlternatives(recommendation, {
           limit: LIVE_BUILD_RECOMMENDATION_LIMIT,
           minHistoricalCount: HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_HISTORICAL_COUNT,
@@ -293,6 +303,7 @@ export class LiveBuildRecommendationTraversalService {
           steamId: input.steamId,
           heroId: input.heroId,
           itemIds: [...input.itemIds],
+          enemyHeroIds: [...input.enemyHeroIds],
           inventoryStateKey: input.inventoryStateKey,
           gameTimeS: input.gameTimeS,
           timeBucket: input.timeBucket,
@@ -352,6 +363,19 @@ export function createTraversalInput(
     .map((item) => Number(item.id))
     .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
     .sort((left, right) => left - right);
+  const enemyHeroIds = localPlayer.teamId === undefined
+    ? []
+    : [...new Set(
+        Object.values(state.playersBySteamId)
+          .filter(
+            (player) =>
+              player.teamId !== undefined &&
+              player.teamId !== localPlayer.teamId &&
+              Number.isSafeInteger(player.heroId) &&
+              Number(player.heroId) > 0,
+          )
+          .map((player) => Number(player.heroId)),
+      )].sort((left, right) => left - right);
   const inventoryStateKey = createInventoryStateKeyFromItemIds(itemIds);
   const gameTimeS = Number.isFinite(state.gameTimeSec)
     ? Math.max(0, Math.floor(Number(state.gameTimeSec)))
@@ -362,6 +386,7 @@ export function createTraversalInput(
     localPlayer.steamId,
     heroId,
     inventoryStateKey,
+    enemyHeroIds.join(','),
     timeBucket,
   ].join(':');
 
@@ -370,6 +395,7 @@ export function createTraversalInput(
     steamId: localPlayer.steamId,
     heroId,
     itemIds,
+    enemyHeroIds,
     inventoryStateKey,
     gameTimeS,
     timeBucket,
@@ -389,6 +415,7 @@ function cloneSnapshot(
   return {
     ...snapshot,
     itemIds: [...snapshot.itemIds],
+    enemyHeroIds: [...snapshot.enemyHeroIds],
     recommendation: snapshot.recommendation
       ? {
           ...snapshot.recommendation,
