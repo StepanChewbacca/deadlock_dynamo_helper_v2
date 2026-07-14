@@ -84,6 +84,8 @@ export function deduplicateDesktopBuildRows(): void {
 
     updatePhaseCount(phaseCard, phaseRows.length);
   }
+
+  updateBuildActionSummary(root, nextIndex - 1);
 }
 
 export function selectUniqueBuildRowIndexes(
@@ -162,6 +164,24 @@ function updatePhaseCount(phaseCard: HTMLElement, count: number): void {
   const countText = `${count} action${count === 1 ? '' : 's'}`;
   if (countElement && countElement.textContent !== countText) {
     countElement.textContent = countText;
+  }
+}
+
+function updateBuildActionSummary(root: Element, count: number): void {
+  for (const card of Array.from(
+    root.querySelectorAll<HTMLElement>('.live-build-summary > div'),
+  )) {
+    const label = card.querySelector('span')?.textContent?.trim();
+    if (label !== 'Build actions') {
+      continue;
+    }
+
+    const value = card.querySelector('strong');
+    const countText = String(count);
+    if (value && value.textContent !== countText) {
+      value.textContent = countText;
+    }
+    return;
   }
 }
 
