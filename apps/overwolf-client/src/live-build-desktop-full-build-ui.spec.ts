@@ -23,11 +23,11 @@ describe('desktop situational diagnostics', () => {
         },
       } as any),
     ).toBe(
-      'Matchup funnel: 100 evaluated, 3 supported, 0 promoted. No warning can fire in this state.',
+      'Matchup funnel: 100 evaluated, 3 supported, 0 promoted, and the primary action is not situational.',
     );
   });
 
-  it('reports a warning-ready primary action', () => {
+  it('reports a rank-promoted primary action as warning-ready', () => {
     expect(
       describeMatchupDiagnostics({
         enemyHeroIds: [2, 3, 4],
@@ -45,6 +45,27 @@ describe('desktop situational diagnostics', () => {
       } as any),
     ).toBe(
       'Warning-ready: 100 evaluated, 3 supported, 2 promoted, 1 inserted.',
+    );
+  });
+
+  it('reports a supported primary action as warning-ready without promotion', () => {
+    expect(
+      describeMatchupDiagnostics({
+        enemyHeroIds: [2, 3, 4],
+        recommendation: {
+          evaluatedCandidateCount: 100,
+          situationalCandidateCount: 1,
+          promotedSituationalCandidateCount: 0,
+          insertedSituationalCandidateCount: 0,
+          action: {
+            isSituational: true,
+            wasPromotedByMatchup: false,
+          },
+          alternatives: [],
+        },
+      } as any),
+    ).toBe(
+      'Warning-ready: 100 evaluated, 1 supported, primary already ranked first before matchup scoring.',
     );
   });
 });
