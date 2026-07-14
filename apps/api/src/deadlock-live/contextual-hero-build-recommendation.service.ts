@@ -23,7 +23,10 @@ export type ContextualHeroBuildRecommendationAction =
   HeroBuildRecommendationAction & {
     baseScore: number;
     contextualScore: number;
+    baseRank: number;
+    contextualRank: number;
     isSituational: boolean;
+    wasPromotedByMatchup: boolean;
     situationalAgainstHeroId?: number;
     situationalInteractionOddsRatio?: number;
     situationalLower95OddsRatio?: number;
@@ -39,6 +42,7 @@ export type ContextualHeroBuildRecommendationResponse = Omit<
   enemyHeroIds: number[];
   matchupModelVersion: typeof GRAPH_MATCHUP_MODEL_VERSION;
   situationalCandidateCount: number;
+  promotedSituationalCandidateCount: number;
   action: ContextualHeroBuildRecommendationAction;
   alternatives: ContextualHeroBuildRecommendationAction[];
 };
@@ -64,14 +68,18 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     const enemyHeroIds = normalizeEnemyHeroIds(request.enemyHeroIds ?? []);
     const sourceActions = [baseResponse.action, ...baseResponse.alternatives];
     const contextualActions = await Promise.all(
-      sourceActions.map((action) =>
-        this.contextualizeAction(request.heroId, enemyHeroIds, action),
+      sourceActions.map((action, index) =>
+        this.contextualizeAction(
+          request.heroId,
+          enemyHeroIds,
+          action,
+          index + 1,
+        ),
       ),
     );
-    contextualActions.sort(compareContextualActions);
-
-    const action = contextualActions[0];
-    const alternatives = contextualActions.slice(1);
+    const rankedActions = rankContextualActions(contextualActions);
+    const action = rankedActions[0];
+    const alternatives = rankedActions.slice(1);
 
     return {
       ...baseResponse,
@@ -83,8 +91,11 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       observationCount: action.matchedStateObservationCount,
       enemyHeroIds,
       matchupModelVersion: GRAPH_MATCHUP_MODEL_VERSION,
-      situationalCandidateCount: contextualActions.filter(
+      situationalCandidateCount: rankedActions.filter(
         (candidate) => candidate.isSituational,
+      ).length,
+      promotedSituationalCandidateCount: rankedActions.filter(
+        (candidate) => candidate.wasPromotedByMatchup,
       ).length,
       action,
       alternatives,
@@ -95,6 +106,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     heroId: number,
     enemyHeroIds: number[],
     action: HeroBuildRecommendationAction,
+    baseRank: number,
   ): Promise<ContextualHeroBuildRecommendationAction> {
     if (
       enemyHeroIds.length === 0 ||
@@ -102,7 +114,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       action.itemId === undefined ||
       action.sourceActionType === undefined
     ) {
-      return createUnchangedContextualAction(action);
+      return createUnchangedContextualAction(action, baseRank);
     }
 
     const evaluation = await this.heroBuildMatchupStatisticsService.evaluate({
@@ -126,7 +138,10 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
       score: contextualScore,
       baseScore: action.score,
       contextualScore,
+      baseRank,
+      contextualRank: baseRank,
       isSituational: conservativeInteractionLogOdds > 0,
+      wasPromotedByMatchup: false,
       situationalAgainstHeroId:
         conservativeInteractionLogOdds > 0
           ? bestEvidence?.enemyHeroId
@@ -163,14 +178,34 @@ export function applyConservativeMatchupOdds(
   return contextualOdds / (1 + contextualOdds);
 }
 
+export function rankContextualActions(
+  actions: readonly ContextualHeroBuildRecommendationAction[],
+): ContextualHeroBuildRecommendationAction[] {
+  return [...actions]
+    .sort(compareContextualActions)
+    .map((action, index) => {
+      const contextualRank = index + 1;
+      return {
+        ...action,
+        contextualRank,
+        wasPromotedByMatchup:
+          action.isSituational && contextualRank < action.baseRank,
+      };
+    });
+}
+
 function createUnchangedContextualAction(
   action: HeroBuildRecommendationAction,
+  baseRank: number,
 ): ContextualHeroBuildRecommendationAction {
   return {
     ...action,
     baseScore: action.score,
     contextualScore: action.score,
+    baseRank,
+    contextualRank: baseRank,
     isSituational: false,
+    wasPromotedByMatchup: false,
     matchupObservationCount: 0,
     matchupModelVersion: GRAPH_MATCHUP_MODEL_VERSION,
     matchupEvidence: [],
@@ -203,7 +238,7 @@ function compareContextualActions(
     return right.historicalCount - left.historicalCount;
   }
 
-  return left.actionKey.localeCompare(right.actionKey);
+  return left.baseRank - right.baseRank;
 }
 
 function clampProbability(value: number): number {
