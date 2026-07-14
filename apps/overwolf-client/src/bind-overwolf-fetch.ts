@@ -1,6 +1,7 @@
-const nativeFetch = globalThis.fetch;
+const runtimeWindow = window;
+const nativeFetch = runtimeWindow.fetch;
 
 if (typeof nativeFetch === 'function') {
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
-    nativeFetch.call(globalThis, input, init);
+  runtimeWindow.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    nativeFetch.call(runtimeWindow, input, init);
 }
