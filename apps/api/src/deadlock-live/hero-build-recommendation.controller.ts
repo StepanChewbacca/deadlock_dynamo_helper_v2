@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
   filterHeroBuildRecommendationAlternatives,
   HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
@@ -10,7 +11,6 @@ import { HeroBuildRecommendationPresentationService } from './hero-build-recomme
 import {
   HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
-  HeroBuildRecommendationRequest,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
 
@@ -18,13 +18,14 @@ export class RecommendHeroBuildDto {
   heroId!: number;
   itemIds!: number[];
   gameTimeS!: number;
+  enemyHeroIds?: number[];
   limit?: number;
   minAlternativeHistoricalCount?: number;
   minAlternativeConfidence?: number;
 }
 
 interface ValidatedRecommendHeroBuildRequest {
-  recommendationRequest: HeroBuildRecommendationRequest;
+  recommendationRequest: HeroBuildContextualRecommendationRequest;
   alternativeFilter: HeroBuildAlternativeFilterOptions;
 }
 
@@ -99,11 +100,14 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
     );
   }
 
+  const enemyHeroIds = validateEnemyHeroIds(dto.enemyHeroIds);
+
   return {
     recommendationRequest: {
       heroId: dto.heroId,
       itemIds: [...dto.itemIds],
       gameTimeS: dto.gameTimeS,
+      enemyHeroIds,
     },
     alternativeFilter: {
       limit: dto.limit ?? HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
@@ -115,4 +119,23 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
         HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
     },
   };
+}
+
+function validateEnemyHeroIds(value: number[] | undefined): number[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new BadRequestException('enemyHeroIds must be an array.');
+  }
+
+  for (const heroId of value) {
+    if (!Number.isSafeInteger(heroId) || heroId <= 0) {
+      throw new BadRequestException(
+        'Every enemyHeroIds value must be a positive safe integer.',
+      );
+    }
+  }
+
+  return [...new Set(value)].sort((left, right) => left - right);
 }
