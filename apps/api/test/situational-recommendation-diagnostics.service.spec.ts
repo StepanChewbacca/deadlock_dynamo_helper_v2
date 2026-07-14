@@ -7,28 +7,7 @@ describe('SituationalRecommendationDiagnosticsService', () => {
       getStatus: jest.fn().mockReturnValue({ actionOptionCount: 1 }),
       getHeroPolicy: jest.fn((heroId: number) =>
         heroId === 1
-          ? {
-              statesByKey: new Map([
-                [
-                  'EMPTY',
-                  {
-                    stateKey: 'EMPTY',
-                    observationCount: 100,
-                    nextActions: [
-                      {
-                        actionType: 'BUY',
-                        itemId: 100,
-                        actionKey: 'BUY:100',
-                        count: 40,
-                        probability: 0.4,
-                        averageGameTimeS: 321,
-                        afterStates: [],
-                      },
-                    ],
-                  },
-                ],
-              ]),
-            }
+          ? createPolicy(100, 321)
           : undefined,
       ),
     };
@@ -99,6 +78,7 @@ describe('SituationalRecommendationDiagnosticsService', () => {
 
     expect(result.rawPositiveSignalCount).toBe(1);
     expect(result.warningExampleCount).toBe(1);
+    expect(result.evaluatedHeroCount).toBe(1);
     expect(result.examples).toHaveLength(1);
     expect(result.examples[0]).toMatchObject({
       heroId: 1,
@@ -120,4 +100,74 @@ describe('SituationalRecommendationDiagnosticsService', () => {
       limit: 20,
     });
   });
+
+  it('shares a small scan budget across available heroes', async () => {
+    const transitionAggregation = {
+      ensureReady: jest.fn().mockResolvedValue(undefined),
+      getStatus: jest.fn().mockReturnValue({ actionOptionCount: 2 }),
+      getHeroPolicy: jest.fn((heroId: number) =>
+        heroId === 1
+          ? createPolicy(101, 100)
+          : heroId === 2
+            ? createPolicy(202, 200)
+            : undefined,
+      ),
+    };
+    const matchupStatistics = {
+      evaluate: jest.fn().mockResolvedValue({ evidence: [] }),
+    };
+    const recentMatchesWindow = {
+      getMatches: jest.fn().mockReturnValue([
+        {
+          players: [
+            { heroId: 1 },
+            { heroId: 2 },
+          ],
+        },
+      ]),
+    };
+    const service = new SituationalRecommendationDiagnosticsService(
+      transitionAggregation as any,
+      matchupStatistics as any,
+      { recommend: jest.fn() } as any,
+      recentMatchesWindow as any,
+    );
+
+    const result = await service.findExamples({
+      maxEvaluatedActions: 2,
+      maxValidatedStates: 1,
+    });
+
+    expect(result.evaluatedActionCount).toBe(2);
+    expect(result.evaluatedHeroCount).toBe(2);
+    expect(matchupStatistics.evaluate.mock.calls.map(([input]) => input.heroId)).toEqual([
+      1,
+      2,
+    ]);
+  });
 });
+
+function createPolicy(itemId: number, averageGameTimeS: number) {
+  return {
+    statesByKey: new Map([
+      [
+        'EMPTY',
+        {
+          stateKey: 'EMPTY',
+          observationCount: 100,
+          nextActions: [
+            {
+              actionType: 'BUY',
+              itemId,
+              actionKey: `BUY:${itemId}`,
+              count: 40,
+              probability: 0.4,
+              averageGameTimeS,
+              afterStates: [],
+            },
+          ],
+        },
+      ],
+    ]),
+  };
+}
