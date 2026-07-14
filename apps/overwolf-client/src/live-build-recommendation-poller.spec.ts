@@ -31,7 +31,7 @@ describe('LiveBuildRecommendationPoller', () => {
 
   it('does not emit again when only cache counters change', async () => {
     let snapshot = createSnapshot();
-    const onSnapshot = jest.fn<(snapshot: LiveBuildRecommendationSnapshot) => void>();
+    const onSnapshot = jest.fn<void, [LiveBuildRecommendationSnapshot]>();
     const firstEmission = deferred<LiveBuildRecommendationSnapshot>();
     onSnapshot.mockImplementationOnce(firstEmission.resolve);
     const fetchImpl = jest.fn(
@@ -59,7 +59,7 @@ describe('LiveBuildRecommendationPoller', () => {
 
   it('emits lifecycle transitions even when the traversal key is unchanged', async () => {
     let snapshot = createSnapshot();
-    const onSnapshot = jest.fn<(snapshot: LiveBuildRecommendationSnapshot) => void>();
+    const onSnapshot = jest.fn<void, [LiveBuildRecommendationSnapshot]>();
     const firstEmission = deferred<LiveBuildRecommendationSnapshot>();
     onSnapshot.mockImplementationOnce(firstEmission.resolve);
     const fetchImpl = jest.fn(
