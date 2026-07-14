@@ -14,6 +14,7 @@ import {
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
+import { preferUpgradeOverComponentSell } from './hero-build-upgrade-preference';
 import { LiveMatchStateService } from './live-match-state.service';
 
 export class RecommendHeroBuildDto {
@@ -58,8 +59,12 @@ export class HeroBuildRecommendationController {
       response,
       validated.alternativeFilter,
     );
+    const preferred = preferUpgradeOverComponentSell(
+      filtered,
+      contextualRequest.itemIds,
+    );
 
-    return this.heroBuildRecommendationPresentationService.present(filtered);
+    return this.heroBuildRecommendationPresentationService.present(preferred);
   }
 
   private resolveLiveEnemyHeroIds(heroId: number): number[] {
