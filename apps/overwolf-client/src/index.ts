@@ -122,7 +122,7 @@ function initializeBackgroundWindow(): void {
     try {
       ui.updateStatus('REGISTERING...', 'init');
       await setRequiredFeatures();
-      ui.updateStatus('REGISTERED', 'success');
+      ui.updateStatus('REGISTERED', 'connected');
       ui.logConsole('Successfully registered GEP required features: game_info, match_info');
 
       restoreHeroNamesFromGep(mainWindow);
