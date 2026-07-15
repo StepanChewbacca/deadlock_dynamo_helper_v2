@@ -127,12 +127,12 @@ export class LiveMatchStateService {
     }
 
     if (event.key?.startsWith('roster')) {
-      this.applyRosterPayload(state, event.payload);
+      this.applyRosterPayload(state, event.payload, event.key);
       return false;
     }
 
     if (event.key?.startsWith('items')) {
-      return this.applyItemsPayload(state, event.payload);
+      return this.applyItemsPayload(state, event.payload, event.key);
     }
 
     return false;
@@ -178,38 +178,52 @@ export class LiveMatchStateService {
     return hours * 3600 + minutes * 60 + seconds;
   }
 
-  private applyRosterPayload(state: MinimalMatchState, payload: unknown): void {
+  private applyRosterPayload(
+    state: MinimalMatchState,
+    payload: unknown,
+    eventKey: string,
+  ): void {
     if (!this.isRecord(payload)) {
       return;
     }
 
-    const steamId = this.getStringValue(payload, 'steam_id');
-    if (!steamId) {
+    const playerKey = this.resolvePlayerKey(payload, eventKey);
+    if (!playerKey) {
       return;
     }
 
-    const player = this.getOrCreatePlayer(state, steamId);
+    const player = this.getOrCreatePlayer(state, playerKey);
     const playerName = this.getStringValue(payload, 'player_name');
     const heroName = this.getStringValue(payload, 'hero_name');
     const heroId = this.getNumericValue(payload, 'hero_id');
-    const teamId = this.getNumericValue(payload, 'team');
-    const lane = this.getNumericValue(payload, 'lane');
+    const teamId =
+      this.getNumericValue(payload, 'team_id') ??
+      this.getNumericValue(payload, 'team');
+    const lane =
+      this.getNumericValue(payload, 'assigned_lane') ??
+      this.getNumericValue(payload, 'lane');
     const level = this.getNumericValue(payload, 'level');
     const souls = this.getNumericValue(payload, 'souls');
     const health = this.getNumericValue(payload, 'health');
     const maxHealth = this.getNumericValue(payload, 'max_health');
     const kills = this.getNumericValue(payload, 'kills');
     const deaths = this.getNumericValue(payload, 'deaths');
-    const assists = this.getNumericValue(payload, 'assists');
+    const assists =
+      this.getNumericValue(payload, 'assist') ??
+      this.getNumericValue(payload, 'assists');
     const heroDamage = this.getNumericValue(payload, 'hero_damage');
     const objectDamage = this.getNumericValue(payload, 'object_damage');
-    const healing = this.getNumericValue(payload, 'healing');
+    const healing =
+      this.getNumericValue(payload, 'hero_healing') ??
+      this.getNumericValue(payload, 'healing');
 
     if (playerName !== undefined) {
       player.playerName = playerName;
     }
     if ('is_local' in payload || 'isLocal' in payload) {
-      player.isLocal = this.getBooleanValue(payload, 'is_local') || this.getBooleanValue(payload, 'isLocal');
+      player.isLocal =
+        this.getBooleanValue(payload, 'is_local') ||
+        this.getBooleanValue(payload, 'isLocal');
     }
     if (heroName !== undefined) {
       player.heroName = heroName;
@@ -255,13 +269,17 @@ export class LiveMatchStateService {
     }
   }
 
-  private applyItemsPayload(state: MinimalMatchState, payload: unknown): boolean {
+  private applyItemsPayload(
+    state: MinimalMatchState,
+    payload: unknown,
+    eventKey: string,
+  ): boolean {
     if (!this.isRecord(payload)) {
       return false;
     }
 
-    const steamId = this.getStringValue(payload, 'steam_id');
-    if (!steamId) {
+    const playerKey = this.resolvePlayerKey(payload, eventKey);
+    if (!playerKey) {
       return false;
     }
 
@@ -270,7 +288,7 @@ export class LiveMatchStateService {
       return false;
     }
 
-    const player = this.getOrCreatePlayer(state, steamId);
+    const player = this.getOrCreatePlayer(state, playerKey);
     const nextItems: MinimalItemState[] = [];
 
     for (const item of itemsValue) {
@@ -300,6 +318,37 @@ export class LiveMatchStateService {
     return previousKey !== nextKey;
   }
 
+  private resolvePlayerKey(
+    payload: Record<string, unknown>,
+    eventKey: string,
+  ): string | undefined {
+    const steamId = this.getStringValue(payload, 'steam_id');
+    if (!steamId) {
+      return undefined;
+    }
+
+    if (steamId !== '0') {
+      return steamId;
+    }
+
+    const rosterSlot = eventKey.startsWith('roster_')
+      ? eventKey
+      : eventKey.startsWith('items_')
+        ? `roster_${eventKey.slice('items_'.length)}`
+        : undefined;
+    if (rosterSlot) {
+      return `bot:${rosterSlot}`;
+    }
+
+    const teamId =
+      this.getNumericValue(payload, 'team_id') ??
+      this.getNumericValue(payload, 'team') ??
+      'unknown';
+    const heroId = this.getNumericValue(payload, 'hero_id') ?? 'unknown';
+    const playerName = this.getStringValue(payload, 'player_name') ?? 'unknown';
+    return `bot:${teamId}:${heroId}:${playerName}`;
+  }
+
   private captureSnapshotIfNeeded(state: MinimalMatchState, force: boolean): void {
     if (!state.matchId || state.matchId === 'unknown') {
       return;
@@ -310,7 +359,8 @@ export class LiveMatchStateService {
     const gameTimeSec = state.gameTimeSec;
     const intervalElapsed =
       gameTimeSec !== undefined &&
-      (latest?.gameTimeSec === undefined || gameTimeSec - latest.gameTimeSec >= this.snapshotIntervalSec);
+      (latest?.gameTimeSec === undefined ||
+        gameTimeSec - latest.gameTimeSec >= this.snapshotIntervalSec);
 
     if (!force && !intervalElapsed && existing.length > 0) {
       return;
@@ -320,26 +370,25 @@ export class LiveMatchStateService {
       matchId: state.matchId,
       gameTimeSec,
       capturedAt: new Date().toISOString(),
-      playersBySteamId: Object.entries(state.playersBySteamId).reduce<Record<string, MinimalMatchSnapshot['playersBySteamId'][string]>>(
-        (acc, [steamId, player]) => {
-          acc[steamId] = {
-            steamId,
-            heroId: player.heroId,
-            teamId: player.teamId,
-            level: player.level,
-            souls: player.souls,
-            kills: player.kills,
-            deaths: player.deaths,
-            assists: player.assists,
-            heroDamage: player.heroDamage,
-            objectDamage: player.objectDamage,
-            healing: player.healing,
-            itemIds: player.items.map((item) => item.id),
-          };
-          return acc;
-        },
-        {},
-      ),
+      playersBySteamId: Object.entries(state.playersBySteamId).reduce<
+        Record<string, MinimalMatchSnapshot['playersBySteamId'][string]>
+      >((acc, [steamId, player]) => {
+        acc[steamId] = {
+          steamId,
+          heroId: player.heroId,
+          teamId: player.teamId,
+          level: player.level,
+          souls: player.souls,
+          kills: player.kills,
+          deaths: player.deaths,
+          assists: player.assists,
+          heroDamage: player.heroDamage,
+          objectDamage: player.objectDamage,
+          healing: player.healing,
+          itemIds: player.items.map((item) => item.id),
+        };
+        return acc;
+      }, {}),
     };
 
     const nextSnapshots = [...existing, snapshot].slice(-this.maxSnapshotsPerMatch);
@@ -353,7 +402,10 @@ export class LiveMatchStateService {
       .join(',');
   }
 
-  private getOrCreatePlayer(state: MinimalMatchState, steamId: string): MinimalPlayerState {
+  private getOrCreatePlayer(
+    state: MinimalMatchState,
+    steamId: string,
+  ): MinimalPlayerState {
     const existing = state.playersBySteamId[steamId];
     if (existing) {
       return existing;
@@ -368,12 +420,18 @@ export class LiveMatchStateService {
     return created;
   }
 
-  private getStringValue(record: Record<string, unknown>, key: string): string | undefined {
+  private getStringValue(
+    record: Record<string, unknown>,
+    key: string,
+  ): string | undefined {
     const value = record[key];
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 
-  private getNumericValue(record: Record<string, unknown>, key: string): number | undefined {
+  private getNumericValue(
+    record: Record<string, unknown>,
+    key: string,
+  ): number | undefined {
     const value = record[key];
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
