@@ -60,7 +60,7 @@ describe('graph matchup statistics', () => {
     expect(applyConservativeMatchupOdds(baseScore, -1)).toBe(baseScore);
   });
 
-  it('rebuilds only matches loaded for the requested canonical hero', async () => {
+  it('rebuilds only matches loaded for the requested current hero', async () => {
     const match = createMatchWithPlayers(2);
     const ensureReady = jest.fn(async () => undefined);
     const getSourceVersionMs = jest.fn(() => 1);
@@ -78,7 +78,7 @@ describe('graph matchup statistics', () => {
     );
 
     await service.evaluate({
-      heroId: 80,
+      heroId: 15,
       stateKey: 'EMPTY',
       actionKey: 'BUY:1',
       enemyHeroIds: [35],
@@ -108,13 +108,13 @@ describe('graph matchup statistics', () => {
           players: [
             {
               playerId: 1,
-              heroId: 81,
+              heroId: 19,
               replayDiagnosticCount: 0,
               steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:OTHER' }],
             },
             {
               playerId: 1,
-              heroId: 80,
+              heroId: 15,
               replayDiagnosticCount: 0,
               steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:TARGET' }],
             },
@@ -184,7 +184,7 @@ function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
       {
         id: 1,
         matchId,
-        heroId: 80,
+        heroId: 15,
         team: 2,
         won: true,
         kills: 0,
@@ -197,7 +197,7 @@ function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
       {
         id: 2,
         matchId,
-        heroId: 60,
+        heroId: 35,
         team: 3,
         won: false,
         kills: 0,
