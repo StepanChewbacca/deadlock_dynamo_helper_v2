@@ -9,6 +9,7 @@ import {
   decorateDesktopSituationalItems,
   initializeDesktopSituationalItems,
 } from './situational-item-ui';
+import { rerenderDesktopSkillBuild } from './skill-build-ui';
 
 const STYLE_ID = 'live-build-full-route-overrides';
 const MATCHUP_DIAGNOSTICS_ID = 'live-build-matchup-diagnostics';
@@ -27,15 +28,18 @@ export function showLiveBuildDesktop(snapshot: LiveBuildRecommendationSnapshot):
   showBaseDesktop(createFullRouteSnapshot(snapshot));
   decorateDesktopSituationalItems(snapshot);
   renderMatchupDiagnostics(snapshot);
+  rerenderDesktopSkillBuild();
 }
 
 export function showLiveBuildDesktopError(message: string): void {
   showBaseDesktopError(message);
+  rerenderDesktopSkillBuild();
 }
 
 export function clearLiveBuildDesktop(): void {
   document.getElementById(MATCHUP_DIAGNOSTICS_ID)?.remove();
   clearBaseDesktop();
+  rerenderDesktopSkillBuild();
 }
 
 export function describeMatchupDiagnostics(
