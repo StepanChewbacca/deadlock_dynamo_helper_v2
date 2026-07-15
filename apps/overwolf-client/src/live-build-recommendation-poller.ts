@@ -97,6 +97,7 @@ export class LiveBuildRecommendationPoller {
   private inFlight?: Promise<void>;
   private rerunRequested = false;
   private lastPresentationKey = '';
+  private lastSnapshot?: LiveBuildRecommendationSnapshot;
 
   constructor(options: LiveBuildRecommendationPollerOptions) {
     this.apiBaseUrl = options.apiBaseUrl.replace(/\/$/, '');
@@ -136,6 +137,7 @@ export class LiveBuildRecommendationPoller {
 
     this.matchId = normalizedMatchId;
     this.lastPresentationKey = '';
+    this.lastSnapshot = undefined;
     this.rerunRequested = false;
 
     if (!this.matchId) {
@@ -220,13 +222,15 @@ export class LiveBuildRecommendationPoller {
   }
 
   private emitSnapshot(snapshot: LiveBuildRecommendationSnapshot): void {
-    const presentationKey = createLiveBuildRecommendationPresentationKey(snapshot);
+    const effectiveSnapshot = preserveLastReadyRecommendation(this.lastSnapshot, snapshot);
+    const presentationKey = createLiveBuildRecommendationPresentationKey(effectiveSnapshot);
+    this.lastSnapshot = effectiveSnapshot;
     if (presentationKey === this.lastPresentationKey) {
       return;
     }
 
     this.lastPresentationKey = presentationKey;
-    this.onSnapshot(snapshot);
+    this.onSnapshot(effectiveSnapshot);
   }
 }
 
@@ -245,6 +249,48 @@ export function createLiveBuildRecommendationPresentationKey(
     snapshot.recommendation?.action.wasPromotedByMatchup ? 'promoted' : 'base',
     snapshot.recommendation?.action.wasInsertedByMatchup ? 'inserted' : 'existing',
   ].join('|');
+}
+
+export function preserveLastReadyRecommendation(
+  previous: LiveBuildRecommendationSnapshot | undefined,
+  next: LiveBuildRecommendationSnapshot,
+): LiveBuildRecommendationSnapshot {
+  if (
+    !previous?.recommendation ||
+    next.recommendation ||
+    previous.matchId !== next.matchId
+  ) {
+    return next;
+  }
+
+  return {
+    ...previous,
+    ...next,
+    state: 'READY',
+    steamId: next.steamId ?? previous.steamId,
+    heroId: next.heroId ?? previous.heroId,
+    itemIds: next.itemIds.length > 0 ? [...next.itemIds] : [...previous.itemIds],
+    enemyHeroIds:
+      next.enemyHeroIds && next.enemyHeroIds.length > 0
+        ? [...next.enemyHeroIds]
+        : [...(previous.enemyHeroIds ?? [])],
+    inventoryStateKey: next.inventoryStateKey ?? previous.inventoryStateKey,
+    gameTimeS: next.gameTimeS ?? previous.gameTimeS,
+    timeBucket: next.timeBucket ?? previous.timeBucket,
+    traversalKey: next.traversalKey ?? previous.traversalKey,
+    isStale: true,
+    recommendation: previous.recommendation,
+    refreshCount: Math.max(previous.refreshCount, next.refreshCount),
+    cacheHitCount: Math.max(previous.cacheHitCount, next.cacheHitCount),
+    discardedResultCount: Math.max(
+      previous.discardedResultCount,
+      next.discardedResultCount,
+    ),
+    lastObservedAt: next.lastObservedAt || previous.lastObservedAt,
+    lastStartedAt: next.lastStartedAt ?? previous.lastStartedAt,
+    lastUpdatedAt: previous.lastUpdatedAt,
+    lastError: next.lastError,
+  };
 }
 
 function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot {
