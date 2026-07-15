@@ -169,14 +169,26 @@ export class HeroBuildMatchupStatisticsService {
       return;
     }
 
-    let refreshPromise = this.refreshPromisesByHeroId.get(heroId);
-    if (!refreshPromise) {
-      refreshPromise = this.rebuildHero(heroId, sourceVersionMs).finally(() => {
-        this.refreshPromisesByHeroId.delete(heroId);
-      });
-      this.refreshPromisesByHeroId.set(heroId, refreshPromise);
+    const refreshPromise = this.getOrStartHeroRefresh(heroId, sourceVersionMs);
+    if (cached) {
+      void refreshPromise.catch(() => undefined);
+      return;
     }
+
     await refreshPromise;
+  }
+
+  private getOrStartHeroRefresh(heroId: number, sourceVersionMs: number): Promise<void> {
+    const existing = this.refreshPromisesByHeroId.get(heroId);
+    if (existing) {
+      return existing;
+    }
+
+    const refreshPromise = this.rebuildHero(heroId, sourceVersionMs).finally(() => {
+      this.refreshPromisesByHeroId.delete(heroId);
+    });
+    this.refreshPromisesByHeroId.set(heroId, refreshPromise);
+    return refreshPromise;
   }
 
   private async rebuildHero(heroId: number, sourceVersionMs: number): Promise<void> {
