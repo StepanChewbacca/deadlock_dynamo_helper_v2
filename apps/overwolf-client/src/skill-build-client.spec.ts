@@ -9,6 +9,7 @@ import { formatSkillStepTitle } from './skill-build-ui';
 
 const RESPONSE: HeroSkillBuildResponse = {
   heroId: 11,
+  resolvedHeroId: 11,
   windowDays: 14,
   sourcePlayerCount: 100,
   validPlayerCount: 95,
@@ -86,12 +87,12 @@ describe('skill build client', () => {
     ).resolves.toEqual(RESPONSE);
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://example.test/deadlock/analysis/heroes/11/skill-build?levels=1%2C0%2C2%2C3',
+      'https://example.test/deadlock/analysis/heroes/11/skill-build?heroIdSource=gep&levels=1%2C0%2C2%2C3',
       { method: 'GET', cache: 'no-store' },
     );
   });
 
-  it('uses empty live levels by default', async () => {
+  it('uses empty live levels and GEP hero semantics by default', async () => {
     const fetchImpl = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -105,7 +106,18 @@ describe('skill build client', () => {
       fetchImpl as unknown as typeof fetch,
     );
 
+    expect(fetchImpl.mock.calls[0]?.[0]).toContain('heroIdSource=gep');
     expect(fetchImpl.mock.calls[0]?.[0]).toContain('levels=0%2C0%2C0%2C0');
+  });
+
+  it('accepts a response with a different resolved Valve hero id', () => {
+    expect(
+      isHeroSkillBuildResponse({
+        ...RESPONSE,
+        heroId: 6,
+        resolvedHeroId: 72,
+      }),
+    ).toBe(true);
   });
 
   it('rejects an invalid response shape', async () => {
