@@ -134,7 +134,7 @@ export class LiveBuildRecommendationTraversalService {
     runtime.desiredInput = input;
     runtime.snapshot = {
       ...runtime.snapshot,
-      state: 'REFRESHING',
+      state: runtime.snapshot.recommendation ? 'READY' : 'REFRESHING',
       matchId: input.matchId,
       steamId: input.steamId,
       heroId: input.heroId,
@@ -227,6 +227,17 @@ export class LiveBuildRecommendationTraversalService {
     observedAt: Date,
     steamId?: string,
   ): void {
+    if (runtime.snapshot.recommendation) {
+      runtime.snapshot = {
+        ...runtime.snapshot,
+        state: 'READY',
+        isStale: true,
+        lastObservedAt: observedAt.toISOString(),
+        lastError: undefined,
+      };
+      return;
+    }
+
     runtime.desiredInput = undefined;
     runtime.resolvedKey = undefined;
     runtime.lastAttemptedKey = undefined;
@@ -268,7 +279,8 @@ export class LiveBuildRecommendationTraversalService {
     ) {
       const input = runtime.desiredInput;
       runtime.lastAttemptedKey = input.traversalKey;
-      runtime.snapshot.state = 'REFRESHING';
+      runtime.snapshot.state = runtime.snapshot.recommendation ? 'READY' : 'REFRESHING';
+      runtime.snapshot.isStale = runtime.snapshot.recommendation !== undefined;
       runtime.snapshot.lastStartedAt = new Date().toISOString();
       runtime.snapshot.lastError = undefined;
 
