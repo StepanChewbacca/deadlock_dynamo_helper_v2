@@ -12,23 +12,41 @@ interface LiveItemMetadata {
 @Injectable()
 export class LiveInventoryEventNormalizerService {
   private readonly metadataByItemId = new Map<number, LiveItemMetadata>();
+  private readonly steamIdByClientAndRosterSlot = new Map<string, Map<string, string>>();
+  private readonly matchIdByClientId = new Map<string, string>();
 
   normalizeBatch(batch: OverwolfLiveBatchDto): OverwolfLiveBatchDto {
+    this.resetRosterSlotsWhenMatchChanges(batch);
+
     return {
       ...batch,
-      events: batch.events.map((event) => this.normalizeEvent(event)),
+      events: batch.events.map((event) => this.normalizeEvent(batch.clientId, event)),
     };
   }
 
-  private normalizeEvent(event: OverwolfLiveEventDto): OverwolfLiveEventDto {
+  private normalizeEvent(
+    clientId: string,
+    event: OverwolfLiveEventDto,
+  ): OverwolfLiveEventDto {
+    if (event.key?.startsWith('roster_') && isRecord(event.payload)) {
+      const steamId = readSteamId(event.payload.steam_id ?? event.payload.steamId);
+      if (steamId) {
+        this.getRosterSlots(clientId).set(event.key, steamId);
+      }
+      return event;
+    }
+
     if (
-      !event.key?.startsWith('items') ||
+      !event.key?.startsWith('items_') ||
       !isRecord(event.payload) ||
       !Array.isArray(event.payload.items)
     ) {
       return event;
     }
 
+    const rosterSlot = `roster_${event.key.slice('items_'.length)}`;
+    const steamId = readSteamId(event.payload.steam_id ?? event.payload.steamId)
+      ?? this.getRosterSlots(clientId).get(rosterSlot);
     const items = event.payload.items
       .map((item) => this.normalizeItem(item))
       .filter((item): item is Record<string, unknown> => item !== undefined);
@@ -37,9 +55,34 @@ export class LiveInventoryEventNormalizerService {
       ...event,
       payload: {
         ...event.payload,
+        ...(steamId ? { steam_id: steamId } : {}),
         items,
       },
     };
+  }
+
+  private resetRosterSlotsWhenMatchChanges(batch: OverwolfLiveBatchDto): void {
+    const matchId = extractMatchId(batch.events);
+    if (!matchId) {
+      return;
+    }
+
+    const previousMatchId = this.matchIdByClientId.get(batch.clientId);
+    if (previousMatchId && previousMatchId !== matchId) {
+      this.steamIdByClientAndRosterSlot.delete(batch.clientId);
+    }
+    this.matchIdByClientId.set(batch.clientId, matchId);
+  }
+
+  private getRosterSlots(clientId: string): Map<string, string> {
+    const existing = this.steamIdByClientAndRosterSlot.get(clientId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = new Map<string, string>();
+    this.steamIdByClientAndRosterSlot.set(clientId, created);
+    return created;
   }
 
   private normalizeItem(value: unknown): Record<string, unknown> | undefined {
@@ -72,6 +115,22 @@ export class LiveInventoryEventNormalizerService {
   }
 }
 
+function extractMatchId(events: readonly OverwolfLiveEventDto[]): string | undefined {
+  for (const event of events) {
+    const explicitMatchId = readString(event.matchId);
+    if (explicitMatchId) {
+      return explicitMatchId;
+    }
+    if (event.key === 'match_id') {
+      const payloadMatchId = readStringOrNumber(event.payload);
+      if (payloadMatchId) {
+        return payloadMatchId;
+      }
+    }
+  }
+  return undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -83,6 +142,20 @@ function readPositiveInteger(value: unknown): number | undefined {
       ? Number(value)
       : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function readSteamId(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return readString(value);
+}
+
+function readStringOrNumber(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return readString(value);
 }
 
 function readString(value: unknown): string | undefined {
