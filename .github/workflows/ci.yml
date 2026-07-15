@@ -94,5 +94,17 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Run workspace tests
-        run: yarn test
+      - name: Build shared package for tests
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Test domain package
+        run: yarn workspace @deadlock-live-probe/build-domain test
+
+      - name: Build domain package for API tests
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Test API
+        run: yarn workspace @deadlock-live-probe/api test
+
+      - name: Test Overwolf client
+        run: yarn workspace @deadlock-live-probe/overwolf-client test
