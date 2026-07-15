@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-project:
+    name: Build project
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+  build-overwolf:
+    name: Build Overwolf client
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build Overwolf client
+        env:
+          OVERWOLF_PUBLIC_TARGET: ${{ runner.temp }}/overwolf-client/public
+        run: yarn workspace @deadlock-live-probe/overwolf-client build
+
+      - name: Upload Overwolf build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: overwolf-client-${{ github.sha }}
+          path: ${{ runner.temp }}/overwolf-client/public
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Run workspace tests
+        run: yarn test
