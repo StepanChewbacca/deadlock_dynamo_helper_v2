@@ -48,6 +48,148 @@ describe('LiveMatchStateService', () => {
     expect(state?.playersBySteamId.s1.kills).toBe(2);
   });
 
+  it('keeps normal real-player steam ids unchanged with current roster fields', () => {
+    const service = new LiveMatchStateService();
+    const state = service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        {
+          receivedAt: 1,
+          source: 'onInfoUpdates2',
+          key: 'roster_1',
+          payload: {
+            steam_id: '76561198000000001',
+            player_name: 'Local',
+            is_local: true,
+            hero_id: 15,
+            team_id: 2,
+            assigned_lane: 6,
+            assist: 2,
+            hero_healing: 100,
+          },
+        },
+        {
+          receivedAt: 2,
+          source: 'onInfoUpdates2',
+          key: 'roster_7',
+          payload: {
+            steam_id: '76561198000000002',
+            player_name: 'Enemy',
+            hero_id: 35,
+            team_id: 3,
+          },
+        },
+      ],
+    });
+
+    expect(Object.keys(state?.playersBySteamId ?? {}).sort()).toEqual([
+      '76561198000000001',
+      '76561198000000002',
+    ]);
+    expect(state?.playersBySteamId['76561198000000001']).toMatchObject({
+      steamId: '76561198000000001',
+      teamId: 2,
+      lane: 6,
+      assists: 2,
+      healing: 100,
+      isLocal: true,
+    });
+    expect(state?.playersBySteamId['76561198000000002']).toMatchObject({
+      steamId: '76561198000000002',
+      teamId: 3,
+      heroId: 35,
+    });
+  });
+
+  it('keeps zero-steam-id players separate by roster slot', () => {
+    const service = new LiveMatchStateService();
+    service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        {
+          receivedAt: 1,
+          source: 'onInfoUpdates2',
+          key: 'roster_6',
+          payload: {
+            steam_id: '0',
+            player_name: 'Bot5',
+            hero_id: 67,
+            team_id: 3,
+          },
+        },
+        {
+          receivedAt: 2,
+          source: 'onInfoUpdates2',
+          key: 'roster_10',
+          payload: {
+            steam_id: '0',
+            player_name: 'Bot9',
+            hero_id: 35,
+            team_id: 3,
+          },
+        },
+      ],
+    });
+
+    const state = service.applyBatch({
+      clientId: 'test-client',
+      events: [
+        {
+          receivedAt: 3,
+          source: 'onInfoUpdates2',
+          key: 'roster_10',
+          payload: {
+            steam_id: '0',
+            player_name: 'Bot9',
+            hero_id: 35,
+            team_id: 3,
+            souls: 5700,
+          },
+        },
+        {
+          receivedAt: 4,
+          source: 'onInfoUpdates2',
+          key: 'items_10',
+          payload: {
+            steam_id: '0',
+            items: [
+              {
+                id: 1,
+                name: 'Boots',
+                class_name: 'boots',
+                enhanced: false,
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(Object.keys(state?.playersBySteamId ?? {}).sort()).toEqual([
+      'bot:roster_10',
+      'bot:roster_6',
+    ]);
+    expect(state?.playersBySteamId['bot:roster_6']).toMatchObject({
+      steamId: 'bot:roster_6',
+      heroId: 67,
+      teamId: 3,
+    });
+    expect(state?.playersBySteamId['bot:roster_10']).toMatchObject({
+      steamId: 'bot:roster_10',
+      heroId: 35,
+      teamId: 3,
+      souls: 5700,
+      items: [
+        {
+          id: 1,
+          name: 'Boots',
+          className: 'boots',
+          enhanced: false,
+        },
+      ],
+    });
+  });
+
   it('replaces item lists for a player', () => {
     const service = new LiveMatchStateService();
     service.applyBatch({
