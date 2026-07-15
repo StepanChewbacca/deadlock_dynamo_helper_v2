@@ -18,6 +18,10 @@ export interface SituationalItemWarning {
 
 export type HeroNameMap = Record<string | number, string>;
 
+type PresentedSituationalAction = LiveBuildRecommendationAction & {
+  situationalAgainstHeroName?: string;
+};
+
 export function createSituationalItemWarning(
   snapshot: LiveBuildRecommendationSnapshot,
   heroNames: HeroNameMap = {},
@@ -40,7 +44,11 @@ export function createSituationalItemWarning(
     actionKey: action.actionKey,
     itemName: action.item.name,
     enemyHeroId,
-    enemyHeroName: resolveHeroName(enemyHeroId, heroNames),
+    enemyHeroName: resolveHeroName(
+      enemyHeroId,
+      heroNames,
+      readPresentedHeroName(action),
+    ),
     wasPromotedByMatchup: Boolean(action.wasPromotedByMatchup),
     wasInsertedByMatchup: Boolean(action.wasInsertedByMatchup),
     lower95OddsRatio: finitePositive(action.situationalLower95OddsRatio),
@@ -63,7 +71,11 @@ export function createSituationalBadgeText(
     return undefined;
   }
 
-  return `Situational vs ${resolveHeroName(enemyHeroId, heroNames)}`;
+  return `Situational vs ${resolveHeroName(
+    enemyHeroId,
+    heroNames,
+    readPresentedHeroName(action),
+  )}`;
 }
 
 export function createSituationalEvidenceText(
@@ -98,10 +110,22 @@ export function createSituationalEvidenceText(
 export function resolveHeroName(
   heroId: number,
   heroNames: HeroNameMap = {},
+  presentedName?: string,
 ): string {
+  const normalizedPresentedName = normalizeHeroName(presentedName);
+  if (normalizedPresentedName) {
+    return normalizedPresentedName;
+  }
+
   const rawName = heroNames[heroId] ?? heroNames[String(heroId)];
   const normalized = normalizeHeroName(rawName);
   return normalized || `Hero ${heroId}`;
+}
+
+function readPresentedHeroName(
+  action: LiveBuildRecommendationAction,
+): string | undefined {
+  return (action as PresentedSituationalAction).situationalAgainstHeroName;
 }
 
 function normalizeHeroName(value: unknown): string {
