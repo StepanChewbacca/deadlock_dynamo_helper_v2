@@ -2,6 +2,12 @@
 
 The skill build model uses match data from the existing rolling 14-day recent match window.
 
+## Stored data format
+
+The crawler converts raw ability item IDs to skill slot numbers before persistence. Therefore, `match_player_skill_upgrades.abilityId` currently contains values `1-4`, despite the legacy field name.
+
+The analysis service replays these persisted slot identifiers directly and uses the hero ability map only to confirm that the requested hero is supported.
+
 ## Rules
 
 - Unlock: 1 AP
@@ -12,7 +18,7 @@ The skill build model uses match data from the existing rolling 14-day recent ma
 ## Algorithm
 
 1. Load recent players for the exact requested hero ID.
-2. Map ability IDs to skill slots.
+2. Interpret persisted ability IDs as skill slots `1-4`.
 3. Replay each chronological skill upgrade sequence.
 4. Keep valid prefixes when a later observation is invalid.
 5. Aggregate transitions by the complete four-skill state.
