@@ -22,7 +22,7 @@ export class LiveEventBuffer {
 
     this.events.push(matchId ? { ...event, matchId } : event);
 
-    if (isInventoryEvent(event)) {
+    if (isImmediateEvent(event)) {
       this.scheduleFlush(0, true);
       return;
     }
@@ -69,8 +69,11 @@ export class LiveEventBuffer {
   }
 }
 
-function isInventoryEvent(event: OverwolfLiveEventDto): boolean {
-  return typeof event.key === 'string' && event.key.startsWith('items');
+function isImmediateEvent(event: OverwolfLiveEventDto): boolean {
+  return (
+    event.feature === 'state_safety_poll' ||
+    (typeof event.key === 'string' && event.key.startsWith('items'))
+  );
 }
 
 function readCurrentMatchId(): string | undefined {
