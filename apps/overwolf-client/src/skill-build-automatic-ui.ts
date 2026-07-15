@@ -78,27 +78,35 @@ export function updateAutomaticSkillBuildUi(): void {
     status?.state ?? 'WAITING_FOR_HERO',
   );
   let changed = false;
+  const panels = Array.from(
+    document.querySelectorAll('.skill-build-panel'),
+  ) as HTMLElement[];
 
-  for (const panel of document.querySelectorAll<HTMLElement>('.skill-build-panel')) {
-    for (const manualControl of panel.querySelectorAll(
-      '.skill-build-confirm, .skill-build-controls',
-    )) {
+  for (const panel of panels) {
+    const manualControls = Array.from(
+      panel.querySelectorAll('.skill-build-confirm, .skill-build-controls'),
+    );
+    for (const manualControl of manualControls) {
       manualControl.remove();
       changed = true;
     }
 
-    const statusElement = panel.querySelector<HTMLElement>('.skill-build-status');
+    const statusElement = panel.querySelector('.skill-build-status') as
+      | HTMLElement
+      | null;
     if (statusElement && statusElement.textContent !== copy.status) {
       statusElement.textContent = copy.status;
       changed = true;
     }
 
-    const actionCopy = panel.querySelector<HTMLElement>('.skill-build-next-copy');
+    const actionCopy = panel.querySelector('.skill-build-next-copy') as
+      | HTMLElement
+      | null;
     if (!actionCopy) {
       continue;
     }
 
-    let note = actionCopy.querySelector<HTMLElement>(`.${NOTE_CLASS}`);
+    let note = actionCopy.querySelector(`.${NOTE_CLASS}`) as HTMLElement | null;
     if (!note) {
       note = document.createElement('span');
       note.className = NOTE_CLASS;
