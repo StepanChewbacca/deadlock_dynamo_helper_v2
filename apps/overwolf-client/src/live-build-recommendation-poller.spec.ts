@@ -90,7 +90,43 @@ describe('LiveBuildRecommendationPoller', () => {
     });
   });
 
-  it('emits a waiting snapshot for an empty backend response', async () => {
+  it('keeps the last ready build when the backend temporarily returns waiting', async () => {
+    let response = createResponse(createSnapshot());
+    const onSnapshot = jest.fn<void, [LiveBuildRecommendationSnapshot]>();
+    const firstEmission = deferred<LiveBuildRecommendationSnapshot>();
+    onSnapshot.mockImplementationOnce(firstEmission.resolve);
+    const fetchImpl = jest.fn(async () => response);
+    const poller = new LiveBuildRecommendationPoller({
+      apiBaseUrl: 'https://example.test',
+      fetchImpl: fetchImpl as typeof fetch,
+      onSnapshot,
+      onClear: jest.fn(),
+    });
+
+    poller.setMatchId('match-1');
+    await firstEmission.promise;
+
+    response = {
+      ok: true,
+      status: 200,
+      text: async () => '',
+    } as Response;
+    await poller.pollNow();
+
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+    expect(onSnapshot.mock.calls[1][0]).toMatchObject({
+      state: 'READY',
+      matchId: 'match-1',
+      isStale: true,
+      recommendation: {
+        action: {
+          label: 'Buy Grit',
+        },
+      },
+    });
+  });
+
+  it('emits a waiting snapshot for an empty backend response before any build is ready', async () => {
     const emitted = deferred<LiveBuildRecommendationSnapshot>();
     const fetchImpl = jest.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => ({
