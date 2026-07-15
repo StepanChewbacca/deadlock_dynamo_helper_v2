@@ -26,8 +26,8 @@ describe('live build recommendation traversal', () => {
     expect(input.itemIds).toEqual([100, 200, 200]);
     expect(input.enemyHeroIds).toEqual([13]);
     expect(input.inventoryStateKey).toBe('100x1|200x2');
-    expect(input.timeBucket).toBe(1);
-    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2:13:1');
+    expect(input.timeBucket).toBe(0);
+    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2:13:0');
   });
 
   it('serves repeated observations from the traversal cache within the same time bucket', async () => {
@@ -134,16 +134,16 @@ describe('live build recommendation traversal', () => {
   it('refreshes when game time crosses a recommendation bucket', async () => {
     const harness = createHarness();
 
-    harness.service.observeState(createState(29, [100]));
+    harness.service.observeState(createState(119, [100]));
     await harness.service.waitForIdle('match-1');
-    harness.service.observeState(createState(30, [100]));
+    harness.service.observeState(createState(120, [100]));
     await harness.service.waitForIdle('match-1');
 
     expect(harness.recommend).toHaveBeenCalledTimes(2);
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'READY',
       timeBucket: 1,
-      gameTimeS: 30,
+      gameTimeS: 120,
       refreshCount: 2,
     });
   });
