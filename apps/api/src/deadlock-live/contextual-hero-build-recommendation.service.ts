@@ -20,6 +20,8 @@ import {
 } from './hero-build-recommendation.service';
 import {
   createInventoryStateKeyFromItemIds,
+  HeroBuildPolicy,
+  HeroBuildPolicyState,
   HeroBuildTransitionAggregationService,
 } from './hero-build-transition-aggregation.service';
 import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
@@ -75,10 +77,24 @@ interface ExpandedRecommendationCandidatePool {
   candidates: ContextualRecommendationCandidateSource[];
 }
 
+interface ParsedContextualPolicyState {
+  state: HeroBuildPolicyState;
+  itemCounts: ReadonlyMap<number, number>;
+}
+
+interface CachedParsedContextualPolicyStates {
+  policy: HeroBuildPolicy;
+  states: ParsedContextualPolicyState[];
+}
+
 @Injectable()
 export class ContextualHeroBuildRecommendationService extends HeroBuildRecommendationService {
   private readonly matchupReadyHeroIds = new Set<number>();
   private readonly matchupWarmupsByHeroId = new Map<number, Promise<void>>();
+  private readonly parsedPolicyStatesByHeroId = new Map<
+    number,
+    CachedParsedContextualPolicyStates
+  >();
 
   constructor(
     private readonly contextualTransitionAggregationService: LiveHeroBuildPolicyService,
@@ -174,19 +190,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     }
 
     const requestedStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
-    const parsedStates = [...policy.statesByKey.values()]
-      .map((state) => ({
-        state,
-        itemCounts: parseInventoryStateKey(state.stateKey),
-      }))
-      .filter(
-        (
-          value,
-        ): value is {
-          state: typeof value.state;
-          itemCounts: ReadonlyMap<number, number>;
-        } => value.itemCounts !== undefined,
-      );
+    const parsedStates = this.getParsedPolicyStates(request.heroId, policy);
     const recipeResolver = (parentItemId: number): readonly number[] =>
       this.contextualRecipeReconciliationService.getComponentItemIds(parentItemId);
     const commonOptions = {
@@ -232,6 +236,34 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
         HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
       ),
     };
+  }
+
+  private getParsedPolicyStates(
+    heroId: number,
+    policy: HeroBuildPolicy,
+  ): ParsedContextualPolicyState[] {
+    const canonicalId = canonicalHeroId(heroId);
+    const cached = this.parsedPolicyStatesByHeroId.get(canonicalId);
+    if (cached?.policy === policy) {
+      return cached.states;
+    }
+
+    const states = [...policy.statesByKey.values()]
+      .map((state) => ({
+        state,
+        itemCounts: parseInventoryStateKey(state.stateKey),
+      }))
+      .filter(
+        (
+          value,
+        ): value is {
+          state: HeroBuildPolicyState;
+          itemCounts: ReadonlyMap<number, number>;
+        } => value.itemCounts !== undefined,
+      );
+
+    this.parsedPolicyStatesByHeroId.set(canonicalId, { policy, states });
+    return states;
   }
 
   private warmMatchupInBackground(
