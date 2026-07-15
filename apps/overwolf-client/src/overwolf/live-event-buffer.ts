@@ -2,6 +2,7 @@ import { OverwolfLiveBatchDto, OverwolfLiveEventDto } from '@deadlock-live-probe
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 type MatchIdProvider = () => string | undefined;
+type InventoryFlushCallback = (batch: OverwolfLiveBatchDto) => void;
 
 export class LiveEventBuffer {
   private readonly events: OverwolfLiveEventDto[] = [];
@@ -13,6 +14,8 @@ export class LiveEventBuffer {
     private readonly fetchImpl: FetchLike = fetch,
     private readonly flushDelayMs = 1000,
     private readonly matchIdProvider: MatchIdProvider = readCurrentMatchId,
+    private readonly onInventoryFlushSuccess: InventoryFlushCallback =
+      refreshCurrentBuildRecommendation,
   ) {}
 
   push(event: OverwolfLiveEventDto): void {
@@ -58,11 +61,15 @@ export class LiveEventBuffer {
     };
 
     try {
-      await this.fetchImpl(`${this.apiBaseUrl}/deadlock/live/events`, {
+      const response = await this.fetchImpl(`${this.apiBaseUrl}/deadlock/live/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      if (response.ok && events.some(isInventoryEvent)) {
+        this.onInventoryFlushSuccess(body);
+      }
     } catch (err) {
       console.error('Failed to flush event batch:', err);
     }
@@ -70,10 +77,23 @@ export class LiveEventBuffer {
 }
 
 function isImmediateEvent(event: OverwolfLiveEventDto): boolean {
-  return (
-    event.feature === 'state_safety_poll' ||
-    (typeof event.key === 'string' && event.key.startsWith('items'))
-  );
+  return event.feature === 'state_safety_poll' || isInventoryEvent(event);
+}
+
+function isInventoryEvent(event: OverwolfLiveEventDto): boolean {
+  return typeof event.key === 'string' && event.key.startsWith('items');
+}
+
+function refreshCurrentBuildRecommendation(): void {
+  try {
+    const ow = (globalThis as any).overwolf;
+    const mainWindow = ow?.windows?.getMainWindow?.();
+    if (typeof mainWindow?.forceLiveBuildRecommendationRefresh === 'function') {
+      mainWindow.forceLiveBuildRecommendationRefresh();
+    }
+  } catch (error) {
+    console.warn('Failed to refresh build recommendation after inventory ingest:', error);
+  }
 }
 
 function readCurrentMatchId(): string | undefined {
