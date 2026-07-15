@@ -159,6 +159,66 @@ describe('skill build domain', () => {
     expect(path.map((step) => step.skillSlot)).toEqual([2, 3, 2]);
   });
 
+  it('searches from the current live state and preserves spent AP', () => {
+    const accumulator = new SkillBuildGraphAccumulator();
+    accumulator.addPath(
+      [
+        { abilityId: 101, upgradeOrder: 1 },
+        { abilityId: 102, upgradeOrder: 2 },
+        { abilityId: 101, upgradeOrder: 3 },
+      ],
+      ABILITY_SLOT_BY_ID,
+    );
+
+    const path = findBestSkillBuildPath(accumulator.build(), {
+      startStateKey: '1:0:0:0',
+      initialPointCost: 1,
+    });
+
+    expect(path.map((step) => step.skillSlot)).toEqual([2, 1]);
+    expect(path.map((step) => step.cumulativePointCost)).toEqual([2, 3]);
+  });
+
+  it('backs off from an unseen but legal live state', () => {
+    const accumulator = new SkillBuildGraphAccumulator();
+
+    for (let index = 0; index < 3; index += 1) {
+      accumulator.addPath(
+        [
+          { abilityId: 101, upgradeOrder: 1 },
+          { abilityId: 101, upgradeOrder: 2 },
+        ],
+        ABILITY_SLOT_BY_ID,
+      );
+    }
+    for (let index = 0; index < 5; index += 1) {
+      accumulator.addPath(
+        [
+          { abilityId: 102, upgradeOrder: 1 },
+          { abilityId: 102, upgradeOrder: 2 },
+        ],
+        ABILITY_SLOT_BY_ID,
+      );
+    }
+
+    const graph = accumulator.build();
+    expect(graph.statesByKey.has('1:1:0:0')).toBe(false);
+
+    const path = findBestSkillBuildPath(graph, {
+      startStateKey: '1:1:0:0',
+      maxActions: 1,
+      initialPointCost: 2,
+    });
+
+    expect(path).toHaveLength(1);
+    expect(path[0]).toMatchObject({
+      skillSlot: 2,
+      type: 'UPGRADE',
+      upgradeTier: 1,
+      cumulativePointCost: 3,
+    });
+  });
+
   it('stops before an action that exceeds the point budget', () => {
     const accumulator = new SkillBuildGraphAccumulator(DEFAULT_SKILL_BUILD_RULESET);
 
