@@ -137,6 +137,10 @@ if (ow?.windows) {
         return;
       }
 
+      if (!snapshot || typeof snapshot !== 'object') {
+        return;
+      }
+
       const warning = createSituationalItemWarning(
         snapshot,
         mainWindow.heroNamesMap || {},
@@ -153,8 +157,13 @@ if (ow?.windows) {
 
     mainWindow.updateWarningUI = updateUI;
     mainWindow.replayCurrentSituationalWarning = () => {
+      const snapshot = mainWindow.latestLiveBuildRecommendation;
+      if (!snapshot || typeof snapshot !== 'object') {
+        return false;
+      }
+
       const warning = createSituationalItemWarning(
-        mainWindow.latestLiveBuildRecommendation,
+        snapshot,
         mainWindow.heroNamesMap || {},
       );
       if (!warning) {
