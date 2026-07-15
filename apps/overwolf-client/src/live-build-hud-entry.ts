@@ -12,6 +12,15 @@ import { showLiveBuildRecommendation } from './live-build-recommendation-ui';
 import { createSituationalItemWarning } from './situational-item-metadata';
 import type { SituationalItemWarning } from './situational-item-metadata';
 import { decorateLiveBuildRecommendation } from './situational-item-ui';
+import {
+  fetchHeroSkillBuild,
+  SkillBuildPresentation,
+} from './skill-build-client';
+import {
+  clearOverlaySkillBuild,
+  showDesktopSkillBuild,
+  showOverlaySkillBuild,
+} from './skill-build-ui';
 
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
 const MATCH_INFO_REFRESH_MS = 2000;
@@ -52,6 +61,18 @@ function initializeInGameHud(): void {
     resizeOverlayToContent();
   };
 
+  mainWindow.inGameSkillBuildUpdate = (
+    presentation: SkillBuildPresentation,
+  ) => {
+    showOverlaySkillBuild(presentation);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameSkillBuildClear = () => {
+    clearOverlaySkillBuild();
+    resizeOverlayToContent();
+  };
+
   (window as any).refreshLiveBuildRecommendation = () => {
     if (typeof mainWindow.forceLiveBuildRecommendationRefresh === 'function') {
       mainWindow.forceLiveBuildRecommendationRefresh();
@@ -62,6 +83,15 @@ function initializeInGameHud(): void {
     ?? createWaitingSnapshot('');
   showLiveBuildRecommendation(initialSnapshot);
   decorateLiveBuildRecommendation(initialSnapshot);
+
+  const initialSkillBuild = mainWindow.latestSkillBuildPresentation as
+    | SkillBuildPresentation
+    | undefined;
+  if (initialSkillBuild && initialSkillBuild.state !== 'EMPTY') {
+    showOverlaySkillBuild(initialSkillBuild);
+  } else {
+    clearOverlaySkillBuild();
+  }
   resizeOverlayToContent();
 }
 
@@ -69,11 +99,82 @@ function initializeBackgroundTraversal(): void {
   const mainWindow = ow.windows.getMainWindow() as any;
   mainWindow.latestLiveBuildRecommendation =
     mainWindow.latestLiveBuildRecommendation ?? null;
+  mainWindow.latestSkillBuildPresentation =
+    mainWindow.latestSkillBuildPresentation ?? { state: 'EMPTY' };
   mainWindow.situationalItemWarning = undefined;
 
   let currentMatchId = '';
+  let currentSkillBuildHeroId: number | undefined;
+  let skillBuildGeneration = 0;
   let warningTimer: ReturnType<typeof setTimeout> | undefined;
   const shownWarningKeys = new Set<string>();
+  const skillBuildCache = new Map<number, SkillBuildPresentation>();
+
+  const publishSkillBuild = (presentation: SkillBuildPresentation): void => {
+    mainWindow.latestSkillBuildPresentation = presentation;
+    showDesktopSkillBuild(presentation);
+    if (typeof mainWindow.inGameSkillBuildUpdate === 'function') {
+      mainWindow.inGameSkillBuildUpdate(presentation);
+    }
+  };
+
+  const clearSkillBuild = (): void => {
+    currentSkillBuildHeroId = undefined;
+    skillBuildGeneration += 1;
+    const empty: SkillBuildPresentation = { state: 'EMPTY' };
+    mainWindow.latestSkillBuildPresentation = empty;
+    showDesktopSkillBuild(empty);
+    if (typeof mainWindow.inGameSkillBuildClear === 'function') {
+      mainWindow.inGameSkillBuildClear();
+    }
+  };
+
+  const syncSkillBuild = (heroIdValue: number | undefined): void => {
+    const heroId = normalizeHeroId(heroIdValue);
+    if (heroId === undefined) {
+      if (currentSkillBuildHeroId !== undefined) {
+        clearSkillBuild();
+      }
+      return;
+    }
+
+    if (heroId === currentSkillBuildHeroId) {
+      return;
+    }
+
+    currentSkillBuildHeroId = heroId;
+    const cached = skillBuildCache.get(heroId);
+    if (cached?.state === 'READY') {
+      publishSkillBuild(cached);
+      return;
+    }
+
+    const generation = ++skillBuildGeneration;
+    publishSkillBuild({ state: 'LOADING', heroId });
+
+    void fetchHeroSkillBuild(API_BASE_URL, heroId)
+      .then((build) => {
+        if (generation !== skillBuildGeneration || heroId !== currentSkillBuildHeroId) {
+          return;
+        }
+        const ready: SkillBuildPresentation = { state: 'READY', build };
+        skillBuildCache.set(heroId, ready);
+        publishSkillBuild(ready);
+      })
+      .catch((error: unknown) => {
+        if (generation !== skillBuildGeneration || heroId !== currentSkillBuildHeroId) {
+          return;
+        }
+        const presentation: SkillBuildPresentation = {
+          state: 'ERROR',
+          heroId,
+          message: error instanceof Error ? error.message : String(error),
+        };
+        skillBuildCache.set(heroId, presentation);
+        publishSkillBuild(presentation);
+        console.warn(`Skill build loading failed: ${presentation.message}`);
+      });
+  };
 
   const clearSituationalWarning = (): void => {
     if (warningTimer) {
@@ -109,12 +210,14 @@ function initializeBackgroundTraversal(): void {
 
   exposeCurrentMatchId(mainWindow, currentMatchId);
   showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
+  showDesktopSkillBuild(mainWindow.latestSkillBuildPresentation);
 
   const poller = new LiveBuildRecommendationPoller({
     apiBaseUrl: API_BASE_URL,
     onSnapshot: (snapshot) => {
       mainWindow.latestLiveBuildRecommendation = snapshot;
       showLiveBuildDesktop(snapshot);
+      syncSkillBuild(snapshot.heroId);
       if (typeof mainWindow.inGameLiveBuildRecommendationUpdate === 'function') {
         mainWindow.inGameLiveBuildRecommendationUpdate(snapshot);
       }
@@ -130,6 +233,7 @@ function initializeBackgroundTraversal(): void {
     onClear: () => {
       mainWindow.latestLiveBuildRecommendation = null;
       clearLiveBuildDesktop();
+      clearSkillBuild();
       clearSituationalWarning();
       if (typeof mainWindow.inGameLiveBuildRecommendationClear === 'function') {
         mainWindow.inGameLiveBuildRecommendationClear();
@@ -157,6 +261,7 @@ function initializeBackgroundTraversal(): void {
       showLiveBuildDesktop(createWaitingSnapshot(currentMatchId));
     } else {
       clearLiveBuildDesktop();
+      clearSkillBuild();
     }
     poller.setMatchId(currentMatchId);
     console.log(
@@ -167,6 +272,7 @@ function initializeBackgroundTraversal(): void {
   };
 
   mainWindow.forceLiveBuildRecommendationRefresh = () => {
+    currentSkillBuildHeroId = undefined;
     void poller.forceRefresh();
   };
 
@@ -303,6 +409,11 @@ function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot
     discardedResultCount: 0,
     lastObservedAt: new Date().toISOString(),
   };
+}
+
+function normalizeHeroId(value: number | undefined): number | undefined {
+  const heroId = Number(value);
+  return Number.isSafeInteger(heroId) && heroId > 0 ? heroId : undefined;
 }
 
 function resizeOverlayToContent(): void {
