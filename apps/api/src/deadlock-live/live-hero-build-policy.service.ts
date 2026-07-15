@@ -73,6 +73,10 @@ export class LiveHeroBuildPolicyService {
 
     const refreshPromise = this.startRefresh(canonicalId);
     if (cached) {
+      void refreshPromise.catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Failed to refresh cached live policy for hero ${canonicalId}: ${message}`);
+      });
       return;
     }
     await refreshPromise;
@@ -223,20 +227,18 @@ export class LiveHeroBuildPolicyService {
       }
 
       const snapshot = accumulator.build();
-      const policy = snapshot.policiesByHeroId.get(canonicalId);
-      if (policy) {
-        this.cacheByCanonicalHeroId.set(canonicalId, {
-          policy,
-          matchCount: processedMatchCount,
-          sourcePlayerCount: snapshot.sourcePlayerCount,
-          includedPlayerCount: snapshot.includedPlayerCount,
-          excludedPlayerCount: snapshot.excludedPlayerCount,
-          stateCount: snapshot.stateCount,
-          transitionCount: snapshot.transitionCount,
-          actionOptionCount: snapshot.actionOptionCount,
-          builtAt: new Date(),
-        });
-      }
+      const policy = snapshot.policiesByHeroId.get(canonicalId) ?? createEmptyPolicy(canonicalId);
+      this.cacheByCanonicalHeroId.set(canonicalId, {
+        policy,
+        matchCount: processedMatchCount,
+        sourcePlayerCount: snapshot.sourcePlayerCount,
+        includedPlayerCount: snapshot.includedPlayerCount,
+        excludedPlayerCount: snapshot.excludedPlayerCount,
+        stateCount: snapshot.stateCount,
+        transitionCount: snapshot.transitionCount,
+        actionOptionCount: snapshot.actionOptionCount,
+        builtAt: new Date(),
+      });
 
       this.lastRefreshDurationMs = Date.now() - startedAt;
       this.lastError = undefined;
@@ -250,6 +252,16 @@ export class LiveHeroBuildPolicyService {
       throw error;
     }
   }
+}
+
+function createEmptyPolicy(heroId: number): HeroBuildPolicy {
+  return {
+    heroId,
+    playerCount: 0,
+    stateCount: 0,
+    transitionCount: 0,
+    statesByKey: new Map(),
+  };
 }
 
 function toRequestedHeroMatchSnapshot(
