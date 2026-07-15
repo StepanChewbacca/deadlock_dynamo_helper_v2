@@ -17,6 +17,7 @@ export class LiveInventoryEventNormalizerService {
 
   normalizeBatch(batch: OverwolfLiveBatchDto): OverwolfLiveBatchDto {
     this.resetRosterSlotsWhenMatchChanges(batch);
+    this.captureRosterSlots(batch.clientId, batch.events);
 
     return {
       ...batch,
@@ -24,18 +25,26 @@ export class LiveInventoryEventNormalizerService {
     };
   }
 
+  private captureRosterSlots(
+    clientId: string,
+    events: readonly OverwolfLiveEventDto[],
+  ): void {
+    const rosterSlots = this.getRosterSlots(clientId);
+    for (const event of events) {
+      if (!event.key?.startsWith('roster_') || !isRecord(event.payload)) {
+        continue;
+      }
+      const steamId = readSteamId(event.payload.steam_id ?? event.payload.steamId);
+      if (steamId) {
+        rosterSlots.set(event.key, steamId);
+      }
+    }
+  }
+
   private normalizeEvent(
     clientId: string,
     event: OverwolfLiveEventDto,
   ): OverwolfLiveEventDto {
-    if (event.key?.startsWith('roster_') && isRecord(event.payload)) {
-      const steamId = readSteamId(event.payload.steam_id ?? event.payload.steamId);
-      if (steamId) {
-        this.getRosterSlots(clientId).set(event.key, steamId);
-      }
-      return event;
-    }
-
     if (
       !event.key?.startsWith('items_') ||
       !isRecord(event.payload) ||
