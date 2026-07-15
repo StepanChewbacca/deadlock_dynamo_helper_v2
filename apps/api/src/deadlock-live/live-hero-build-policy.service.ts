@@ -5,7 +5,11 @@ import { CanonicalBuildSequenceService } from './canonical-build-sequence.servic
 import { Match } from './entities/match.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
-import { canonicalHeroId, heroIdAliases } from './hero-id-aliases';
+import {
+  canonicalHeroId,
+  resolveGepHeroIdFromValve,
+  resolveValveHeroIdFromGep,
+} from './hero-id-aliases';
 import {
   HeroBuildNextActionsResponse,
   HeroBuildPolicy,
@@ -179,12 +183,11 @@ export class LiveHeroBuildPolicyService {
         // The live policy can use the existing recipe cache when refresh is unavailable.
       }
 
-      const aliases = [...heroIdAliases(canonicalId)];
-      const aliasSet = new Set(aliases);
+      const valveHeroId = resolveValveHeroIdFromGep(canonicalId);
       const players = await this.matchPlayerRepository
         .createQueryBuilder('player')
         .innerJoinAndSelect('player.match', 'match')
-        .where('player.heroId IN (:...heroIds)', { heroIds: aliases })
+        .where('player.heroId = :heroId', { heroId: valveHeroId })
         .andWhere('match.startTime >= :cutoff', { cutoff: getRecentMatchCutoff(new Date()) })
         .orderBy('match.startTime', 'DESC')
         .addOrderBy('match.matchId', 'DESC')
@@ -216,7 +219,7 @@ export class LiveHeroBuildPolicyService {
         const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
         const sequences = this.canonicalBuildSequenceService.canonicalizeMatch(replay);
         for (const sequence of sequences.players) {
-          if (!aliasSet.has(sequence.heroId)) {
+          if (resolveGepHeroIdFromValve(sequence.heroId) !== canonicalId) {
             continue;
           }
           accumulator.addPlayer({ ...sequence, heroId: canonicalId });
