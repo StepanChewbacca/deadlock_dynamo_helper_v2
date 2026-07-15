@@ -186,7 +186,10 @@ describe('SkillBuildAnalysisService', () => {
   it('caches the hero graph for repeated live state requests', async () => {
     const { service, matchPlayerRepository, skillUpgradeRepository } = createService(
       [createPlayer(1)],
-      [createUpgrade(1, 1, STORED_SKILL_1, 1)],
+      [
+        createUpgrade(1, 1, STORED_SKILL_1, 1),
+        createUpgrade(2, 1, STORED_SKILL_2, 2),
+      ],
     );
 
     await service.getHeroSkillBuild(11);
