@@ -1,25 +1,25 @@
-import { initializeAutomaticSkillBuildRuntime } from './skill-build-automatic-runtime';
+import { initializeAutomaticSkillBuildRuntimeV2 } from './skill-build-automatic-runtime-v2';
 import {
-  initializeAutomaticSkillBuildUi,
-  updateAutomaticSkillBuildUi,
-} from './skill-build-automatic-ui';
+  initializeAutomaticSkillBuildUiV2,
+  updateAutomaticSkillBuildUiV2,
+} from './skill-build-automatic-ui-v2';
 
 const ow = (window as any).overwolf;
 
-initializeAutomaticSkillBuildUi();
+initializeAutomaticSkillBuildUiV2();
 
 if (ow?.windows) {
   ow.windows.getCurrentWindow((result: any) => {
     const mainWindow = ow.windows.getMainWindow() as any;
     mainWindow.inGameAutomaticSkillTrackingUpdate = () => {
-      updateAutomaticSkillBuildUi();
+      updateAutomaticSkillBuildUiV2();
     };
 
     if (result?.window?.name === 'in_game') {
-      updateAutomaticSkillBuildUi();
+      updateAutomaticSkillBuildUiV2();
       return;
     }
 
-    initializeAutomaticSkillBuildRuntime(ow, mainWindow);
+    initializeAutomaticSkillBuildRuntimeV2(ow, mainWindow);
   });
 }
