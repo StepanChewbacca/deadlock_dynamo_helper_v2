@@ -98,6 +98,25 @@ describe('LiveHeroBuildPolicyService', () => {
       count: 1,
     });
   });
+
+  it('does not remap Abrams item history to Billy', async () => {
+    const queryBuilder = createQueryBuilder([]);
+    const service = new LiveHeroBuildPolicyService(
+      { createQueryBuilder: jest.fn(() => queryBuilder) } as any,
+      { find: jest.fn(async () => []) } as any,
+      { normalizeMatch: jest.fn() } as any,
+      { replayMatch: jest.fn() } as any,
+      { canonicalizeMatch: jest.fn() } as any,
+      { refreshRecipes: jest.fn(async () => undefined) } as any,
+    );
+
+    await service.ensureReady(6);
+
+    expect(queryBuilder.where).toHaveBeenCalledWith(
+      'player.heroId = :heroId',
+      { heroId: 6 },
+    );
+  });
 });
 
 function createQueryBuilder(result: unknown[]) {
