@@ -1,5 +1,9 @@
 import { applyConservativeMatchupOdds } from '../src/deadlock-live/contextual-hero-build-recommendation.service';
-import { calculateGraphMatchupInteraction } from '../src/deadlock-live/hero-build-matchup-statistics.service';
+import {
+  calculateGraphMatchupInteraction,
+  HeroBuildMatchupStatisticsService,
+} from '../src/deadlock-live/hero-build-matchup-statistics.service';
+import { RecentMatchSnapshot } from '../src/deadlock-live/recent-matches-window.service';
 
 describe('graph matchup statistics', () => {
   it('detects an item action that is specifically stronger against an enemy hero', () => {
@@ -55,4 +59,50 @@ describe('graph matchup statistics', () => {
     expect(contextualScore).toBeGreaterThan(baseScore);
     expect(applyConservativeMatchupOdds(baseScore, -1)).toBe(baseScore);
   });
+
+  it('rebuilds the matchup index one match at a time', async () => {
+    const matchOne = createEmptyMatch(1);
+    const matchTwo = createEmptyMatch(2);
+    const getMatch = jest.fn((matchId: number) =>
+      matchId === 1 ? matchOne : matchTwo,
+    );
+    const normalizeMatch = jest.fn(() => ({ players: [] }));
+    const replayMatch = jest.fn(() => ({ players: [] }));
+    const canonicalizeMatch = jest.fn(() => ({ players: [] }));
+
+    const service = new HeroBuildMatchupStatisticsService(
+      {
+        getStatus: () => ({ lastRefreshedAt: new Date(1) }),
+        getMatchIds: () => [1, 2],
+        getMatch,
+      } as any,
+      { normalizeMatch } as any,
+      { replayMatch } as any,
+      { canonicalizeMatch } as any,
+      { refreshRecipes: jest.fn(async () => undefined) } as any,
+    );
+
+    await service.evaluate({
+      heroId: 15,
+      stateKey: 'EMPTY',
+      actionKey: 'BUY:1',
+      enemyHeroIds: [35],
+    });
+
+    expect(getMatch.mock.calls.map(([matchId]) => matchId)).toEqual([1, 2]);
+    expect(normalizeMatch).toHaveBeenCalledTimes(2);
+    expect(replayMatch).toHaveBeenCalledTimes(2);
+    expect(canonicalizeMatch).toHaveBeenCalledTimes(2);
+  });
 });
+
+function createEmptyMatch(matchId: number): RecentMatchSnapshot {
+  return {
+    matchId,
+    startTime: new Date(matchId),
+    durationS: 0,
+    averageBadge: 0,
+    winningTeam: 0,
+    players: [],
+  };
+}
