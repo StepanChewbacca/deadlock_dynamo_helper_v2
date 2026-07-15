@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  findMostPopularSkillBuildPath,
+  findBestSkillBuildPath,
   SkillBuildDiagnostic,
   SkillBuildGraphAccumulator,
   SkillBuildPathStep,
@@ -86,7 +86,7 @@ export class SkillBuildAnalysisService {
     }
 
     const graph = accumulator.build();
-    const actions = findMostPopularSkillBuildPath(graph, { maxPointBudget });
+    const actions = findBestSkillBuildPath(graph, { maxPointBudget });
 
     if (actions.length === 0) {
       throw new NotFoundException(
