@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import {
   createInitialSkillBuildState,
   createSkillBuildStateKey,
@@ -13,14 +14,22 @@ import {
   SkillSlot,
   SkillUpgradeObservation,
 } from '@deadlock-live-probe/build-domain';
+import { In, Repository } from 'typeorm';
+import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
+import { MatchPlayer } from './entities/match-player.entity';
 import { HERO_ABILITY_MAP } from './hero-abilities';
 import {
+  chunkValues,
+  getRecentMatchCutoff,
+  RECENT_MATCH_QUERY_BATCH_SIZE,
+  RECENT_MATCH_TARGET_COUNT,
   RECENT_MATCH_WINDOW_DAYS,
-  RecentMatchSkillSnapshot,
-  RecentMatchesWindowService,
 } from './recent-matches-window.service';
 
 export const SKILL_BUILD_MAX_POINT_BUDGET = 36;
+
+const HERO_SKILL_GRAPH_TTL_MS = 5 * 60_000;
+const HERO_SKILL_GRAPH_YIELD_INTERVAL = 100;
 
 export type HeroSkillLevels = Readonly<Record<SkillSlot, SkillLevel>>;
 
@@ -51,7 +60,6 @@ export interface HeroSkillBuildResponse {
 }
 
 interface CachedHeroSkillGraph {
-  windowVersion: string;
   graph: SkillBuildGraph;
   abilityIdsBySlot: Readonly<Record<SkillSlot, number>>;
   sourcePlayerCount: number;
@@ -59,13 +67,24 @@ interface CachedHeroSkillGraph {
   partialPlayerCount: number;
   rejectedPlayerCount: number;
   diagnostics: HeroSkillBuildDiagnosticSummary[];
+  builtAt: Date;
 }
 
 @Injectable()
 export class SkillBuildAnalysisService {
+  private readonly logger = new Logger(SkillBuildAnalysisService.name);
   private readonly cacheByHeroId = new Map<number, CachedHeroSkillGraph>();
+  private readonly refreshPromisesByHeroId = new Map<
+    number,
+    Promise<CachedHeroSkillGraph>
+  >();
 
-  constructor(private readonly recentMatchesWindowService: RecentMatchesWindowService) {}
+  constructor(
+    @InjectRepository(MatchPlayer)
+    private readonly matchPlayerRepository: Repository<MatchPlayer>,
+    @InjectRepository(MatchPlayerSkillUpgrade)
+    private readonly skillUpgradeRepository: Repository<MatchPlayerSkillUpgrade>,
+  ) {}
 
   async getHeroSkillBuild(
     heroId: number,
@@ -78,9 +97,7 @@ export class SkillBuildAnalysisService {
       throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
     }
 
-    await this.ensureRecentMatchesLoaded();
-
-    const cached = this.getOrBuildCachedGraph(heroId, abilitySlotById);
+    const cached = await this.ensureHeroGraph(heroId, abilitySlotById);
     const currentState = createCurrentState(options.currentLevels);
     const currentPointCost = getSkillBuildSpentPoints(currentState);
     const maxPointBudget = options.maxPointBudget ?? SKILL_BUILD_MAX_POINT_BUDGET;
@@ -113,46 +130,103 @@ export class SkillBuildAnalysisService {
       abilityIdsBySlot: { ...cached.abilityIdsBySlot },
       currentLevels: { ...currentState.levels },
       currentPointCost,
-      totalPointCost: actions[actions.length - 1]?.cumulativePointCost ?? currentPointCost,
+      totalPointCost:
+        actions[actions.length - 1]?.cumulativePointCost ?? currentPointCost,
       nextAction: actions[0] ? { ...actions[0] } : undefined,
       actions,
     };
   }
 
-  private getOrBuildCachedGraph(
+  private async ensureHeroGraph(
     heroId: number,
     abilitySlotById: Readonly<Record<number, SkillSlot>>,
-  ): CachedHeroSkillGraph {
-    const windowVersion = this.getWindowVersion();
+  ): Promise<CachedHeroSkillGraph> {
     const cached = this.cacheByHeroId.get(heroId);
-    if (cached?.windowVersion === windowVersion) {
+    const isFresh =
+      cached !== undefined &&
+      Date.now() - cached.builtAt.getTime() < HERO_SKILL_GRAPH_TTL_MS;
+    if (isFresh) {
       return cached;
     }
 
-    const abilityIdsBySlot = createAbilityIdByStoredSlot(abilitySlotById);
-    const players = this.recentMatchesWindowService.getPlayersByHeroIds([heroId]);
+    const refreshPromise = this.startRefresh(heroId, abilitySlotById);
+    if (cached) {
+      void refreshPromise.catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Failed to refresh cached skill graph for hero ${heroId}: ${message}`,
+        );
+      });
+      return cached;
+    }
+
+    return refreshPromise;
+  }
+
+  private startRefresh(
+    heroId: number,
+    abilitySlotById: Readonly<Record<number, SkillSlot>>,
+  ): Promise<CachedHeroSkillGraph> {
+    const existing = this.refreshPromisesByHeroId.get(heroId);
+    if (existing) {
+      return existing;
+    }
+
+    const refreshPromise = this.buildHeroGraph(heroId, abilitySlotById).finally(
+      () => {
+        this.refreshPromisesByHeroId.delete(heroId);
+      },
+    );
+    this.refreshPromisesByHeroId.set(heroId, refreshPromise);
+    return refreshPromise;
+  }
+
+  private async buildHeroGraph(
+    heroId: number,
+    abilitySlotById: Readonly<Record<number, SkillSlot>>,
+  ): Promise<CachedHeroSkillGraph> {
+    const startedAt = Date.now();
+    const players = await this.matchPlayerRepository
+      .createQueryBuilder('player')
+      .innerJoinAndSelect('player.match', 'match')
+      .where('player.heroId = :heroId', { heroId })
+      .andWhere('match.startTime >= :cutoff', {
+        cutoff: getRecentMatchCutoff(new Date()),
+      })
+      .orderBy('match.startTime', 'DESC')
+      .addOrderBy('match.matchId', 'DESC')
+      .take(RECENT_MATCH_TARGET_COUNT)
+      .getMany();
+
     if (players.length === 0) {
       throw new NotFoundException(
-        `No recent match data exists for hero ${heroId} in the last ${RECENT_MATCH_WINDOW_DAYS} days.`,
+        `No recent match data exists for hero ${heroId} in the last ` +
+          `${RECENT_MATCH_WINDOW_DAYS} days.`,
       );
     }
 
+    const skillUpgradesByPlayerId = await this.loadSkillUpgrades(players);
+    const abilityIdsBySlot = createAbilityIdByStoredSlot(abilitySlotById);
     const accumulator = new SkillBuildGraphAccumulator();
     const diagnosticCounts = new Map<SkillBuildDiagnostic['code'], number>();
     let validPlayerCount = 0;
     let partialPlayerCount = 0;
     let rejectedPlayerCount = 0;
 
-    for (const player of players) {
-      if (player.skillUpgrades.length === 0) {
+    for (let index = 0; index < players.length; index += 1) {
+      const player = players[index];
+      const skillUpgrades = skillUpgradesByPlayerId.get(Number(player.id)) ?? [];
+      if (skillUpgrades.length === 0) {
         rejectedPlayerCount += 1;
         continue;
       }
 
       const replay = accumulator.addPath(
-        player.skillUpgrades.map((upgrade) =>
-          normalizePersistedSkillUpgrade(upgrade, abilityIdsBySlot),
-        ),
+        [...skillUpgrades]
+          .sort((left, right) => left.upgradeOrder - right.upgradeOrder)
+          .map((upgrade) =>
+            normalizePersistedSkillUpgrade(upgrade, abilityIdsBySlot),
+          ),
         abilitySlotById,
       );
 
@@ -170,17 +244,21 @@ export class SkillBuildAnalysisService {
       } else {
         rejectedPlayerCount += 1;
       }
+
+      if ((index + 1) % HERO_SKILL_GRAPH_YIELD_INTERVAL === 0) {
+        await yieldToEventLoop();
+      }
     }
 
     const graph = accumulator.build();
     if (graph.statesByKey.get(graph.rootStateKey)?.outgoingTransitions.length === 0) {
       throw new NotFoundException(
-        `No valid skill upgrade path exists for hero ${heroId} in the last ${RECENT_MATCH_WINDOW_DAYS} days.`,
+        `No valid skill upgrade path exists for hero ${heroId} in the last ` +
+          `${RECENT_MATCH_WINDOW_DAYS} days.`,
       );
     }
 
-    const nextCache: CachedHeroSkillGraph = {
-      windowVersion,
+    const cached: CachedHeroSkillGraph = {
       graph,
       abilityIdsBySlot,
       sourcePlayerCount: players.length,
@@ -189,22 +267,39 @@ export class SkillBuildAnalysisService {
       rejectedPlayerCount,
       diagnostics: [...diagnosticCounts.entries()]
         .map(([code, count]) => ({ code, count }))
-        .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code)),
+        .sort(
+          (left, right) =>
+            right.count - left.count || left.code.localeCompare(right.code),
+        ),
+      builtAt: new Date(),
     };
-    this.cacheByHeroId.set(heroId, nextCache);
-    return nextCache;
+    this.cacheByHeroId.set(heroId, cached);
+    this.logger.log(
+      `Built skill graph for hero ${heroId} from ${players.length} players in ` +
+        `${Date.now() - startedAt} ms.`,
+    );
+    return cached;
   }
 
-  private async ensureRecentMatchesLoaded(): Promise<void> {
-    if (this.recentMatchesWindowService.getStatus().lastRefreshedAt) {
-      return;
+  private async loadSkillUpgrades(
+    players: MatchPlayer[],
+  ): Promise<Map<number, MatchPlayerSkillUpgrade[]>> {
+    const result = new Map<number, MatchPlayerSkillUpgrade[]>();
+    const playerIds = players.map((player) => Number(player.id));
+
+    for (const batch of chunkValues(playerIds, RECENT_MATCH_QUERY_BATCH_SIZE)) {
+      const skillUpgrades = await this.skillUpgradeRepository.find({
+        where: { matchPlayerId: In(batch) },
+      });
+      for (const upgrade of skillUpgrades) {
+        const playerId = Number(upgrade.matchPlayerId);
+        const playerUpgrades = result.get(playerId) ?? [];
+        playerUpgrades.push(upgrade);
+        result.set(playerId, playerUpgrades);
+      }
     }
 
-    await this.recentMatchesWindowService.refresh();
-  }
-
-  private getWindowVersion(): string {
-    return this.recentMatchesWindowService.getStatus().lastRefreshedAt?.toISOString() ?? 'empty';
+    return result;
   }
 }
 
@@ -235,19 +330,30 @@ function createCurrentState(currentLevels?: HeroSkillLevels): SkillBuildState {
 }
 
 function isCompleteSkillState(state: SkillBuildState): boolean {
-  return state.levels[1] === 4 &&
+  return (
+    state.levels[1] === 4 &&
     state.levels[2] === 4 &&
     state.levels[3] === 4 &&
-    state.levels[4] === 4;
+    state.levels[4] === 4
+  );
 }
 
 function normalizePersistedSkillUpgrade(
-  upgrade: RecentMatchSkillSnapshot,
+  upgrade: MatchPlayerSkillUpgrade,
   abilityIdByStoredSlot: Readonly<Record<SkillSlot, number>>,
 ): SkillUpgradeObservation {
   return {
-    abilityId: abilityIdByStoredSlot[upgrade.abilityId as SkillSlot] ?? upgrade.abilityId,
-    upgradeOrder: upgrade.upgradeOrder,
-    upgradeTimeS: upgrade.upgradeTimeS,
+    abilityId:
+      abilityIdByStoredSlot[Number(upgrade.abilityId) as SkillSlot] ??
+      Number(upgrade.abilityId),
+    upgradeOrder: Number(upgrade.upgradeOrder),
+    upgradeTimeS:
+      upgrade.upgradeTimeS === undefined || upgrade.upgradeTimeS === null
+        ? undefined
+        : Number(upgrade.upgradeTimeS),
   };
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
