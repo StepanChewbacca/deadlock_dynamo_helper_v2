@@ -4,7 +4,7 @@ import { parseJsonSafely } from './parse-json-safely';
 
 export type EventCallback = (event: OverwolfLiveEventDto) => void;
 
-const STATE_SAFETY_POLL_INTERVAL_MS = 15_000;
+const STATE_SAFETY_POLL_INTERVAL_MS = 3_000;
 const STATE_SAFETY_CATEGORIES = new Set([
   'match_info',
   'game_info',
@@ -14,6 +14,7 @@ const STATE_SAFETY_CATEGORIES = new Set([
 
 let diagnosticCapture: DiagnosticCapture | undefined;
 let stateSafetyTimer: ReturnType<typeof setInterval> | undefined;
+let stateSafetyPollInFlight = false;
 
 export function listenOverwolfEvents(onEvent: EventCallback): void {
   if (typeof overwolf === 'undefined' || !overwolf.games || !overwolf.games.events) {
@@ -87,7 +88,13 @@ function startStateSafetyPolling(
   }
 
   const reconcileCurrentState = (): void => {
+    if (stateSafetyPollInFlight) {
+      return;
+    }
+
+    stateSafetyPollInFlight = true;
     eventsApi.getInfo((result: any) => {
+      stateSafetyPollInFlight = false;
       try {
         if (
           !result ||
