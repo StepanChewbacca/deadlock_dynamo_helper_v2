@@ -8,7 +8,7 @@ jest.mock('../diagnostics/diagnostic-capture', () => ({
 import { listenOverwolfEvents } from './listen-overwolf-events';
 
 describe('listenOverwolfEvents', () => {
-  it('reconciles the full live state immediately and every fifteen seconds', () => {
+  it('reconciles the full live state immediately and every three seconds', () => {
     jest.useFakeTimers();
     const onEvent = jest.fn();
     const getInfo = jest.fn((callback: (result: unknown) => void) => {
@@ -76,7 +76,7 @@ describe('listenOverwolfEvents', () => {
       },
     });
 
-    jest.advanceTimersByTime(15_000);
+    jest.advanceTimersByTime(3_000);
 
     expect(getInfo).toHaveBeenCalledTimes(2);
     expect(onEvent).toHaveBeenCalledTimes(6);
