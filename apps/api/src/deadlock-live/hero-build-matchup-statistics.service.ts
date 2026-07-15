@@ -206,10 +206,23 @@ export class HeroBuildMatchupStatisticsService {
     match: RecentMatchSnapshot,
     requestedHeroId: number,
   ): void {
-    const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
+    const requestedPlayers = match.players.filter(
+      (player) => canonicalHeroId(player.heroId) === requestedHeroId,
+    );
+    if (requestedPlayers.length === 0) {
+      return;
+    }
+
+    const requestedHeroMatch: RecentMatchSnapshot = {
+      ...match,
+      players: requestedPlayers,
+    };
+    const timelines = this.matchTimelineNormalizationService.normalizeMatch(
+      requestedHeroMatch,
+    );
     const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
     const sequences = this.canonicalBuildSequenceService.canonicalizeMatch(replay);
-    const playersById = new Map(match.players.map((player) => [player.id, player]));
+    const playersById = new Map(requestedPlayers.map((player) => [player.id, player]));
 
     for (const sequence of sequences.players) {
       if (canonicalHeroId(sequence.heroId) !== requestedHeroId) {
