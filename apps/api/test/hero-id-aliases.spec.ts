@@ -22,14 +22,21 @@ describe('hero id aliases', () => {
     expect(heroIdAliases(999)).toEqual([999]);
   });
 
-  it('preserves compatibility mappings used at API boundaries', () => {
-    expect(GEP_TO_VALVE_ID[2]).toBe(64);
-    expect(VALVE_TO_GEP_ID[64]).toBe(2);
+  it('keeps GEP mappings explicit instead of deriving them from legacy aliases', () => {
+    expect(GEP_TO_VALVE_ID[16]).toBe(27);
+    expect(GEP_TO_VALVE_ID[27]).toBe(66);
+    expect(VALVE_TO_GEP_ID[27]).toBe(16);
+    expect(VALVE_TO_GEP_ID[66]).toBe(27);
+    expect(GEP_TO_VALVE_ID[2]).toBeUndefined();
+    expect(GEP_TO_VALVE_ID[6]).toBeUndefined();
   });
 
-  it('resolves live Victor and Yamato ids to distinct Valve hero ids', () => {
+  it('resolves live Victor and Yamato ids without remapping unrelated heroes', () => {
     expect(resolveValveHeroIdFromGep(27)).toBe(66);
     expect(resolveValveHeroIdFromGep(16)).toBe(27);
+    expect(resolveValveHeroIdFromGep(2)).toBe(2);
+    expect(resolveValveHeroIdFromGep(6)).toBe(6);
+    expect(resolveValveHeroIdFromGep(72)).toBe(72);
     expect(resolveValveHeroIdFromGep(999)).toBe(999);
   });
 });
