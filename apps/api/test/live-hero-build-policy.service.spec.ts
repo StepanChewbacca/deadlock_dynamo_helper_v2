@@ -93,7 +93,7 @@ describe('LiveHeroBuildPolicyService', () => {
     expect(normalizeMatch).toHaveBeenCalledTimes(1);
     expect(replayMatch).toHaveBeenCalledTimes(1);
     expect(canonicalizeMatch).toHaveBeenCalledTimes(1);
-    expect(service.getHeroPolicy(72)?.statesByKey.get('EMPTY')?.nextActions[0]).toMatchObject({
+    expect(service.getHeroPolicy(6)?.statesByKey.get('EMPTY')?.nextActions[0]).toMatchObject({
       actionKey: 'BUY:1000',
       count: 1,
     });

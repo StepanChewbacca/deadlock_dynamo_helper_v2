@@ -1,5 +1,7 @@
 // Hero ability item IDs from official api.deadlock-api.com hero assets.
 // Each entry maps: { [abilityItemId]: skillSlot (1-4) }.
+export const UNKNOWN_SKILL_SLOT = 0;
+
 export const HERO_ABILITY_MAP: Record<number, Record<number, number>> = {
   1: {  // Infernus
     491391007: 1,
@@ -242,7 +244,7 @@ export function mapAbilityToSkillNumber(heroId: number, abilityItemId: number): 
   if (heroMap && abilityItemId in heroMap) {
     return heroMap[abilityItemId];
   }
-  return 1;
+  return UNKNOWN_SKILL_SLOT;
 }
 
 export function isAbilityItem(heroId: number, itemId: number): boolean {

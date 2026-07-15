@@ -180,6 +180,7 @@ export class LiveHeroBuildPolicyService {
       }
 
       const aliases = [...heroIdAliases(canonicalId)];
+      const aliasSet = new Set(aliases);
       const players = await this.matchPlayerRepository
         .createQueryBuilder('player')
         .innerJoinAndSelect('player.match', 'match')
@@ -215,7 +216,7 @@ export class LiveHeroBuildPolicyService {
         const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
         const sequences = this.canonicalBuildSequenceService.canonicalizeMatch(replay);
         for (const sequence of sequences.players) {
-          if (canonicalHeroId(sequence.heroId) !== canonicalId) {
+          if (!aliasSet.has(sequence.heroId)) {
             continue;
           }
           accumulator.addPlayer({ ...sequence, heroId: canonicalId });

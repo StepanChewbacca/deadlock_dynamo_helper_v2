@@ -59,6 +59,8 @@ import { RulesetResolutionRefreshService } from './ruleset-resolution-refresh.se
 import { RulesetResolverService } from './ruleset-resolver.service';
 import { RulesetWindowManifestService } from './ruleset-window-manifest.service';
 import { SituationalRecommendationDiagnosticsService } from './situational-recommendation-diagnostics.service';
+import { SkillBuildAnalysisController } from './skill-build-analysis.controller';
+import { SkillBuildAnalysisService } from './skill-build-analysis.service';
 import { StoredMatchReprocessingService } from './stored-match-reprocessing.service';
 import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
 
@@ -89,6 +91,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     MatchTimelineNormalizationController,
     HeroBuildTransitionAggregationController,
     HeroBuildRecommendationController,
+    SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
   ],
@@ -118,6 +121,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       useExisting: LiveHeroBuildRecommendationPresentationService,
     },
     SituationalRecommendationDiagnosticsService,
+    SkillBuildAnalysisService,
     RawEventLogService,
     RecentLiveEventsService,
     LazyRecentMatchesWindowService,
@@ -156,6 +160,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
+    SkillBuildAnalysisService,
     RawEventLogService,
     RecentLiveEventsService,
     RecentMatchesWindowService,

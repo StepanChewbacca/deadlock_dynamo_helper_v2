@@ -66,7 +66,7 @@ describe('LiveHeroMatchupSourceService', () => {
     );
     expect(matchPlayerRepository.find).toHaveBeenCalledTimes(1);
     expect(matchPlayerItemRepository.find).toHaveBeenCalledTimes(1);
-    const matches = service.getMatches(72);
+    const matches = service.getMatches(6);
     expect(matches).toHaveLength(1);
     expect(matches[0].players).toEqual([
       expect.objectContaining({
