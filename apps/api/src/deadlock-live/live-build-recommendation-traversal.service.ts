@@ -18,7 +18,7 @@ import {
 } from './hero-build-recommendation.service';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
 
-export const LIVE_BUILD_RECOMMENDATION_TIME_BUCKET_S = 30;
+export const LIVE_BUILD_RECOMMENDATION_TIME_BUCKET_S = 120;
 export const LIVE_BUILD_RECOMMENDATION_LIMIT = 5;
 export const LIVE_BUILD_RECOMMENDATION_MAX_TRACKED_MATCHES = 32;
 
