@@ -1,5 +1,6 @@
 import {
   ContextualHeroBuildRecommendationAction,
+  ContextualHeroBuildRecommendationService,
   HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
   mergeContextualRecommendationCandidatePool,
   rankContextualActions,
@@ -97,6 +98,78 @@ describe('contextual candidate expansion', () => {
         wasInBaseBuild: false,
       }),
     ]);
+  });
+
+  it('returns the base recommendation before matchup warmup starts', async () => {
+    jest.useFakeTimers();
+    const matchupEvaluate = jest.fn(async () => ({
+      modelVersion: GRAPH_MATCHUP_MODEL_VERSION,
+      found: false,
+      heroId: 6,
+      stateKey: 'EMPTY',
+      actionKey: 'BUY:1000',
+      stateObservationCount: 0,
+      actionObservationCount: 0,
+      enemyHeroIds: [13],
+      evidence: [],
+    }));
+    const policy = {
+      heroId: 6,
+      playerCount: 10,
+      stateCount: 1,
+      transitionCount: 10,
+      statesByKey: new Map([
+        [
+          'EMPTY',
+          {
+            heroId: 6,
+            stateKey: 'EMPTY',
+            observationCount: 10,
+            nextActionCount: 1,
+            nextActions: [
+              {
+                actionType: 'BUY' as const,
+                itemId: 1000,
+                actionKey: 'BUY:1000',
+                count: 10,
+                probability: 1,
+                averageGameTimeS: 60,
+                afterStates: [{ afterStateKey: '1000x1', count: 10, probability: 1 }],
+              },
+            ],
+          },
+        ],
+      ]),
+    };
+    const service = new ContextualHeroBuildRecommendationService(
+      {
+        ensureReady: jest.fn(async () => undefined),
+        getStatus: () => ({ lastRefreshedAt: new Date() }),
+        getHeroPolicy: () => policy,
+      } as any,
+      { getComponentItemIds: () => [] } as any,
+      { evaluate: matchupEvaluate } as any,
+    );
+
+    const result = await service.recommend({
+      heroId: 6,
+      itemIds: [],
+      gameTimeS: 0,
+      enemyHeroIds: [13],
+      limit: 1,
+    });
+
+    expect(result.action).toMatchObject({
+      actionKey: 'BUY:1000',
+      isSituational: false,
+    });
+    expect(matchupEvaluate).not.toHaveBeenCalled();
+
+    jest.runOnlyPendingTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(matchupEvaluate).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
   });
 });
 
