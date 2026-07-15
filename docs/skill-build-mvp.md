@@ -11,12 +11,16 @@ The skill build model uses match data from the existing rolling 14-day recent ma
 
 ## Algorithm
 
-1. Load recent players for the requested hero and its configured aliases.
+1. Load recent players for the exact requested hero ID.
 2. Map ability IDs to skill slots.
 3. Replay each chronological skill upgrade sequence.
 4. Keep valid prefixes when a later observation is invalid.
 5. Aggregate transitions by the complete four-skill state.
-6. Traverse the most frequently observed transition from each state while respecting the AP budget.
+6. Search the complete state DAG with memoized dynamic programming.
+7. Score each full path as the sum of `log(1 + transitionCount)` for all transitions in the path.
+8. Select the globally highest-scoring legal path while respecting the AP and action limits.
+
+The global search considers the historical support of every later transition. It does not commit to the locally most popular first action when another branch has stronger support across the complete build.
 
 ## API
 
