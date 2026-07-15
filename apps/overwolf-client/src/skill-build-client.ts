@@ -26,6 +26,7 @@ export interface SkillBuildPathStep {
 
 export interface HeroSkillBuildResponse {
   heroId: number;
+  resolvedHeroId: number;
   windowDays: number;
   sourcePlayerCount: number;
   validPlayerCount: number;
@@ -94,6 +95,7 @@ export async function fetchHeroSkillBuild(
 
   const baseUrl = apiBaseUrl.replace(/\/$/, '');
   const query = new URLSearchParams({
+    heroIdSource: 'gep',
     levels: [levels[1], levels[2], levels[3], levels[4]].join(','),
   });
   const response = await fetchImpl(
@@ -120,6 +122,7 @@ export function isHeroSkillBuildResponse(value: unknown): value is HeroSkillBuil
 
   return (
     isPositiveInteger(value.heroId) &&
+    isPositiveInteger(value.resolvedHeroId) &&
     isPositiveInteger(value.windowDays) &&
     isNonNegativeInteger(value.sourcePlayerCount) &&
     isNonNegativeInteger(value.validPlayerCount) &&
