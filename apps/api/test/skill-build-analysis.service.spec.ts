@@ -12,11 +12,12 @@ const DYNAMO_SKILL_3 = 492030745;
 function createPlayer(
   id: number,
   skillUpgrades: RecentMatchPlayerSnapshot['skillUpgrades'],
+  heroId = 11,
 ): RecentMatchPlayerSnapshot {
   return {
     id,
     matchId: id,
-    heroId: 11,
+    heroId,
     team: 0,
     won: true,
     kills: 0,
@@ -53,6 +54,7 @@ describe('SkillBuildAnalysisService', () => {
 
     const result = service.getHeroSkillBuild(11);
 
+    expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledWith([11]);
     expect(result.actions.map((action) => action.skillSlot)).toEqual([1, 2, 1]);
     expect(result.actions.map((action) => action.cumulativePointCost)).toEqual([1, 2, 3]);
     expect(result.sourcePlayerCount).toBe(3);
@@ -95,6 +97,29 @@ describe('SkillBuildAnalysisService', () => {
 
     expect(result.actions).toHaveLength(3);
     expect(result.totalPointCost).toBe(4);
+  });
+
+  it('does not merge matches from another hero through legacy aliases', () => {
+    const recentMatchesWindowService = {
+      getPlayersByHeroIds: jest.fn().mockReturnValue([
+        createPlayer(1, [{ id: 1, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1 }]),
+      ]),
+    } as unknown as RecentMatchesWindowService;
+    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
+
+    service.getHeroSkillBuild(11);
+
+    expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledWith([11]);
+  });
+
+  it('throws when the hero has no ability mapping', () => {
+    const recentMatchesWindowService = {
+      getPlayersByHeroIds: jest.fn(),
+    } as unknown as RecentMatchesWindowService;
+    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
+
+    expect(() => service.getHeroSkillBuild(999)).toThrow(NotFoundException);
+    expect(recentMatchesWindowService.getPlayersByHeroIds).not.toHaveBeenCalled();
   });
 
   it('throws when the recent window contains no players for the hero', () => {
