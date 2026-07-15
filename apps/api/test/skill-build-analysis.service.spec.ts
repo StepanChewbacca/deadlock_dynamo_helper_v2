@@ -1,9 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
+import type { Repository, SelectQueryBuilder } from 'typeorm';
+import { MatchPlayerSkillUpgrade } from '../src/deadlock-live/entities/match-player-skill-upgrade.entity';
+import { MatchPlayer } from '../src/deadlock-live/entities/match-player.entity';
 import { SkillBuildAnalysisService } from '../src/deadlock-live/skill-build-analysis.service';
-import type {
-  RecentMatchPlayerSnapshot,
-  RecentMatchesWindowService,
-} from '../src/deadlock-live/recent-matches-window.service';
 
 const STORED_UNKNOWN_SKILL = 0;
 const STORED_SKILL_1 = 1;
@@ -11,63 +10,101 @@ const STORED_SKILL_2 = 2;
 const STORED_SKILL_3 = 3;
 const DYNAMO_ABILITY_1 = 3760705623;
 const DYNAMO_ABILITY_2 = 2031714424;
-const WINDOW_REFRESHED_AT = new Date('2026-07-15T12:00:00.000Z');
 
-function createPlayer(
-  id: number,
-  skillUpgrades: RecentMatchPlayerSnapshot['skillUpgrades'],
-  heroId = 11,
-): RecentMatchPlayerSnapshot {
+function createPlayer(id: number, heroId = 11): MatchPlayer {
   return {
     id,
     matchId: id,
     heroId,
-    team: 0,
-    won: true,
-    kills: 0,
-    deaths: 0,
-    assists: 0,
-    netWorth: 0,
-    itemPurchases: [],
-    skillUpgrades,
+    match: { matchId: id, startTime: new Date() },
+  } as MatchPlayer;
+}
+
+function createUpgrade(
+  id: number,
+  matchPlayerId: number,
+  abilityId: number,
+  upgradeOrder: number,
+  upgradeTimeS?: number,
+): MatchPlayerSkillUpgrade {
+  return {
+    id,
+    matchPlayerId,
+    abilityId,
+    upgradeOrder,
+    upgradeTimeS,
+  } as MatchPlayerSkillUpgrade;
+}
+
+function createRepositories(
+  players: MatchPlayer[],
+  upgrades: MatchPlayerSkillUpgrade[],
+): {
+  matchPlayerRepository: Repository<MatchPlayer>;
+  skillUpgradeRepository: Repository<MatchPlayerSkillUpgrade>;
+  queryBuilder: SelectQueryBuilder<MatchPlayer>;
+} {
+  const queryBuilder = {
+    innerJoinAndSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(players),
+  } as unknown as SelectQueryBuilder<MatchPlayer>;
+
+  return {
+    matchPlayerRepository: {
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    } as unknown as Repository<MatchPlayer>,
+    skillUpgradeRepository: {
+      find: jest.fn().mockResolvedValue(upgrades),
+    } as unknown as Repository<MatchPlayerSkillUpgrade>,
+    queryBuilder,
   };
 }
 
-function createWindowService(
-  players: RecentMatchPlayerSnapshot[],
-  lastRefreshedAt: Date | undefined = WINDOW_REFRESHED_AT,
-): RecentMatchesWindowService {
+function createService(
+  players: MatchPlayer[],
+  upgrades: MatchPlayerSkillUpgrade[],
+): {
+  service: SkillBuildAnalysisService;
+  matchPlayerRepository: Repository<MatchPlayer>;
+  skillUpgradeRepository: Repository<MatchPlayerSkillUpgrade>;
+  queryBuilder: SelectQueryBuilder<MatchPlayer>;
+} {
+  const repositories = createRepositories(players, upgrades);
   return {
-    getStatus: jest.fn().mockReturnValue({ lastRefreshedAt }),
-    refresh: jest.fn().mockResolvedValue({ lastRefreshedAt: WINDOW_REFRESHED_AT }),
-    getPlayersByHeroIds: jest.fn().mockReturnValue(players),
-  } as unknown as RecentMatchesWindowService;
+    service: new SkillBuildAnalysisService(
+      repositories.matchPlayerRepository,
+      repositories.skillUpgradeRepository,
+    ),
+    ...repositories,
+  };
 }
 
 describe('SkillBuildAnalysisService', () => {
   it('builds a state-conditioned path and restores raw ability IDs', async () => {
-    const players = [
-      createPlayer(1, [
-        { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1, upgradeTimeS: 10 },
-        { id: 2, abilityId: STORED_SKILL_2, upgradeOrder: 2, upgradeTimeS: 20 },
-        { id: 3, abilityId: STORED_SKILL_1, upgradeOrder: 3, upgradeTimeS: 30 },
-      ]),
-      createPlayer(2, [
-        { id: 4, abilityId: STORED_SKILL_1, upgradeOrder: 1, upgradeTimeS: 12 },
-        { id: 5, abilityId: STORED_SKILL_2, upgradeOrder: 2, upgradeTimeS: 22 },
-        { id: 6, abilityId: STORED_SKILL_1, upgradeOrder: 3, upgradeTimeS: 32 },
-      ]),
-      createPlayer(3, [
-        { id: 7, abilityId: STORED_SKILL_2, upgradeOrder: 1 },
-        { id: 8, abilityId: STORED_SKILL_3, upgradeOrder: 2 },
-      ]),
+    const players = [createPlayer(1), createPlayer(2), createPlayer(3)];
+    const upgrades = [
+      createUpgrade(1, 1, STORED_SKILL_1, 1, 10),
+      createUpgrade(2, 1, STORED_SKILL_2, 2, 20),
+      createUpgrade(3, 1, STORED_SKILL_1, 3, 30),
+      createUpgrade(4, 2, STORED_SKILL_1, 1, 12),
+      createUpgrade(5, 2, STORED_SKILL_2, 2, 22),
+      createUpgrade(6, 2, STORED_SKILL_1, 3, 32),
+      createUpgrade(7, 3, STORED_SKILL_2, 1),
+      createUpgrade(8, 3, STORED_SKILL_3, 2),
     ];
-    const recentMatchesWindowService = createWindowService(players);
-    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
+    const { service, queryBuilder } = createService(players, upgrades);
 
     const result = await service.getHeroSkillBuild(11);
 
-    expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledWith([11]);
+    expect(queryBuilder.where).toHaveBeenCalledWith(
+      'player.heroId = :heroId',
+      { heroId: 11 },
+    );
     expect(result.actions.map((action) => action.skillSlot)).toEqual([1, 2, 1]);
     expect(result.actions.map((action) => action.abilityId)).toEqual([
       DYNAMO_ABILITY_1,
@@ -84,19 +121,17 @@ describe('SkillBuildAnalysisService', () => {
     });
     expect(result.sourcePlayerCount).toBe(3);
     expect(result.validPlayerCount).toBe(3);
-    expect(result.partialPlayerCount).toBe(0);
-    expect(result.rejectedPlayerCount).toBe(0);
   });
 
   it('recommends the next action from the current live levels', async () => {
-    const players = [
-      createPlayer(1, [
-        { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
-        { id: 2, abilityId: STORED_SKILL_2, upgradeOrder: 2 },
-        { id: 3, abilityId: STORED_SKILL_1, upgradeOrder: 3 },
-      ]),
-    ];
-    const service = new SkillBuildAnalysisService(createWindowService(players));
+    const { service } = createService(
+      [createPlayer(1)],
+      [
+        createUpgrade(1, 1, STORED_SKILL_1, 1),
+        createUpgrade(2, 1, STORED_SKILL_2, 2),
+        createUpgrade(3, 1, STORED_SKILL_1, 3),
+      ],
+    );
 
     const result = await service.getHeroSkillBuild(11, {
       currentLevels: { 1: 1, 2: 0, 3: 0, 4: 0 },
@@ -114,11 +149,13 @@ describe('SkillBuildAnalysisService', () => {
   });
 
   it('uses a valid prefix and reports the persisted unknown skill marker', async () => {
-    const player = createPlayer(1, [
-      { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
-      { id: 2, abilityId: STORED_UNKNOWN_SKILL, upgradeOrder: 2 },
-    ]);
-    const service = new SkillBuildAnalysisService(createWindowService([player]));
+    const { service } = createService(
+      [createPlayer(1)],
+      [
+        createUpgrade(1, 1, STORED_SKILL_1, 1),
+        createUpgrade(2, 1, STORED_UNKNOWN_SKILL, 2),
+      ],
+    );
 
     const result = await service.getHeroSkillBuild(11);
 
@@ -130,13 +167,15 @@ describe('SkillBuildAnalysisService', () => {
   });
 
   it('respects the requested point budget', async () => {
-    const player = createPlayer(1, [
-      { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
-      { id: 2, abilityId: STORED_SKILL_1, upgradeOrder: 2 },
-      { id: 3, abilityId: STORED_SKILL_1, upgradeOrder: 3 },
-      { id: 4, abilityId: STORED_SKILL_1, upgradeOrder: 4 },
-    ]);
-    const service = new SkillBuildAnalysisService(createWindowService([player]));
+    const { service } = createService(
+      [createPlayer(1)],
+      [
+        createUpgrade(1, 1, STORED_SKILL_1, 1),
+        createUpgrade(2, 1, STORED_SKILL_1, 2),
+        createUpgrade(3, 1, STORED_SKILL_1, 3),
+        createUpgrade(4, 1, STORED_SKILL_1, 4),
+      ],
+    );
 
     const result = await service.getHeroSkillBuild(11, { maxPointBudget: 4 });
 
@@ -144,56 +183,48 @@ describe('SkillBuildAnalysisService', () => {
     expect(result.totalPointCost).toBe(4);
   });
 
-  it('caches the hero graph until the recent window refresh version changes', async () => {
-    const recentMatchesWindowService = createWindowService([
-      createPlayer(1, [{ id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 }]),
-    ]);
-    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
+  it('caches the hero graph for repeated live state requests', async () => {
+    const { service, matchPlayerRepository, skillUpgradeRepository } = createService(
+      [createPlayer(1)],
+      [createUpgrade(1, 1, STORED_SKILL_1, 1)],
+    );
 
     await service.getHeroSkillBuild(11);
     await service.getHeroSkillBuild(11, {
       currentLevels: { 1: 1, 2: 0, 3: 0, 4: 0 },
     });
 
-    expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledTimes(1);
+    expect(matchPlayerRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(skillUpgradeRepository.find).toHaveBeenCalledTimes(1);
   });
 
-  it('loads the lazy recent window before building the graph', async () => {
-    const recentMatchesWindowService = createWindowService(
-      [createPlayer(1, [{ id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 }])],
-      undefined,
+  it('does not query aliases or players from other heroes', async () => {
+    const { service, queryBuilder } = createService(
+      [createPlayer(1)],
+      [createUpgrade(1, 1, STORED_SKILL_1, 1)],
     );
-    (recentMatchesWindowService.getStatus as jest.Mock)
-      .mockReturnValueOnce({ lastRefreshedAt: undefined })
-      .mockReturnValue({ lastRefreshedAt: WINDOW_REFRESHED_AT });
-    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
 
     await service.getHeroSkillBuild(11);
 
-    expect(recentMatchesWindowService.refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not merge matches from another hero through legacy aliases', async () => {
-    const recentMatchesWindowService = createWindowService([
-      createPlayer(1, [{ id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 }]),
-    ]);
-    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
-
-    await service.getHeroSkillBuild(11);
-
-    expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledWith([11]);
+    expect(queryBuilder.where).toHaveBeenCalledWith(
+      'player.heroId = :heroId',
+      { heroId: 11 },
+    );
+    expect(queryBuilder.where).not.toHaveBeenCalledWith(
+      expect.stringContaining('IN'),
+      expect.anything(),
+    );
   });
 
   it('throws when the hero has no ability mapping', async () => {
-    const recentMatchesWindowService = createWindowService([]);
-    const service = new SkillBuildAnalysisService(recentMatchesWindowService);
+    const { service, matchPlayerRepository } = createService([], []);
 
     await expect(service.getHeroSkillBuild(999)).rejects.toBeInstanceOf(NotFoundException);
-    expect(recentMatchesWindowService.getPlayersByHeroIds).not.toHaveBeenCalled();
+    expect(matchPlayerRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('throws when the recent window contains no players for the hero', async () => {
-    const service = new SkillBuildAnalysisService(createWindowService([]));
+  it('throws when no recent player exists for the exact hero', async () => {
+    const { service } = createService([], []);
 
     await expect(service.getHeroSkillBuild(11)).rejects.toBeInstanceOf(NotFoundException);
   });
