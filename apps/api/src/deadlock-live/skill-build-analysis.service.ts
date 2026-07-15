@@ -5,21 +5,16 @@ import {
   SkillBuildGraphAccumulator,
   SkillBuildPathStep,
   SkillSlot,
+  SkillUpgradeObservation,
 } from '@deadlock-live-probe/build-domain';
 import { HERO_ABILITY_MAP } from './hero-abilities';
 import {
   RECENT_MATCH_WINDOW_DAYS,
+  RecentMatchSkillSnapshot,
   RecentMatchesWindowService,
 } from './recent-matches-window.service';
 
 export const SKILL_BUILD_MAX_POINT_BUDGET = 36;
-
-const STORED_SKILL_SLOT_BY_ID: Readonly<Record<number, SkillSlot>> = {
-  1: 1,
-  2: 2,
-  3: 3,
-  4: 4,
-};
 
 export interface HeroSkillBuildDiagnosticSummary {
   code: SkillBuildDiagnostic['code'];
@@ -46,9 +41,13 @@ export class SkillBuildAnalysisService {
     heroId: number,
     maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET,
   ): HeroSkillBuildResponse {
-    if (!HERO_ABILITY_MAP[heroId]) {
+    const abilitySlotById = HERO_ABILITY_MAP[heroId] as
+      | Readonly<Record<number, SkillSlot>>
+      | undefined;
+    if (!abilitySlotById) {
       throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
     }
+    const abilityIdByStoredSlot = createAbilityIdByStoredSlot(abilitySlotById);
 
     const players = this.recentMatchesWindowService.getPlayersByHeroIds([heroId]);
 
@@ -71,8 +70,10 @@ export class SkillBuildAnalysisService {
       }
 
       const replay = accumulator.addPath(
-        player.skillUpgrades,
-        STORED_SKILL_SLOT_BY_ID,
+        player.skillUpgrades.map((upgrade) =>
+          normalizePersistedSkillUpgrade(upgrade, abilityIdByStoredSlot),
+        ),
+        abilitySlotById,
       );
 
       for (const diagnostic of replay.diagnostics) {
@@ -114,4 +115,26 @@ export class SkillBuildAnalysisService {
       actions,
     };
   }
+}
+
+function createAbilityIdByStoredSlot(
+  abilitySlotById: Readonly<Record<number, SkillSlot>>,
+): Readonly<Record<number, number>> {
+  return Object.fromEntries(
+    Object.entries(abilitySlotById).map(([abilityId, skillSlot]) => [
+      skillSlot,
+      Number(abilityId),
+    ]),
+  );
+}
+
+function normalizePersistedSkillUpgrade(
+  upgrade: RecentMatchSkillSnapshot,
+  abilityIdByStoredSlot: Readonly<Record<number, number>>,
+): SkillUpgradeObservation {
+  return {
+    abilityId: abilityIdByStoredSlot[upgrade.abilityId] ?? upgrade.abilityId,
+    upgradeOrder: upgrade.upgradeOrder,
+    upgradeTimeS: upgrade.upgradeTimeS,
+  };
 }
