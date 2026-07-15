@@ -27,11 +27,7 @@ export interface SkillBuildObservationBaseline {
   abilityItemCounts: AbilityItemCounts;
 }
 
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-}
+type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 const STORAGE_PREFIX = 'deadlock-live-skill-progress';
 const SKILL_SLOTS = [1, 2, 3, 4] as const;
