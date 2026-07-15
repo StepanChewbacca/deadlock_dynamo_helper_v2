@@ -2,6 +2,7 @@ import {
   canonicalHeroId,
   GEP_TO_VALVE_ID,
   heroIdAliases,
+  resolveValveHeroIdFromGep,
   VALVE_TO_GEP_ID,
 } from '../src/deadlock-live/hero-id-aliases';
 
@@ -24,5 +25,11 @@ describe('hero id aliases', () => {
   it('preserves compatibility mappings used at API boundaries', () => {
     expect(GEP_TO_VALVE_ID[2]).toBe(64);
     expect(VALVE_TO_GEP_ID[64]).toBe(2);
+  });
+
+  it('resolves live Victor and Yamato ids to distinct Valve hero ids', () => {
+    expect(resolveValveHeroIdFromGep(27)).toBe(66);
+    expect(resolveValveHeroIdFromGep(16)).toBe(27);
+    expect(resolveValveHeroIdFromGep(999)).toBe(999);
   });
 });
