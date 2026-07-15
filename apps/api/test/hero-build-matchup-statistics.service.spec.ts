@@ -61,7 +61,7 @@ describe('graph matchup statistics', () => {
   });
 
   it('rebuilds only matches indexed for the requested canonical hero', async () => {
-    const match = createEmptyMatch(2);
+    const match = createMatchWithPlayers(2);
     const getMatchIdsByHeroId = jest.fn(() => [2]);
     const getMatch = jest.fn(() => match);
     const normalizeMatch = jest.fn(() => ({ players: [] }));
