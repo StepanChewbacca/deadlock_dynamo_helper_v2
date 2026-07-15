@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { OverwolfLiveBatchDto } from '@deadlock-live-probe/shared';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
+import { LiveInventoryEventNormalizerService } from './live-inventory-event-normalizer.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RecentLiveEventsService } from './recent-live-events.service';
@@ -15,13 +16,16 @@ export class LiveIngestController {
     private readonly recentLiveEventsService: RecentLiveEventsService,
     private readonly liveBuildRecommendationTraversalService:
       LiveBuildRecommendationTraversalService,
+    private readonly liveInventoryEventNormalizerService:
+      LiveInventoryEventNormalizerService,
   ) {}
 
   @Post('events')
   async ingestEvents(@Body() batch: OverwolfLiveBatchDto): Promise<{ ok: true }> {
     this.recentLiveEventsService.append(batch.events);
-    const state = this.liveMatchStateService.applyBatch(batch);
-    this.inventoryShadowReplayService.applyBatch(batch, state?.matchId);
+    const normalizedBatch = this.liveInventoryEventNormalizerService.normalizeBatch(batch);
+    const state = this.liveMatchStateService.applyBatch(normalizedBatch);
+    this.inventoryShadowReplayService.applyBatch(normalizedBatch, state?.matchId);
     this.liveBuildRecommendationTraversalService.observeState(state);
     await this.rawEventLogService.appendEvents(batch.events);
     return { ok: true };
