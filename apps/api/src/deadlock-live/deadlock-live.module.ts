@@ -24,6 +24,7 @@ import { HeroBuildRecommendationController } from './hero-build-recommendation.c
 import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
 import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
 import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
+import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
 import { HistoricalCatalogBackfillService } from './historical-catalog-backfill.service';
 import { HistoricalMatchReplayService } from './historical-match-replay.service';
 import { IngestStatusController } from './ingest-status.controller';
@@ -31,6 +32,7 @@ import { IngestStatusService } from './ingest-status.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { ItemCatalogImportService } from './item-catalog-import.service';
+import { LazyBuildTransitionAggregationService } from './lazy-build-transition-aggregation.service';
 import { LazyRecentMatchesWindowService } from './lazy-recent-matches-window.service';
 import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
@@ -93,6 +95,11 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     LiveHeroBuildPolicyService,
+    LazyBuildTransitionAggregationService,
+    {
+      provide: HeroBuildTransitionAggregationService,
+      useExisting: LazyBuildTransitionAggregationService,
+    },
     HeroBuildMatchupStatisticsService,
     {
       provide: HeroBuildRecommendationService,
@@ -132,6 +139,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     LiveHeroBuildPolicyService,
+    HeroBuildTransitionAggregationService,
     HeroBuildMatchupStatisticsService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
