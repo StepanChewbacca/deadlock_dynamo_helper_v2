@@ -75,15 +75,16 @@ function startInventorySafetyPolling(
   onEvent: EventCallback,
   capture: DiagnosticCapture,
 ): void {
+  const eventsApi = overwolf.games.events as any;
   if (
     inventorySafetyTimer ||
-    typeof overwolf.games.events.getInfo !== 'function'
+    typeof eventsApi.getInfo !== 'function'
   ) {
     return;
   }
 
   inventorySafetyTimer = setInterval(() => {
-    overwolf.games.events.getInfo((result: any) => {
+    eventsApi.getInfo((result: any) => {
       try {
         if (
           !result ||
