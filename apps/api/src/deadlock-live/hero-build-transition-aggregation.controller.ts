@@ -1,8 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
-import {
-  createInventoryStateKeyFromItemIds,
-  HeroBuildTransitionAggregationService,
-} from './hero-build-transition-aggregation.service';
+import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
+import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
 
 export class GetHeroBuildNextActionsDto {
   heroId?: number;
@@ -15,12 +13,11 @@ export class GetHeroBuildNextActionsDto {
 @Controller('deadlock/analysis/build-policy')
 export class HeroBuildTransitionAggregationController {
   constructor(
-    private readonly heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
+    private readonly heroBuildTransitionAggregationService: LiveHeroBuildPolicyService,
   ) {}
 
   @Get('status')
-  async getStatus() {
-    await this.heroBuildTransitionAggregationService.ensureReady();
+  getStatus() {
     return this.heroBuildTransitionAggregationService.getStatus();
   }
 
@@ -32,7 +29,7 @@ export class HeroBuildTransitionAggregationController {
     const limit = parseBoundedPositiveInteger(body.limit, 'limit', 10, 100);
     const minCount = parseBoundedPositiveInteger(body.minCount, 'minCount', 1, 1_000_000);
 
-    await this.heroBuildTransitionAggregationService.ensureReady();
+    await this.heroBuildTransitionAggregationService.ensureReady(heroId);
     return this.heroBuildTransitionAggregationService.getNextActions(
       heroId,
       stateKey,
