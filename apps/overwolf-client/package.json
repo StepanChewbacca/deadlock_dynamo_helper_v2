@@ -1,6 +1,6 @@
 {
   "name": "@deadlock-live-probe/overwolf-client",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "scripts": {
     "build": "webpack --mode production && node scripts/sync-public-to-windows.js",
