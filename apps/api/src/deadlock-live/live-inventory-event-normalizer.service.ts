@@ -46,16 +46,18 @@ export class LiveInventoryEventNormalizerService {
     event: OverwolfLiveEventDto,
   ): OverwolfLiveEventDto {
     if (
-      !event.key?.startsWith('items_') ||
+      !event.key?.startsWith('items') ||
       !isRecord(event.payload) ||
       !Array.isArray(event.payload.items)
     ) {
       return event;
     }
 
-    const rosterSlot = `roster_${event.key.slice('items_'.length)}`;
+    const rosterSlot = event.key.startsWith('items_')
+      ? `roster_${event.key.slice('items_'.length)}`
+      : undefined;
     const steamId = readSteamId(event.payload.steam_id ?? event.payload.steamId)
-      ?? this.getRosterSlots(clientId).get(rosterSlot);
+      ?? (rosterSlot ? this.getRosterSlots(clientId).get(rosterSlot) : undefined);
     const items = event.payload.items
       .map((item) => this.normalizeItem(item))
       .filter((item): item is Record<string, unknown> => item !== undefined);
