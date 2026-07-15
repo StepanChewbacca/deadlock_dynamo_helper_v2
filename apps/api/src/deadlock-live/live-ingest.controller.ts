@@ -19,11 +19,11 @@ export class LiveIngestController {
 
   @Post('events')
   async ingestEvents(@Body() batch: OverwolfLiveBatchDto): Promise<{ ok: true }> {
-    await this.rawEventLogService.appendEvents(batch.events);
     this.recentLiveEventsService.append(batch.events);
     const state = this.liveMatchStateService.applyBatch(batch);
     this.inventoryShadowReplayService.applyBatch(batch, state?.matchId);
     this.liveBuildRecommendationTraversalService.observeState(state);
+    await this.rawEventLogService.appendEvents(batch.events);
     return { ok: true };
   }
 
