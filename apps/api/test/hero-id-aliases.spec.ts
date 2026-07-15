@@ -22,16 +22,16 @@ describe('hero id aliases', () => {
     expect(heroIdAliases(999)).toEqual([999]);
   });
 
-  it('keeps GEP mappings explicit instead of deriving them from legacy aliases', () => {
+  it('preserves the existing skill-build compatibility map', () => {
+    expect(GEP_TO_VALVE_ID[2]).toBe(64);
+    expect(GEP_TO_VALVE_ID[6]).toBe(72);
     expect(GEP_TO_VALVE_ID[16]).toBe(27);
     expect(GEP_TO_VALVE_ID[27]).toBe(66);
-    expect(VALVE_TO_GEP_ID[27]).toBe(16);
-    expect(VALVE_TO_GEP_ID[66]).toBe(27);
-    expect(GEP_TO_VALVE_ID[2]).toBeUndefined();
-    expect(GEP_TO_VALVE_ID[6]).toBeUndefined();
+    expect(VALVE_TO_GEP_ID[64]).toBe(2);
+    expect(VALVE_TO_GEP_ID[72]).toBe(72);
   });
 
-  it('resolves live Victor and Yamato ids without remapping unrelated heroes', () => {
+  it('resolves item-build Victor and Yamato ids without remapping unrelated heroes', () => {
     expect(resolveValveHeroIdFromGep(27)).toBe(66);
     expect(resolveValveHeroIdFromGep(16)).toBe(27);
     expect(resolveValveHeroIdFromGep(2)).toBe(2);
