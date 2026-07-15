@@ -2,7 +2,12 @@ const path = require('path');
 
 module.exports = {
   entry: {
-    index: ['./src/desktop-version.ts', './src/live-build-hud-entry.ts', './src/index.ts'],
+    index: [
+      './src/desktop-version.ts',
+      './src/live-build-hud-entry.ts',
+      './src/index.ts',
+      './src/skill-build-automatic-entry.ts',
+    ],
     dynamo_warning: './src/dynamo_warning.ts',
   },
   output: {
