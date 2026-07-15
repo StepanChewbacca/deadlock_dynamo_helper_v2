@@ -31,6 +31,7 @@ import { IngestStatusService } from './ingest-status.service';
 import { InventoryShadowReplayService } from './inventory-shadow-replay.service';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { ItemCatalogImportService } from './item-catalog-import.service';
+import { LazyRecentMatchesWindowService } from './lazy-recent-matches-window.service';
 import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
 import { LiveIngestController } from './live-ingest.controller';
@@ -101,7 +102,11 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     SituationalRecommendationDiagnosticsService,
     RawEventLogService,
     RecentLiveEventsService,
-    RecentMatchesWindowService,
+    LazyRecentMatchesWindowService,
+    {
+      provide: RecentMatchesWindowService,
+      useExisting: LazyRecentMatchesWindowService,
+    },
     RecentMatchCrawlerService,
     RecentMatchRosterRepairService,
     RecipeAwareTimelineReconciliationService,
