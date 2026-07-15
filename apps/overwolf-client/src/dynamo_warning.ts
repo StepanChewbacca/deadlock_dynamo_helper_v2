@@ -1,6 +1,11 @@
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
-import type { SituationalItemWarning } from './situational-item-metadata';
+import {
+  createSituationalItemWarning,
+  SituationalItemWarning,
+} from './situational-item-metadata';
 
+const WARNING_DURATION_MS = 15_000;
+const SNAPSHOT_CHECK_INTERVAL_MS = 500;
 const ow = (window as any).overwolf;
 
 if (ow?.windows) {
@@ -14,9 +19,13 @@ if (ow?.windows) {
     const dragHandle = document.querySelector('.popup-drag-handle') as HTMLElement | null;
     const textElement = document.querySelector('.popup-text') as HTMLElement | null;
     const titleElement = document.querySelector('.popup-title') as HTMLElement | null;
+    const mainWindow = ow.windows.getMainWindow() as any;
+    const shownWarningKeys = new Set<string>();
+    let currentMatchId = '';
+    let pendingWarningKey = '';
+    let warningTimer: ReturnType<typeof setTimeout> | undefined;
 
     const updateUI = (): void => {
-      const mainWindow = ow.windows.getMainWindow() as any;
       const isMenuOpen = Boolean(mainWindow?.overlayMenuActive);
       const warning = mainWindow?.situationalItemWarning as
         | SituationalItemWarning
@@ -58,14 +67,109 @@ if (ow?.windows) {
       card.style.display = 'none';
     };
 
+    const clearWarningTimer = (): void => {
+      if (!warningTimer) {
+        return;
+      }
+      clearTimeout(warningTimer);
+      warningTimer = undefined;
+    };
+
+    const scheduleWarningClear = (warning: SituationalItemWarning): void => {
+      clearWarningTimer();
+      warningTimer = setTimeout(() => {
+        if (mainWindow.situationalItemWarning?.key === warning.key) {
+          mainWindow.situationalItemWarning = undefined;
+          updateUI();
+        }
+        warningTimer = undefined;
+      }, WARNING_DURATION_MS);
+    };
+
+    const presentWarning = (warning: SituationalItemWarning): void => {
+      if (
+        shownWarningKeys.has(warning.key) ||
+        pendingWarningKey === warning.key
+      ) {
+        return;
+      }
+
+      pendingWarningKey = warning.key;
+      mainWindow.situationalItemWarning = warning;
+      updateUI();
+
+      ow.windows.restore(windowId, (restoreResult: any) => {
+        pendingWarningKey = '';
+        if (!isSuccessfulOverwolfResult(restoreResult)) {
+          if (mainWindow.situationalItemWarning?.key === warning.key) {
+            mainWindow.situationalItemWarning = undefined;
+            updateUI();
+          }
+          return;
+        }
+
+        shownWarningKeys.add(warning.key);
+        scheduleWarningClear(warning);
+        if (typeof ow.windows.bringToFront === 'function') {
+          ow.windows.bringToFront(windowId, false, () => undefined);
+        }
+      });
+    };
+
+    const checkLatestSnapshot = (): void => {
+      const snapshot = mainWindow.latestLiveBuildRecommendation;
+      const snapshotMatchId = typeof snapshot?.matchId === 'string'
+        ? snapshot.matchId
+        : '';
+
+      if (snapshotMatchId !== currentMatchId) {
+        currentMatchId = snapshotMatchId;
+        shownWarningKeys.clear();
+        pendingWarningKey = '';
+        clearWarningTimer();
+      }
+
+      const existingWarning = mainWindow.situationalItemWarning as
+        | SituationalItemWarning
+        | undefined;
+      if (existingWarning) {
+        presentWarning(existingWarning);
+        return;
+      }
+
+      const warning = createSituationalItemWarning(
+        snapshot,
+        mainWindow.heroNamesMap || {},
+      );
+      if (warning) {
+        presentWarning(warning);
+      }
+    };
+
     dragHandle?.addEventListener('mousedown', (event: MouseEvent) => {
       event.preventDefault();
       ow.windows.dragMove(windowId);
     });
 
-    const mainWindow = ow.windows.getMainWindow() as any;
     mainWindow.updateWarningUI = updateUI;
+    mainWindow.replayCurrentSituationalWarning = () => {
+      const warning = createSituationalItemWarning(
+        mainWindow.latestLiveBuildRecommendation,
+        mainWindow.heroNamesMap || {},
+      );
+      if (!warning) {
+        return false;
+      }
+
+      shownWarningKeys.delete(warning.key);
+      pendingWarningKey = '';
+      presentWarning(warning);
+      return true;
+    };
+
     updateUI();
+    checkLatestSnapshot();
+    setInterval(checkLatestSnapshot, SNAPSHOT_CHECK_INTERVAL_MS);
   });
 }
 
