@@ -6,7 +6,7 @@ The skill build model uses match data from the existing rolling 14-day recent ma
 
 The crawler converts raw ability item IDs to skill slot numbers before persistence. Therefore, `match_player_skill_upgrades.abilityId` currently contains values `1-4`, despite the legacy field name.
 
-The analysis service replays these persisted slot identifiers directly and uses the hero ability map only to confirm that the requested hero is supported.
+At the API boundary, the analysis service converts those stored slots back to the requested hero's raw ability item IDs before replay. Domain actions and API responses therefore keep `abilityId` semantically correct while still using the existing database format.
 
 ## Rules
 
@@ -18,7 +18,7 @@ The analysis service replays these persisted slot identifiers directly and uses 
 ## Algorithm
 
 1. Load recent players for the exact requested hero ID.
-2. Interpret persisted ability IDs as skill slots `1-4`.
+2. Convert persisted skill slots `1-4` back to raw ability item IDs.
 3. Replay each chronological skill upgrade sequence.
 4. Keep valid prefixes when a later observation is invalid.
 5. Aggregate transitions by the complete four-skill state.
@@ -36,4 +36,4 @@ Optional query parameter:
 
 - `maxPointBudget`: positive integer up to 36.
 
-The response includes source counts, validation diagnostics, action costs, cumulative AP cost, conditional pick rate, sample size, and average observed upgrade time.
+The response includes source counts, validation diagnostics, raw ability item IDs, skill slots, action costs, cumulative AP cost, conditional pick rate, sample size, and average observed upgrade time.
