@@ -21,6 +21,45 @@ describe('LiveEventBuffer', () => {
     ]);
   });
 
+  it('flushes inventory events without waiting for the normal batch delay', async () => {
+    const calls: any[] = [];
+    const fetchImpl = async (_url: string, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return { ok: true } as Response;
+    };
+
+    const buffer = new LiveEventBuffer(
+      'client-1',
+      'http://localhost:3000',
+      fetchImpl,
+      1000,
+      () => 'match-1',
+    );
+    buffer.push({
+      receivedAt: 1,
+      source: 'onInfoUpdates2',
+      key: 'match_clock',
+      payload: '01:00',
+    });
+    buffer.push({
+      receivedAt: 2,
+      source: 'onInfoUpdates2',
+      key: 'items_12',
+      payload: {
+        steam_id: '76561198000000001',
+        items: [{ id: 100, name: 'Extra Regen', class_name: 'extra_regen' }],
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].events).toEqual([
+      expect.objectContaining({ key: 'match_clock', matchId: 'match-1' }),
+      expect.objectContaining({ key: 'items_12', matchId: 'match-1' }),
+    ]);
+  });
+
   it('attaches the restored match id to events that do not contain one', async () => {
     const calls: any[] = [];
     const fetchImpl = async (_url: string, init?: RequestInit) => {
