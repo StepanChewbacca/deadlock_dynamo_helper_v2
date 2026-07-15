@@ -34,14 +34,14 @@ export class HeroBuildRecommendationOwnershipFilterService {
         action: createHoldAction(response),
         alternatives: [],
         noMatchReason: 'NO_LEGAL_ACTION',
-      };
+      } as T;
     }
 
     return {
       ...response,
       action: { ...legalActions[0] },
       alternatives: legalActions.slice(1).map((action) => ({ ...action })),
-    };
+    } as T;
   }
 
   private isLegalAction(
