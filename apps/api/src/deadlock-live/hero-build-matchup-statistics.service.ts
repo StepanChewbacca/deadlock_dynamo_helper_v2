@@ -180,7 +180,11 @@ export class HeroBuildMatchupStatisticsService {
     }
 
     const nextIndex: HeroGraphMatchupIndex = new Map();
-    for (const match of this.recentMatchesWindowService.getMatches()) {
+    for (const matchId of this.recentMatchesWindowService.getMatchIds()) {
+      const match = this.recentMatchesWindowService.getMatch(matchId);
+      if (!match) {
+        continue;
+      }
       this.addMatch(nextIndex, match);
     }
 
