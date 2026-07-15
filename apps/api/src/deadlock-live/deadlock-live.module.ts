@@ -21,6 +21,7 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
+import { HeroBuildRecommendationOwnershipFilterService } from './hero-build-recommendation-ownership-filter.service';
 import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
 import { HeroBuildRecommendationService } from './hero-build-recommendation.service';
 import { HeroBuildTransitionAggregationController } from './hero-build-transition-aggregation.controller';
@@ -36,8 +37,10 @@ import { LazyBuildTransitionAggregationService } from './lazy-build-transition-a
 import { LazyRecentMatchesWindowService } from './lazy-recent-matches-window.service';
 import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
+import { LiveHeroBuildRecommendationPresentationService } from './live-hero-build-recommendation-presentation.service';
 import { LiveHeroMatchupSourceService } from './live-hero-matchup-source.service';
 import { LiveIngestController } from './live-ingest.controller';
+import { LiveInventoryEventNormalizerService } from './live-inventory-event-normalizer.service';
 import { LiveMatchStateService } from './live-match-state.service';
 import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
@@ -91,6 +94,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   ],
   providers: [
     LiveMatchStateService,
+    LiveInventoryEventNormalizerService,
     LiveBuildRecommendationTraversalService,
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
@@ -107,7 +111,12 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       provide: HeroBuildRecommendationService,
       useClass: ContextualHeroBuildRecommendationService,
     },
-    HeroBuildRecommendationPresentationService,
+    HeroBuildRecommendationOwnershipFilterService,
+    LiveHeroBuildRecommendationPresentationService,
+    {
+      provide: HeroBuildRecommendationPresentationService,
+      useExisting: LiveHeroBuildRecommendationPresentationService,
+    },
     SituationalRecommendationDiagnosticsService,
     RawEventLogService,
     RecentLiveEventsService,
