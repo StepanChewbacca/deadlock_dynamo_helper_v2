@@ -22,6 +22,7 @@ import {
   createInventoryStateKeyFromItemIds,
   HeroBuildTransitionAggregationService,
 } from './hero-build-transition-aggregation.service';
+import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
 export const HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT = 100;
@@ -76,14 +77,17 @@ interface ExpandedRecommendationCandidatePool {
 
 @Injectable()
 export class ContextualHeroBuildRecommendationService extends HeroBuildRecommendationService {
+  private readonly matchupReadyHeroIds = new Set<number>();
+  private readonly matchupWarmupsByHeroId = new Map<number, Promise<void>>();
+
   constructor(
-    private readonly contextualTransitionAggregationService: HeroBuildTransitionAggregationService,
+    private readonly contextualTransitionAggregationService: LiveHeroBuildPolicyService,
     private readonly contextualRecipeReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly heroBuildMatchupStatisticsService:
       HeroBuildMatchupStatisticsService,
   ) {
     super(
-      contextualTransitionAggregationService,
+      contextualTransitionAggregationService as unknown as HeroBuildTransitionAggregationService,
       contextualRecipeReconciliationService,
     );
   }
@@ -95,17 +99,32 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
     const pool = await this.recommendExpandedCandidatePool(request);
     const baseResponse = pool.baseResponse;
     const enemyHeroIds = normalizeEnemyHeroIds(request.enemyHeroIds ?? []);
-    const contextualActions = await Promise.all(
-      pool.candidates.map((candidate) =>
-        this.contextualizeAction(
-          request.heroId,
-          enemyHeroIds,
-          candidate.action,
-          candidate.baseRank,
-          candidate.wasInBaseBuild,
-        ),
-      ),
-    );
+    const canonicalId = canonicalHeroId(request.heroId);
+    const matchupReady = this.matchupReadyHeroIds.has(canonicalId);
+
+    if (!matchupReady) {
+      this.warmMatchupInBackground(canonicalId, enemyHeroIds, pool.candidates);
+    }
+
+    const contextualActions = matchupReady
+      ? await Promise.all(
+          pool.candidates.map((candidate) =>
+            this.contextualizeAction(
+              request.heroId,
+              enemyHeroIds,
+              candidate.action,
+              candidate.baseRank,
+              candidate.wasInBaseBuild,
+            ),
+          ),
+        )
+      : pool.candidates.map((candidate) =>
+          createUnchangedContextualAction(
+            candidate.action,
+            candidate.baseRank,
+            candidate.wasInBaseBuild,
+          ),
+        );
     const rankedActions = rankContextualActions(
       contextualActions,
       requestedLimit,
@@ -142,7 +161,7 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
   private async recommendExpandedCandidatePool(
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<ExpandedRecommendationCandidatePool> {
-    await this.contextualTransitionAggregationService.ensureReady();
+    await this.contextualTransitionAggregationService.ensureReady(request.heroId);
 
     const policyStatus = this.contextualTransitionAggregationService.getStatus();
     const policy = this.contextualTransitionAggregationService.getHeroPolicy(request.heroId);
@@ -213,6 +232,49 @@ export class ContextualHeroBuildRecommendationService extends HeroBuildRecommend
         HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT,
       ),
     };
+  }
+
+  private warmMatchupInBackground(
+    heroId: number,
+    enemyHeroIds: number[],
+    candidates: ContextualRecommendationCandidateSource[],
+  ): void {
+    if (
+      enemyHeroIds.length === 0 ||
+      this.matchupReadyHeroIds.has(heroId) ||
+      this.matchupWarmupsByHeroId.has(heroId)
+    ) {
+      return;
+    }
+
+    const candidate = candidates.find(
+      (value) =>
+        value.action.type !== 'HOLD' &&
+        value.action.itemId !== undefined &&
+        value.action.sourceActionType !== undefined,
+    );
+    if (!candidate || candidate.action.itemId === undefined) {
+      return;
+    }
+
+    const warmup = new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    })
+      .then(async () => {
+        await this.heroBuildMatchupStatisticsService.evaluate({
+          heroId,
+          stateKey: candidate.action.matchedStateKey,
+          actionKey: `${candidate.action.sourceActionType}:${candidate.action.itemId}`,
+          enemyHeroIds,
+        });
+        this.matchupReadyHeroIds.add(heroId);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.matchupWarmupsByHeroId.delete(heroId);
+      });
+
+    this.matchupWarmupsByHeroId.set(heroId, warmup);
   }
 
   private async contextualizeAction(
