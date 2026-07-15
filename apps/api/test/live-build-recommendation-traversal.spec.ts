@@ -71,6 +71,34 @@ describe('live build recommendation traversal', () => {
     });
   });
 
+  it('keeps the previous recommendation visible during a slow refresh', async () => {
+    const nextRecommendation = deferred<HeroBuildRecommendationResponse>();
+    const recommend = createRecommendMock();
+    recommend
+      .mockImplementationOnce(async (request) => createRecommendation(request.itemIds))
+      .mockImplementationOnce(() => nextRecommendation.promise);
+    const harness = createHarness(recommend);
+
+    harness.service.observeState(createState(10, [100]));
+    await harness.service.waitForIdle('match-1');
+    harness.service.observeState(createState(20, [100, 200]));
+
+    expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
+      state: 'READY',
+      itemIds: [100, 200],
+      inventoryStateKey: '100x1|200x1',
+      isStale: true,
+      recommendation: {
+        action: {
+          itemId: 999,
+        },
+      },
+    });
+
+    nextRecommendation.resolve(createRecommendation([100, 200]));
+    await harness.service.waitForIdle('match-1');
+  });
+
   it('refreshes when game time crosses a recommendation bucket', async () => {
     const harness = createHarness();
 
@@ -128,6 +156,29 @@ describe('live build recommendation traversal', () => {
       enemyHeroIds: [],
       refreshCount: 0,
       isStale: false,
+    });
+  });
+
+  it('keeps a ready recommendation when a later snapshot temporarily lacks the local player', async () => {
+    const harness = createHarness();
+
+    harness.service.observeState(createState(10, [100]));
+    await harness.service.waitForIdle('match-1');
+
+    const incompleteState = createState(11, [100]);
+    incompleteState.playersBySteamId.local.isLocal = false;
+    harness.service.observeState(incompleteState);
+
+    expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
+      state: 'READY',
+      itemIds: [100],
+      inventoryStateKey: '100x1',
+      isStale: true,
+      recommendation: {
+        action: {
+          itemId: 999,
+        },
+      },
     });
   });
 });
