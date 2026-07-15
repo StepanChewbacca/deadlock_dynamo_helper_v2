@@ -36,6 +36,7 @@ import { LazyBuildTransitionAggregationService } from './lazy-build-transition-a
 import { LazyRecentMatchesWindowService } from './lazy-recent-matches-window.service';
 import { LiveBuildRecommendationTraversalService } from './live-build-recommendation-traversal.service';
 import { LiveHeroBuildPolicyService } from './live-hero-build-policy.service';
+import { LiveHeroMatchupSourceService } from './live-hero-matchup-source.service';
 import { LiveIngestController } from './live-ingest.controller';
 import { LiveMatchStateService } from './live-match-state.service';
 import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
@@ -95,6 +96,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     LiveHeroBuildPolicyService,
+    LiveHeroMatchupSourceService,
     LazyBuildTransitionAggregationService,
     {
       provide: HeroBuildTransitionAggregationService,
@@ -139,6 +141,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
     LiveHeroBuildPolicyService,
+    LiveHeroMatchupSourceService,
     HeroBuildTransitionAggregationService,
     HeroBuildMatchupStatisticsService,
     HeroBuildRecommendationService,
