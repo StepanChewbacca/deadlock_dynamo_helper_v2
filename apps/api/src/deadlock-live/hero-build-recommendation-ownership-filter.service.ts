@@ -44,6 +44,16 @@ export class HeroBuildRecommendationOwnershipFilterService {
     } as T;
   }
 
+  isActionLegalForState(
+    action: HeroBuildRecommendationAction,
+    stateKey: string,
+  ): boolean {
+    const currentItemCounts = parseInventoryStateKey(stateKey);
+    return currentItemCounts
+      ? this.isLegalAction(action, currentItemCounts)
+      : true;
+  }
+
   private isLegalAction(
     action: HeroBuildRecommendationAction,
     currentItemCounts: ReadonlyMap<number, number>,
