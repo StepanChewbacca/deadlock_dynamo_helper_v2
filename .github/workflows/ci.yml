@@ -115,5 +115,14 @@ jobs:
           fi
           tail -n 20 "$RUNNER_TEMP/api-tests.log"
 
+      - name: Upload failed API test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-log-${{ github.sha }}
+          path: ${{ runner.temp }}/api-tests.log
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Test Overwolf client
         run: yarn workspace @deadlock-live-probe/overwolf-client test
