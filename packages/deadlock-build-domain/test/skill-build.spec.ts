@@ -4,12 +4,12 @@ import {
   createSkillBuildAction,
   createSkillBuildStateKey,
   DEFAULT_SKILL_BUILD_RULESET,
-  findMostPopularSkillBuildPath,
+  findBestSkillBuildPath,
   getSkillBuildSpentPoints,
   replaySkillBuild,
   SkillBuildGraphAccumulator,
   SkillSlot,
-} from '../src/skill-build';
+} from '../src';
 
 const ABILITY_SLOT_BY_ID: Record<number, SkillSlot> = {
   101: 1,
@@ -117,10 +117,46 @@ describe('skill build domain', () => {
       ABILITY_SLOT_BY_ID,
     );
 
-    const path = findMostPopularSkillBuildPath(accumulator.build());
+    const path = findBestSkillBuildPath(accumulator.build());
 
     expect(path.map((step) => step.skillSlot)).toEqual([1, 2, 1]);
     expect(path.map((step) => step.cumulativePointCost)).toEqual([1, 2, 3]);
+  });
+
+  it('chooses the globally strongest path instead of the greedy first transition', () => {
+    const accumulator = new SkillBuildGraphAccumulator();
+
+    for (let index = 0; index < 5; index += 1) {
+      accumulator.addPath(
+        [{ abilityId: 101, upgradeOrder: 1 }],
+        ABILITY_SLOT_BY_ID,
+      );
+    }
+    accumulator.addPath(
+      [
+        { abilityId: 101, upgradeOrder: 1 },
+        { abilityId: 102, upgradeOrder: 2 },
+      ],
+      ABILITY_SLOT_BY_ID,
+    );
+
+    for (let index = 0; index < 5; index += 1) {
+      accumulator.addPath(
+        [
+          { abilityId: 102, upgradeOrder: 1 },
+          { abilityId: 103, upgradeOrder: 2 },
+          { abilityId: 102, upgradeOrder: 3 },
+        ],
+        ABILITY_SLOT_BY_ID,
+      );
+    }
+
+    const graph = accumulator.build();
+    expect(graph.statesByKey.get(graph.rootStateKey)?.outgoingTransitions[0]?.action.skillSlot).toBe(1);
+
+    const path = findBestSkillBuildPath(graph);
+
+    expect(path.map((step) => step.skillSlot)).toEqual([2, 3, 2]);
   });
 
   it('stops before an action that exceeds the point budget', () => {
@@ -136,7 +172,7 @@ describe('skill build domain', () => {
       ABILITY_SLOT_BY_ID,
     );
 
-    const path = findMostPopularSkillBuildPath(accumulator.build(), { maxPointBudget: 4 });
+    const path = findBestSkillBuildPath(accumulator.build(), { maxPointBudget: 4 });
 
     expect(path).toHaveLength(3);
     expect(path[path.length - 1]?.cumulativePointCost).toBe(4);
