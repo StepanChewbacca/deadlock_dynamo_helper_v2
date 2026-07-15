@@ -25,4 +25,6 @@ export class LazyBuildTransitionAggregationService extends HeroBuildTransitionAg
   }
 
   override onModuleInit(): void {}
+
+  override refreshOnInterval(): void {}
 }
