@@ -104,7 +104,16 @@ jobs:
         run: yarn workspace @deadlock-live-probe/build-domain build
 
       - name: Test API
-        run: yarn workspace @deadlock-live-probe/api test
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test > "$RUNNER_TEMP/api-tests.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 200 "$RUNNER_TEMP/api-tests.log"
+            exit "$status"
+          fi
+          tail -n 20 "$RUNNER_TEMP/api-tests.log"
 
       - name: Test Overwolf client
         run: yarn workspace @deadlock-live-probe/overwolf-client test
