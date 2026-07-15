@@ -1,21 +1,28 @@
 import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
+import { GEP_TO_VALVE_ID } from './hero-id-aliases';
 import {
   HeroSkillLevels,
   SKILL_BUILD_MAX_POINT_BUDGET,
   SkillBuildAnalysisService,
 } from './skill-build-analysis.service';
 
+type HeroIdSource = 'api' | 'gep';
+
 @Controller('deadlock/analysis/heroes')
 export class SkillBuildAnalysisController {
   constructor(private readonly skillBuildAnalysisService: SkillBuildAnalysisService) {}
 
   @Get(':heroId/skill-build')
-  getHeroSkillBuild(
+  async getHeroSkillBuild(
     @Param('heroId') heroIdValue: string,
     @Query('maxPointBudget') maxPointBudgetValue?: string,
     @Query('levels') levelsValue?: string,
+    @Query('heroIdSource') heroIdSourceValue?: string,
   ) {
     const heroId = parsePositiveSafeInteger(heroIdValue, 'heroId');
+    const heroIdSource = parseHeroIdSource(heroIdSourceValue);
+    const resolvedHeroId =
+      heroIdSource === 'gep' ? GEP_TO_VALVE_ID[heroId] ?? heroId : heroId;
     const maxPointBudget =
       maxPointBudgetValue === undefined
         ? SKILL_BUILD_MAX_POINT_BUDGET
@@ -27,11 +34,30 @@ export class SkillBuildAnalysisController {
       );
     }
 
-    return this.skillBuildAnalysisService.getHeroSkillBuild(heroId, {
-      maxPointBudget,
-      currentLevels: parseSkillLevels(levelsValue),
-    });
+    const build = await this.skillBuildAnalysisService.getHeroSkillBuild(
+      resolvedHeroId,
+      {
+        maxPointBudget,
+        currentLevels: parseSkillLevels(levelsValue),
+      },
+    );
+
+    return {
+      ...build,
+      heroId,
+      resolvedHeroId,
+    };
   }
+}
+
+function parseHeroIdSource(value: string | undefined): HeroIdSource {
+  if (value === undefined || value === 'api') {
+    return 'api';
+  }
+  if (value === 'gep') {
+    return 'gep';
+  }
+  throw new BadRequestException('heroIdSource must be either api or gep.');
 }
 
 function parseSkillLevels(value: string | undefined): HeroSkillLevels | undefined {
