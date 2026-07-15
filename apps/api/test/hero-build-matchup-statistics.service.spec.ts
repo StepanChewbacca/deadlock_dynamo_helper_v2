@@ -60,12 +60,10 @@ describe('graph matchup statistics', () => {
     expect(applyConservativeMatchupOdds(baseScore, -1)).toBe(baseScore);
   });
 
-  it('rebuilds the matchup index one match at a time', async () => {
-    const matchOne = createEmptyMatch(1);
-    const matchTwo = createEmptyMatch(2);
-    const getMatch = jest.fn((matchId: number) =>
-      matchId === 1 ? matchOne : matchTwo,
-    );
+  it('rebuilds only matches indexed for the requested canonical hero', async () => {
+    const match = createEmptyMatch(2);
+    const getMatchIdsByHeroId = jest.fn(() => [2]);
+    const getMatch = jest.fn(() => match);
     const normalizeMatch = jest.fn(() => ({ players: [] }));
     const replayMatch = jest.fn(() => ({ players: [] }));
     const canonicalizeMatch = jest.fn(() => ({ players: [] }));
@@ -73,7 +71,7 @@ describe('graph matchup statistics', () => {
     const service = new HeroBuildMatchupStatisticsService(
       {
         getStatus: () => ({ lastRefreshedAt: new Date(1) }),
-        getMatchIds: () => [1, 2],
+        getMatchIdsByHeroId,
         getMatch,
       } as any,
       { normalizeMatch } as any,
@@ -83,16 +81,68 @@ describe('graph matchup statistics', () => {
     );
 
     await service.evaluate({
-      heroId: 15,
+      heroId: 80,
       stateKey: 'EMPTY',
       actionKey: 'BUY:1',
       enemyHeroIds: [35],
     });
 
-    expect(getMatch.mock.calls.map(([matchId]) => matchId)).toEqual([1, 2]);
-    expect(normalizeMatch).toHaveBeenCalledTimes(2);
-    expect(replayMatch).toHaveBeenCalledTimes(2);
-    expect(canonicalizeMatch).toHaveBeenCalledTimes(2);
+    expect(getMatchIdsByHeroId).toHaveBeenCalledWith(15);
+    expect(getMatch).toHaveBeenCalledTimes(1);
+    expect(getMatch).toHaveBeenCalledWith(2);
+    expect(normalizeMatch).toHaveBeenCalledTimes(1);
+    expect(replayMatch).toHaveBeenCalledTimes(1);
+    expect(canonicalizeMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores build sequences belonging to other heroes', async () => {
+    const match = createMatchWithPlayers(3);
+    const service = new HeroBuildMatchupStatisticsService(
+      {
+        getStatus: () => ({ lastRefreshedAt: new Date(1) }),
+        getMatchIdsByHeroId: () => [3],
+        getMatch: () => match,
+      } as any,
+      { normalizeMatch: () => ({ players: [] }) } as any,
+      { replayMatch: () => ({ players: [] }) } as any,
+      {
+        canonicalizeMatch: () => ({
+          players: [
+            {
+              playerId: 1,
+              heroId: 19,
+              replayDiagnosticCount: 0,
+              steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:OTHER' }],
+            },
+            {
+              playerId: 1,
+              heroId: 15,
+              replayDiagnosticCount: 0,
+              steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:TARGET' }],
+            },
+          ],
+        }),
+      } as any,
+      { refreshRecipes: jest.fn(async () => undefined) } as any,
+    );
+
+    const target = await service.evaluate({
+      heroId: 15,
+      stateKey: 'EMPTY',
+      actionKey: 'BUY:TARGET',
+      enemyHeroIds: [35],
+    });
+    const other = await service.evaluate({
+      heroId: 15,
+      stateKey: 'EMPTY',
+      actionKey: 'BUY:OTHER',
+      enemyHeroIds: [35],
+    });
+
+    expect(target.stateObservationCount).toBe(1);
+    expect(target.actionObservationCount).toBe(1);
+    expect(other.stateObservationCount).toBe(1);
+    expect(other.actionObservationCount).toBe(0);
   });
 });
 
@@ -104,5 +154,43 @@ function createEmptyMatch(matchId: number): RecentMatchSnapshot {
     averageBadge: 0,
     winningTeam: 0,
     players: [],
+  };
+}
+
+function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
+  return {
+    matchId,
+    startTime: new Date(matchId),
+    durationS: 0,
+    averageBadge: 0,
+    winningTeam: 2,
+    players: [
+      {
+        id: 1,
+        matchId,
+        heroId: 15,
+        team: 2,
+        won: true,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        netWorth: 0,
+        itemPurchases: [],
+        skillUpgrades: [],
+      },
+      {
+        id: 2,
+        matchId,
+        heroId: 35,
+        team: 3,
+        won: false,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        netWorth: 0,
+        itemPurchases: [],
+        skillUpgrades: [],
+      },
+    ],
   };
 }
