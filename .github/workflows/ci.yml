@@ -64,9 +64,27 @@ jobs:
         run: yarn workspace @deadlock-live-probe/shared build
 
       - name: Build Overwolf client
+        shell: bash
         env:
           OVERWOLF_PUBLIC_TARGET: ${{ runner.temp }}/overwolf-client/public
-        run: yarn workspace @deadlock-live-probe/overwolf-client build
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/overwolf-client build > "$RUNNER_TEMP/overwolf-build.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 200 "$RUNNER_TEMP/overwolf-build.log"
+            exit "$status"
+          fi
+          tail -n 20 "$RUNNER_TEMP/overwolf-build.log"
+
+      - name: Upload failed Overwolf build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overwolf-build-log-${{ github.sha }}
+          path: ${{ runner.temp }}/overwolf-build.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Upload Overwolf build artifact
         uses: actions/upload-artifact@v4
@@ -125,4 +143,22 @@ jobs:
           retention-days: 3
 
       - name: Test Overwolf client
-        run: yarn workspace @deadlock-live-probe/overwolf-client test
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/overwolf-client test > "$RUNNER_TEMP/overwolf-tests.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 200 "$RUNNER_TEMP/overwolf-tests.log"
+            exit "$status"
+          fi
+          tail -n 20 "$RUNNER_TEMP/overwolf-tests.log"
+
+      - name: Upload failed Overwolf test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overwolf-test-log-${{ github.sha }}
+          path: ${{ runner.temp }}/overwolf-tests.log
+          if-no-files-found: error
+          retention-days: 3
