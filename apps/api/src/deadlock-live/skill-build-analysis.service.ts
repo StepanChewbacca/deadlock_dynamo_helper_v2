@@ -104,7 +104,7 @@ export class SkillBuildAnalysisService {
       diagnostics: [...diagnosticCounts.entries()]
         .map(([code, count]) => ({ code, count }))
         .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code)),
-      totalPointCost: actions.at(-1)?.cumulativePointCost ?? 0,
+      totalPointCost: actions[actions.length - 1]?.cumulativePointCost ?? 0,
       actions,
     };
   }
