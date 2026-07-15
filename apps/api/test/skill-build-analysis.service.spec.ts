@@ -5,6 +5,7 @@ import type {
   RecentMatchesWindowService,
 } from '../src/deadlock-live/recent-matches-window.service';
 
+const STORED_UNKNOWN_SKILL = 0;
 const STORED_SKILL_1 = 1;
 const STORED_SKILL_2 = 2;
 const STORED_SKILL_3 = 3;
@@ -70,10 +71,10 @@ describe('SkillBuildAnalysisService', () => {
     expect(result.rejectedPlayerCount).toBe(0);
   });
 
-  it('uses a valid prefix and reports diagnostics for a damaged sequence', () => {
+  it('uses a valid prefix and reports the persisted unknown skill marker', () => {
     const player = createPlayer(1, [
       { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
-      { id: 2, abilityId: 999, upgradeOrder: 2 },
+      { id: 2, abilityId: STORED_UNKNOWN_SKILL, upgradeOrder: 2 },
     ]);
     const recentMatchesWindowService = {
       getPlayersByHeroIds: jest.fn().mockReturnValue([player]),
