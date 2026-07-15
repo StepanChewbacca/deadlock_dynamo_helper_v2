@@ -1,10 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  isAbilityItem,
+  mapAbilityToSkillNumber,
+  UNKNOWN_SKILL_SLOT,
+} from '../src/deadlock-live/hero-abilities';
+import {
   calculateMissingRecentMatchCount,
   RECENT_MATCH_CRAWL_CRON,
 } from '../src/deadlock-live/recent-match-crawler.service';
 import { RECENT_MATCH_TARGET_COUNT } from '../src/deadlock-live/recent-matches-window.service';
+
+const DYNAMO_HERO_ID = 11;
+const DYNAMO_SKILL_ONE_ID = 3760705623;
+const INFERNUS_SKILL_ONE_ID = 491391007;
 
 describe('recent match crawler', () => {
   it('runs every four hours, six times per day', () => {
@@ -26,5 +35,21 @@ describe('recent match crawler', () => {
     );
 
     expect(source).not.toContain('min_average_badge');
+  });
+
+  it('maps a known hero ability to its actual skill slot', () => {
+    expect(mapAbilityToSkillNumber(DYNAMO_HERO_ID, DYNAMO_SKILL_ONE_ID)).toBe(1);
+  });
+
+  it('does not silently map another hero ability to skill one', () => {
+    expect(isAbilityItem(DYNAMO_HERO_ID, INFERNUS_SKILL_ONE_ID)).toBe(true);
+    expect(mapAbilityToSkillNumber(DYNAMO_HERO_ID, INFERNUS_SKILL_ONE_ID)).toBe(
+      UNKNOWN_SKILL_SLOT,
+    );
+  });
+
+  it('marks an unknown item as neither an ability nor a valid skill slot', () => {
+    expect(isAbilityItem(DYNAMO_HERO_ID, 999)).toBe(false);
+    expect(mapAbilityToSkillNumber(DYNAMO_HERO_ID, 999)).toBe(UNKNOWN_SKILL_SLOT);
   });
 });

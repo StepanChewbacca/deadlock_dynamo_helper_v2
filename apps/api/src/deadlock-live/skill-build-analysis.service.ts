@@ -1,0 +1,150 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  findBestSkillBuildPath,
+  SkillBuildDiagnostic,
+  SkillBuildGraphAccumulator,
+  SkillBuildPathStep,
+  SkillSlot,
+  SkillUpgradeObservation,
+} from '@deadlock-live-probe/build-domain';
+import { HERO_ABILITY_MAP } from './hero-abilities';
+import {
+  RECENT_MATCH_WINDOW_DAYS,
+  RecentMatchSkillSnapshot,
+  RecentMatchesWindowService,
+} from './recent-matches-window.service';
+
+export const SKILL_BUILD_MAX_POINT_BUDGET = 36;
+
+export interface HeroSkillBuildDiagnosticSummary {
+  code: SkillBuildDiagnostic['code'];
+  count: number;
+}
+
+export interface HeroSkillBuildResponse {
+  heroId: number;
+  windowDays: number;
+  sourcePlayerCount: number;
+  validPlayerCount: number;
+  partialPlayerCount: number;
+  rejectedPlayerCount: number;
+  diagnostics: HeroSkillBuildDiagnosticSummary[];
+  totalPointCost: number;
+  actions: SkillBuildPathStep[];
+}
+
+@Injectable()
+export class SkillBuildAnalysisService {
+  constructor(private readonly recentMatchesWindowService: RecentMatchesWindowService) {}
+
+  async getHeroSkillBuild(
+    heroId: number,
+    maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET,
+  ): Promise<HeroSkillBuildResponse> {
+    const abilitySlotById = HERO_ABILITY_MAP[heroId] as
+      | Readonly<Record<number, SkillSlot>>
+      | undefined;
+    if (!abilitySlotById) {
+      throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
+    }
+
+    await this.ensureRecentMatchesLoaded();
+
+    const abilityIdByStoredSlot = createAbilityIdByStoredSlot(abilitySlotById);
+    const players = this.recentMatchesWindowService.getPlayersByHeroIds([heroId]);
+
+    if (players.length === 0) {
+      throw new NotFoundException(
+        `No recent match data exists for hero ${heroId} in the last ${RECENT_MATCH_WINDOW_DAYS} days.`,
+      );
+    }
+
+    const accumulator = new SkillBuildGraphAccumulator();
+    const diagnosticCounts = new Map<SkillBuildDiagnostic['code'], number>();
+    let validPlayerCount = 0;
+    let partialPlayerCount = 0;
+    let rejectedPlayerCount = 0;
+
+    for (const player of players) {
+      if (player.skillUpgrades.length === 0) {
+        rejectedPlayerCount += 1;
+        continue;
+      }
+
+      const replay = accumulator.addPath(
+        player.skillUpgrades.map((upgrade) =>
+          normalizePersistedSkillUpgrade(upgrade, abilityIdByStoredSlot),
+        ),
+        abilitySlotById,
+      );
+
+      for (const diagnostic of replay.diagnostics) {
+        diagnosticCounts.set(
+          diagnostic.code,
+          (diagnosticCounts.get(diagnostic.code) ?? 0) + 1,
+        );
+      }
+
+      if (replay.valid) {
+        validPlayerCount += 1;
+      } else if (replay.actions.length > 0) {
+        partialPlayerCount += 1;
+      } else {
+        rejectedPlayerCount += 1;
+      }
+    }
+
+    const graph = accumulator.build();
+    const actions = findBestSkillBuildPath(graph, { maxPointBudget });
+
+    if (actions.length === 0) {
+      throw new NotFoundException(
+        `No valid skill upgrade path exists for hero ${heroId} in the last ${RECENT_MATCH_WINDOW_DAYS} days.`,
+      );
+    }
+
+    return {
+      heroId,
+      windowDays: RECENT_MATCH_WINDOW_DAYS,
+      sourcePlayerCount: players.length,
+      validPlayerCount,
+      partialPlayerCount,
+      rejectedPlayerCount,
+      diagnostics: [...diagnosticCounts.entries()]
+        .map(([code, count]) => ({ code, count }))
+        .sort((left, right) => right.count - left.count || left.code.localeCompare(right.code)),
+      totalPointCost: actions[actions.length - 1]?.cumulativePointCost ?? 0,
+      actions,
+    };
+  }
+
+  private async ensureRecentMatchesLoaded(): Promise<void> {
+    if (this.recentMatchesWindowService.getStatus().lastRefreshedAt) {
+      return;
+    }
+
+    await this.recentMatchesWindowService.refresh();
+  }
+}
+
+function createAbilityIdByStoredSlot(
+  abilitySlotById: Readonly<Record<number, SkillSlot>>,
+): Readonly<Record<number, number>> {
+  return Object.fromEntries(
+    Object.entries(abilitySlotById).map(([abilityId, skillSlot]) => [
+      skillSlot,
+      Number(abilityId),
+    ]),
+  );
+}
+
+function normalizePersistedSkillUpgrade(
+  upgrade: RecentMatchSkillSnapshot,
+  abilityIdByStoredSlot: Readonly<Record<number, number>>,
+): SkillUpgradeObservation {
+  return {
+    abilityId: abilityIdByStoredSlot[upgrade.abilityId] ?? upgrade.abilityId,
+    upgradeOrder: upgrade.upgradeOrder,
+    upgradeTimeS: upgrade.upgradeTimeS,
+  };
+}
