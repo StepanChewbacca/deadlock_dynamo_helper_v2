@@ -60,20 +60,17 @@ describe('graph matchup statistics', () => {
     expect(applyConservativeMatchupOdds(baseScore, -1)).toBe(baseScore);
   });
 
-  it('rebuilds only matches indexed for the requested canonical hero', async () => {
+  it('rebuilds only matches loaded for the requested canonical hero', async () => {
     const match = createMatchWithPlayers(2);
-    const getMatchIdsByHeroId = jest.fn(() => [2]);
-    const getMatch = jest.fn(() => match);
+    const ensureReady = jest.fn(async () => undefined);
+    const getSourceVersionMs = jest.fn(() => 1);
+    const getMatches = jest.fn(() => [match]);
     const normalizeMatch = jest.fn(() => ({ players: [] }));
     const replayMatch = jest.fn(() => ({ players: [] }));
     const canonicalizeMatch = jest.fn(() => ({ players: [] }));
 
     const service = new HeroBuildMatchupStatisticsService(
-      {
-        getStatus: () => ({ lastRefreshedAt: new Date(1) }),
-        getMatchIdsByHeroId,
-        getMatch,
-      } as any,
+      { ensureReady, getSourceVersionMs, getMatches } as any,
       { normalizeMatch } as any,
       { replayMatch } as any,
       { canonicalizeMatch } as any,
@@ -87,9 +84,10 @@ describe('graph matchup statistics', () => {
       enemyHeroIds: [35],
     });
 
-    expect(getMatchIdsByHeroId).toHaveBeenCalledWith(15);
-    expect(getMatch).toHaveBeenCalledTimes(1);
-    expect(getMatch).toHaveBeenCalledWith(2);
+    expect(ensureReady).toHaveBeenCalledWith(15);
+    expect(getSourceVersionMs).toHaveBeenCalledWith(15);
+    expect(getMatches).toHaveBeenCalledTimes(1);
+    expect(getMatches).toHaveBeenCalledWith(15);
     expect(normalizeMatch).toHaveBeenCalledTimes(1);
     expect(replayMatch).toHaveBeenCalledTimes(1);
     expect(canonicalizeMatch).toHaveBeenCalledTimes(1);
@@ -99,9 +97,9 @@ describe('graph matchup statistics', () => {
     const match = createMatchWithPlayers(3);
     const service = new HeroBuildMatchupStatisticsService(
       {
-        getStatus: () => ({ lastRefreshedAt: new Date(1) }),
-        getMatchIdsByHeroId: () => [3],
-        getMatch: () => match,
+        ensureReady: async () => undefined,
+        getSourceVersionMs: () => 1,
+        getMatches: () => [match],
       } as any,
       { normalizeMatch: () => ({ players: [] }) } as any,
       { replayMatch: () => ({ players: [] }) } as any,
@@ -145,17 +143,6 @@ describe('graph matchup statistics', () => {
     expect(other.actionObservationCount).toBe(0);
   });
 });
-
-function createEmptyMatch(matchId: number): RecentMatchSnapshot {
-  return {
-    matchId,
-    startTime: new Date(matchId),
-    durationS: 0,
-    averageBadge: 0,
-    winningTeam: 0,
-    players: [],
-  };
-}
 
 function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
   return {
