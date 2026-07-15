@@ -71,7 +71,7 @@ export interface HeroBuildPresentationHeroSource {
   name: string;
 }
 
-@ Injectable()
+@Injectable()
 export class HeroBuildRecommendationPresentationService {
   constructor(
     @InjectRepository(Item)
