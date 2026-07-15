@@ -22,13 +22,26 @@ export class LiveEventBuffer {
 
     this.events.push(matchId ? { ...event, matchId } : event);
 
-    if (this.timerId) {
+    if (isInventoryEvent(event)) {
+      this.scheduleFlush(0, true);
       return;
+    }
+
+    this.scheduleFlush(this.flushDelayMs, false);
+  }
+
+  private scheduleFlush(delayMs: number, replaceExisting: boolean): void {
+    if (this.timerId) {
+      if (!replaceExisting) {
+        return;
+      }
+      clearTimeout(this.timerId);
+      this.timerId = undefined;
     }
 
     this.timerId = setTimeout(() => {
       void this.flush();
-    }, this.flushDelayMs);
+    }, delayMs);
   }
 
   private async flush(): Promise<void> {
@@ -54,6 +67,10 @@ export class LiveEventBuffer {
       console.error('Failed to flush event batch:', err);
     }
   }
+}
+
+function isInventoryEvent(event: OverwolfLiveEventDto): boolean {
+  return typeof event.key === 'string' && event.key.startsWith('items');
 }
 
 function readCurrentMatchId(): string | undefined {
