@@ -12,6 +12,7 @@ import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timelin
 export const GRAPH_MATCHUP_MODEL_VERSION = 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1';
 export const GRAPH_MATCHUP_CONFIDENCE_Z = 1.96;
 export const GRAPH_MATCHUP_CONTINUITY_CORRECTION = 0.5;
+const GRAPH_MATCHUP_YIELD_INTERVAL = 25;
 
 export interface GraphOutcomeSample {
   matches: number;
@@ -199,12 +200,17 @@ export class HeroBuildMatchupStatisticsService {
     }
 
     const nextIndex: HeroGraphStateIndex = new Map();
+    let processedMatchCount = 0;
     for (const matchId of this.recentMatchesWindowService.getMatchIdsByHeroId(heroId)) {
       const match = this.recentMatchesWindowService.getMatch(matchId);
       if (!match) {
         continue;
       }
       this.addMatch(nextIndex, match, heroId);
+      processedMatchCount += 1;
+      if (processedMatchCount % GRAPH_MATCHUP_YIELD_INTERVAL === 0) {
+        await yieldToEventLoop();
+      }
     }
 
     this.indexesByHeroId.set(heroId, {
@@ -420,4 +426,8 @@ function compareEvidence(
     return right.interactionLogOddsRatio - left.interactionLogOddsRatio;
   }
   return right.matchupObservationCount - left.matchupObservationCount;
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
