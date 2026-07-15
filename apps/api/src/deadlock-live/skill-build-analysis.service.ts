@@ -7,7 +7,6 @@ import {
   SkillSlot,
 } from '@deadlock-live-probe/build-domain';
 import { HERO_ABILITY_MAP } from './hero-abilities';
-import { canonicalHeroId, heroIdAliases } from './hero-id-aliases';
 import {
   RECENT_MATCH_WINDOW_DAYS,
   RecentMatchesWindowService,
@@ -22,7 +21,6 @@ export interface HeroSkillBuildDiagnosticSummary {
 
 export interface HeroSkillBuildResponse {
   heroId: number;
-  requestedHeroId: number;
   windowDays: number;
   sourcePlayerCount: number;
   validPlayerCount: number;
@@ -37,10 +35,16 @@ export interface HeroSkillBuildResponse {
 export class SkillBuildAnalysisService {
   constructor(private readonly recentMatchesWindowService: RecentMatchesWindowService) {}
 
-  getHeroSkillBuild(heroId: number, maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET): HeroSkillBuildResponse {
-    const canonicalId = canonicalHeroId(heroId);
-    const aliases = heroIdAliases(canonicalId);
-    const players = this.recentMatchesWindowService.getPlayersByHeroIds([...aliases]);
+  getHeroSkillBuild(
+    heroId: number,
+    maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET,
+  ): HeroSkillBuildResponse {
+    const abilityMap = HERO_ABILITY_MAP[heroId];
+    if (!abilityMap) {
+      throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
+    }
+
+    const players = this.recentMatchesWindowService.getPlayersByHeroIds([heroId]);
 
     if (players.length === 0) {
       throw new NotFoundException(
@@ -57,16 +61,6 @@ export class SkillBuildAnalysisService {
     for (const player of players) {
       if (player.skillUpgrades.length === 0) {
         rejectedPlayerCount += 1;
-        continue;
-      }
-
-      const abilityMap = HERO_ABILITY_MAP[player.heroId];
-      if (!abilityMap) {
-        rejectedPlayerCount += 1;
-        diagnosticCounts.set(
-          'UNKNOWN_ABILITY',
-          (diagnosticCounts.get('UNKNOWN_ABILITY') ?? 0) + 1,
-        );
         continue;
       }
 
@@ -101,8 +95,7 @@ export class SkillBuildAnalysisService {
     }
 
     return {
-      heroId: canonicalId,
-      requestedHeroId: heroId,
+      heroId,
       windowDays: RECENT_MATCH_WINDOW_DAYS,
       sourcePlayerCount: players.length,
       validPlayerCount,
