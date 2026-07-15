@@ -1,5 +1,6 @@
 import { MinimalMatchState } from '@deadlock-live-probe/shared';
 import { HeroBuildRecommendationWithAlternativeFilter } from '../src/deadlock-live/hero-build-recommendation-alternative-filter';
+import { HeroBuildRecommendationOwnershipFilterService } from '../src/deadlock-live/hero-build-recommendation-ownership-filter.service';
 import { HeroBuildRecommendationPresentationService } from '../src/deadlock-live/hero-build-recommendation-presentation.service';
 import {
   createTraversalInput,
@@ -96,6 +97,37 @@ describe('live build recommendation traversal', () => {
     });
 
     nextRecommendation.resolve(createRecommendation([100, 200]));
+    await harness.service.waitForIdle('match-1');
+  });
+
+  it('removes a purchased primary action before the slow refresh completes', async () => {
+    const nextRecommendation = deferred<HeroBuildRecommendationResponse>();
+    const recommend = createRecommendMock();
+    recommend
+      .mockImplementationOnce(async (request) => createRecommendation(request.itemIds))
+      .mockImplementationOnce(() => nextRecommendation.promise);
+    const harness = createHarness(recommend);
+
+    harness.service.observeState(createState(10, [100]));
+    await harness.service.waitForIdle('match-1');
+    harness.service.observeState(createState(11, [100, 999]));
+
+    expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
+      state: 'READY',
+      itemIds: [100, 999],
+      inventoryStateKey: '100x1|999x1',
+      isStale: true,
+      recommendation: {
+        mode: 'NO_MATCH',
+        action: {
+          type: 'HOLD',
+          actionKey: 'HOLD',
+          label: 'Recalculating next item',
+        },
+      },
+    });
+
+    nextRecommendation.resolve(createRecommendation([100, 999]));
     await harness.service.waitForIdle('match-1');
   });
 
@@ -205,13 +237,20 @@ function createHarness(recommend = createRecommendMock()) {
       missingItemIds: [Number(response.action.itemId)],
     },
   }));
+  const isActionLegalForState = jest.fn(
+    (action: { type: string; itemId?: number }, stateKey: string) =>
+      action.type !== 'BUY' ||
+      action.itemId === undefined ||
+      !stateKey.split('|').some((token) => token.startsWith(`${action.itemId}x`)),
+  );
 
   const service = new LiveBuildRecommendationTraversalService(
     { recommend } as unknown as HeroBuildRecommendationService,
     { present } as unknown as HeroBuildRecommendationPresentationService,
+    { isActionLegalForState } as unknown as HeroBuildRecommendationOwnershipFilterService,
   );
 
-  return { service, recommend, present };
+  return { service, recommend, present, isActionLegalForState };
 }
 
 function createRecommendMock() {
