@@ -8,6 +8,8 @@ import type {
 const STORED_SKILL_1 = 1;
 const STORED_SKILL_2 = 2;
 const STORED_SKILL_3 = 3;
+const DYNAMO_ABILITY_1 = 3760705623;
+const DYNAMO_ABILITY_2 = 2031714424;
 
 function createPlayer(
   id: number,
@@ -30,7 +32,7 @@ function createPlayer(
 }
 
 describe('SkillBuildAnalysisService', () => {
-  it('builds a state-conditioned skill path from persisted skill slot identifiers', () => {
+  it('builds a state-conditioned path and restores raw ability IDs', () => {
     const players = [
       createPlayer(1, [
         { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1, upgradeTimeS: 10 },
@@ -56,6 +58,11 @@ describe('SkillBuildAnalysisService', () => {
 
     expect(recentMatchesWindowService.getPlayersByHeroIds).toHaveBeenCalledWith([11]);
     expect(result.actions.map((action) => action.skillSlot)).toEqual([1, 2, 1]);
+    expect(result.actions.map((action) => action.abilityId)).toEqual([
+      DYNAMO_ABILITY_1,
+      DYNAMO_ABILITY_2,
+      DYNAMO_ABILITY_1,
+    ]);
     expect(result.actions.map((action) => action.cumulativePointCost)).toEqual([1, 2, 3]);
     expect(result.sourcePlayerCount).toBe(3);
     expect(result.validPlayerCount).toBe(3);
@@ -76,6 +83,7 @@ describe('SkillBuildAnalysisService', () => {
     const result = service.getHeroSkillBuild(11);
 
     expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.abilityId).toBe(DYNAMO_ABILITY_1);
     expect(result.validPlayerCount).toBe(0);
     expect(result.partialPlayerCount).toBe(1);
     expect(result.diagnostics).toEqual([{ code: 'UNKNOWN_ABILITY', count: 1 }]);
