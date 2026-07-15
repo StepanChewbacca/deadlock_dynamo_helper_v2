@@ -6,6 +6,7 @@ import { Match } from './entities/match.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.entity';
+import { canonicalHeroId } from './hero-id-aliases';
 
 export const RECENT_MATCH_WINDOW_DAYS = 14;
 export const RECENT_MATCH_TARGET_COUNT = 10_000;
@@ -76,6 +77,7 @@ export interface RecentMatchesWindowStatus {
 export class RecentMatchesWindowService implements OnModuleInit {
   private readonly logger = new Logger(RecentMatchesWindowService.name);
   private matchesById = new Map<number, RecentMatchSnapshot>();
+  private matchIdsByCanonicalHeroId = new Map<number, number[]>();
   private refreshPromise?: Promise<RecentMatchesWindowStatus>;
   private lastRefreshedAt?: Date;
   private lastRefreshDurationMs = 0;
@@ -120,6 +122,10 @@ export class RecentMatchesWindowService implements OnModuleInit {
 
   getMatchIds(): number[] {
     return Array.from(this.matchesById.keys());
+  }
+
+  getMatchIdsByHeroId(heroId: number): number[] {
+    return [...(this.matchIdsByCanonicalHeroId.get(canonicalHeroId(heroId)) ?? [])];
   }
 
   getMatch(matchId: number): RecentMatchSnapshot | undefined {
@@ -266,13 +272,24 @@ export class RecentMatchesWindowService implements OnModuleInit {
       }
 
       const nextWindow = new Map<number, RecentMatchSnapshot>();
+      const nextMatchIdsByCanonicalHeroId = new Map<number, number[]>();
       for (const match of matches) {
         match.players = playersByMatchId.get(Number(match.matchId)) ?? [];
         const snapshot = toRecentMatchSnapshot(match);
         nextWindow.set(snapshot.matchId, snapshot);
+
+        const canonicalHeroIds = new Set(
+          snapshot.players.map((player) => canonicalHeroId(player.heroId)),
+        );
+        for (const heroId of canonicalHeroIds) {
+          const heroMatchIds = nextMatchIdsByCanonicalHeroId.get(heroId) ?? [];
+          heroMatchIds.push(snapshot.matchId);
+          nextMatchIdsByCanonicalHeroId.set(heroId, heroMatchIds);
+        }
       }
 
       this.matchesById = nextWindow;
+      this.matchIdsByCanonicalHeroId = nextMatchIdsByCanonicalHeroId;
       this.lastRefreshedAt = new Date();
       this.lastRefreshDurationMs = Date.now() - startedAt;
       this.lastError = undefined;
