@@ -2,6 +2,7 @@ import {
   createEmptySkillLevels,
   createSkillLevelsKey,
   HeroSkillBuildResponse,
+  SkillLevel,
   SkillLevels,
   SkillSlot,
 } from './skill-build-client';
@@ -42,6 +43,14 @@ interface RuntimeContext {
   heroId: number;
   localSteamId?: string;
   build: HeroSkillBuildResponse;
+}
+
+interface ReconciledObservation {
+  levels: SkillLevels;
+  observedSlots: SkillSlot[];
+  complete: boolean;
+  confidence: AutomaticSkillTelemetryConfidence;
+  evidence: string[];
 }
 
 export class AutomaticSkillBuildRuntime {
@@ -135,29 +144,29 @@ export class AutomaticSkillBuildRuntime {
       return;
     }
 
-    this.resetForContextChange(context);
-
-    let bestObservation: AutomaticSkillTelemetryResult | undefined;
-    for (const payload of this.payloads) {
-      const observation = extractAutomaticSkillTelemetry(payload.value, {
-        abilityIdsBySlot: context.build.abilityIdsBySlot,
-        localSteamId: context.localSteamId,
-        eventKey: payload.eventKey,
-      });
-      if (!observation || !isBetterObservation(observation, bestObservation)) {
-        continue;
-      }
-      bestObservation = observation;
-    }
-
-    if (!bestObservation) {
+    const contextChanged = this.resetForContextChange(context);
+    if (contextChanged) {
+      this.pollGameInfo();
       this.publishStatus('WAITING_FOR_TELEMETRY', context);
       return;
     }
 
-    this.applyObservation(bestObservation);
+    const reconciled = reconcileAutomaticSkillObservations(
+      this.payloads,
+      context,
+    );
+    if (!reconciled) {
+      this.publishStatus('WAITING_FOR_TELEMETRY', context);
+      return;
+    }
+
+    this.applyObservation(reconciled);
     this.applyLevelsToExistingSkillRuntime(context);
-    this.publishStatus('SYNCED', context, bestObservation);
+    this.publishStatus(
+      reconciled.confidence === 'LOW' ? 'WAITING_FOR_TELEMETRY' : 'SYNCED',
+      context,
+      reconciled,
+    );
   }
 
   private getRuntimeContext(): RuntimeContext | undefined {
@@ -184,12 +193,12 @@ export class AutomaticSkillBuildRuntime {
     };
   }
 
-  private resetForContextChange(context: RuntimeContext): void {
+  private resetForContextChange(context: RuntimeContext): boolean {
     if (
       context.matchId === this.lastMatchId &&
       context.heroId === this.lastHeroId
     ) {
-      return;
+      return false;
     }
 
     this.lastMatchId = context.matchId;
@@ -198,15 +207,11 @@ export class AutomaticSkillBuildRuntime {
     this.observedSlots.clear();
     this.exactObservation = false;
     this.lastAppliedLevels = { ...context.build.currentLevels };
-
-    const cutoff = Date.now() - 10_000;
-    const recentPayloads = this.payloads.filter(
-      (payload) => payload.receivedAt >= cutoff,
-    );
-    this.payloads.splice(0, this.payloads.length, ...recentPayloads);
+    this.payloads.splice(0);
+    return true;
   }
 
-  private applyObservation(observation: AutomaticSkillTelemetryResult): void {
+  private applyObservation(observation: ReconciledObservation): void {
     if (observation.complete && observation.confidence !== 'LOW') {
       this.observedLevels = { ...observation.levels };
       this.observedSlots.clear();
@@ -221,7 +226,7 @@ export class AutomaticSkillBuildRuntime {
       this.observedLevels[skillSlot] = Math.max(
         this.observedLevels[skillSlot],
         observation.levels[skillSlot],
-      ) as SkillLevels[SkillSlot];
+      ) as SkillLevel;
       this.observedSlots.add(skillSlot);
     }
   }
@@ -265,13 +270,15 @@ export class AutomaticSkillBuildRuntime {
   private publishStatus(
     state: AutomaticSkillTrackingState,
     context?: RuntimeContext,
-    observation?: AutomaticSkillTelemetryResult,
+    observation?: ReconciledObservation,
   ): void {
     const status: AutomaticSkillTrackingStatus = {
       state,
       matchId: context?.matchId ?? this.lastMatchId,
       heroId: context?.heroId ?? this.lastHeroId,
-      levels: { ...this.observedLevels },
+      levels: observation
+        ? { ...observation.levels }
+        : { ...this.observedLevels },
       confidence: observation?.confidence,
       evidence: observation?.evidence ?? [],
       updatedAt: new Date().toISOString(),
@@ -306,26 +313,102 @@ export function initializeAutomaticSkillBuildRuntime(
   return runtime;
 }
 
-function isBetterObservation(
-  candidate: AutomaticSkillTelemetryResult,
-  current: AutomaticSkillTelemetryResult | undefined,
+export function isSafeAutomaticSkillObservation(
+  observation: AutomaticSkillTelemetryResult,
+  payload: Pick<BufferedPayload, 'eventKey'>,
+  context: Pick<RuntimeContext, 'localSteamId'>,
 ): boolean {
-  if (!current) {
-    return true;
+  const usesVectorIndex = observation.evidence.some((entry) =>
+    entry.includes('vector-index'),
+  );
+  const usesUnscopedSingleVector = observation.evidence.some((entry) =>
+    entry.includes('single-ability-state-vector'),
+  );
+
+  if (usesUnscopedSingleVector) {
+    return false;
+  }
+  if (usesVectorIndex) {
+    return payload.eventKey === 'getInfo' && Boolean(context.localSteamId);
+  }
+  return true;
+}
+
+export function reconcileAutomaticSkillObservations(
+  payloads: readonly BufferedPayload[],
+  context: RuntimeContext,
+): ReconciledObservation | undefined {
+  let latestComplete:
+    | { observation: AutomaticSkillTelemetryResult; receivedAt: number }
+    | undefined;
+  const partialLevels = createEmptySkillLevels();
+  const partialSlots = new Set<SkillSlot>();
+  const evidence = new Set<string>();
+  let bestConfidence: AutomaticSkillTelemetryConfidence = 'LOW';
+  let found = false;
+
+  for (const payload of payloads) {
+    const observation = extractAutomaticSkillTelemetry(payload.value, {
+      abilityIdsBySlot: context.build.abilityIdsBySlot,
+      localSteamId: context.localSteamId,
+      eventKey: payload.eventKey,
+    });
+    if (!observation || !isSafeAutomaticSkillObservation(observation, payload, context)) {
+      continue;
+    }
+
+    found = true;
+    if (confidenceRank(observation.confidence) > confidenceRank(bestConfidence)) {
+      bestConfidence = observation.confidence;
+    }
+    for (const entry of observation.evidence) {
+      evidence.add(entry);
+    }
+
+    if (observation.complete && observation.confidence !== 'LOW') {
+      if (!latestComplete || payload.receivedAt >= latestComplete.receivedAt) {
+        latestComplete = { observation, receivedAt: payload.receivedAt };
+      }
+      continue;
+    }
+
+    for (const skillSlot of observation.observedSlots) {
+      partialLevels[skillSlot] = Math.max(
+        partialLevels[skillSlot],
+        observation.levels[skillSlot],
+      ) as SkillLevel;
+      partialSlots.add(skillSlot);
+    }
   }
 
-  const confidenceDifference =
-    confidenceRank(candidate.confidence) - confidenceRank(current.confidence);
-  if (confidenceDifference !== 0) {
-    return confidenceDifference > 0;
+  if (!found) {
+    return undefined;
   }
-  if (candidate.complete !== current.complete) {
-    return candidate.complete;
+
+  if (latestComplete) {
+    const levels = { ...latestComplete.observation.levels };
+    for (const skillSlot of partialSlots) {
+      levels[skillSlot] = Math.max(
+        levels[skillSlot],
+        partialLevels[skillSlot],
+      ) as SkillLevel;
+    }
+    return {
+      levels,
+      observedSlots: [...SKILL_SLOTS],
+      complete: true,
+      confidence: latestComplete.observation.confidence,
+      evidence: [...evidence],
+    };
   }
-  if (candidate.observedSlots.length !== current.observedSlots.length) {
-    return candidate.observedSlots.length > current.observedSlots.length;
-  }
-  return getTotalLevel(candidate.levels) > getTotalLevel(current.levels);
+
+  return {
+    levels: partialLevels,
+    observedSlots: [...partialSlots].sort((left, right) => left - right),
+    complete: partialSlots.size === SKILL_SLOTS.length,
+    confidence: bestConfidence,
+    evidence: [...evidence],
+  };
 }
 
 function confidenceRank(value: AutomaticSkillTelemetryConfidence): number {
@@ -348,26 +431,22 @@ function mergePartialLevels(
     result[skillSlot] = Math.max(
       baseline[skillSlot],
       observed[skillSlot],
-    ) as SkillLevels[SkillSlot];
+    ) as SkillLevel;
   }
   return result;
 }
 
 function maxSkillLevels(left: SkillLevels, right: SkillLevels): SkillLevels {
   return {
-    1: Math.max(left[1], right[1]) as SkillLevels[1],
-    2: Math.max(left[2], right[2]) as SkillLevels[2],
-    3: Math.max(left[3], right[3]) as SkillLevels[3],
-    4: Math.max(left[4], right[4]) as SkillLevels[4],
+    1: Math.max(left[1], right[1]) as SkillLevel,
+    2: Math.max(left[2], right[2]) as SkillLevel,
+    3: Math.max(left[3], right[3]) as SkillLevel,
+    4: Math.max(left[4], right[4]) as SkillLevel,
   };
 }
 
 function hasAnyHigherLevel(left: SkillLevels, right: SkillLevels): boolean {
   return SKILL_SLOTS.some((skillSlot) => left[skillSlot] > right[skillSlot]);
-}
-
-function getTotalLevel(levels: SkillLevels): number {
-  return SKILL_SLOTS.reduce((total, skillSlot) => total + levels[skillSlot], 0);
 }
 
 function getStatusKey(status: AutomaticSkillTrackingStatus): string {
