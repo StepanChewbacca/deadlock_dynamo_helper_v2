@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
-import { canonicalHeroId } from './hero-id-aliases';
+import { canonicalHeroId, resolveValveHeroIdFromGep } from './hero-id-aliases';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
 import { LiveHeroMatchupSourceService } from './live-hero-matchup-source.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
@@ -100,7 +100,15 @@ export class HeroBuildMatchupStatisticsService {
     const heroId = canonicalHeroId(input.heroId);
     await this.ensureReady(heroId);
 
-    const enemyHeroIds = normalizeHeroIds(input.enemyHeroIds);
+    const enemyHeroIds = normalizeGepHeroIds(input.enemyHeroIds);
+    const enemyValveHeroIds = normalizeValveHeroIds(
+      enemyHeroIds.map(resolveValveHeroIdFromGep),
+    );
+    const gepHeroIdByValveHeroId = new Map<number, number>();
+    for (const enemyHeroId of enemyHeroIds) {
+      gepHeroIdByValveHeroId.set(resolveValveHeroIdFromGep(enemyHeroId), enemyHeroId);
+    }
+
     const state = this.indexesByHeroId.get(heroId)?.index.get(input.stateKey);
     const action = state?.actionsByKey.get(input.actionKey);
 
@@ -119,10 +127,10 @@ export class HeroBuildMatchupStatisticsService {
     }
 
     const otherActionsTotal = subtractSamples(state, action);
-    const evidence = enemyHeroIds
-      .map((enemyHeroId) => {
-        const stateAgainst = state.byEnemyHeroId.get(enemyHeroId) ?? emptySample();
-        const actionAgainst = action.byEnemyHeroId.get(enemyHeroId) ?? emptySample();
+    const evidence = enemyValveHeroIds
+      .map((enemyValveHeroId) => {
+        const stateAgainst = state.byEnemyHeroId.get(enemyValveHeroId) ?? emptySample();
+        const actionAgainst = action.byEnemyHeroId.get(enemyValveHeroId) ?? emptySample();
         const otherActionsAgainst = subtractSamples(stateAgainst, actionAgainst);
         const stateWithoutEnemy = subtractSamples(state, stateAgainst);
         const actionWithoutEnemy = subtractSamples(action, actionAgainst);
@@ -132,7 +140,7 @@ export class HeroBuildMatchupStatisticsService {
         );
 
         return calculateGraphMatchupInteraction({
-          enemyHeroId,
+          enemyHeroId: gepHeroIdByValveHeroId.get(enemyValveHeroId) ?? enemyValveHeroId,
           actionAgainst,
           otherActionsAgainst,
           actionWithoutEnemy,
@@ -215,8 +223,9 @@ export class HeroBuildMatchupStatisticsService {
     match: RecentMatchSnapshot,
     requestedHeroId: number,
   ): void {
+    const requestedValveHeroId = resolveValveHeroIdFromGep(requestedHeroId);
     const requestedPlayers = match.players.filter(
-      (player) => canonicalHeroId(player.heroId) === requestedHeroId,
+      (player) => player.heroId === requestedValveHeroId,
     );
     if (requestedPlayers.length === 0) {
       return;
@@ -234,7 +243,7 @@ export class HeroBuildMatchupStatisticsService {
     const playersById = new Map(requestedPlayers.map((player) => [player.id, player]));
 
     for (const sequence of sequences.players) {
-      if (canonicalHeroId(sequence.heroId) !== requestedHeroId) {
+      if (sequence.heroId !== requestedValveHeroId) {
         continue;
       }
       if (sequence.replayDiagnosticCount > 0 || sequence.steps.length === 0) {
@@ -246,7 +255,7 @@ export class HeroBuildMatchupStatisticsService {
         continue;
       }
 
-      const enemyHeroIds = normalizeHeroIds(
+      const enemyHeroIds = normalizeValveHeroIds(
         match.players
           .filter((candidate) => candidate.team !== player.team)
           .map((candidate) => candidate.heroId),
@@ -388,11 +397,17 @@ function emptySample(): MutableOutcomeSample {
   return { matches: 0, wins: 0 };
 }
 
-function normalizeHeroIds(heroIds: readonly number[]): number[] {
+function normalizeGepHeroIds(heroIds: readonly number[]): number[] {
   return [...new Set(
     heroIds
       .filter((heroId) => Number.isSafeInteger(heroId) && heroId > 0)
       .map(canonicalHeroId),
+  )].sort((left, right) => left - right);
+}
+
+function normalizeValveHeroIds(heroIds: readonly number[]): number[] {
+  return [...new Set(
+    heroIds.filter((heroId) => Number.isSafeInteger(heroId) && heroId > 0),
   )].sort((left, right) => left - right);
 }
 

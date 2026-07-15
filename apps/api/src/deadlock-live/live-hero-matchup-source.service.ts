@@ -4,7 +4,7 @@ import { In, Repository } from 'typeorm';
 import { Match } from './entities/match.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
-import { canonicalHeroId, heroIdAliases } from './hero-id-aliases';
+import { canonicalHeroId, resolveValveHeroIdFromGep } from './hero-id-aliases';
 import {
   chunkValues,
   getRecentMatchCutoff,
@@ -82,11 +82,11 @@ export class LiveHeroMatchupSourceService {
 
   private async loadHeroMatches(canonicalId: number): Promise<void> {
     const startedAt = Date.now();
-    const aliases = [...heroIdAliases(canonicalId)];
+    const valveHeroId = resolveValveHeroIdFromGep(canonicalId);
     const requestedPlayers = await this.matchPlayerRepository
       .createQueryBuilder('player')
       .innerJoinAndSelect('player.match', 'match')
-      .where('player.heroId IN (:...heroIds)', { heroIds: aliases })
+      .where('player.heroId = :heroId', { heroId: valveHeroId })
       .andWhere('match.startTime >= :cutoff', { cutoff: getRecentMatchCutoff(new Date()) })
       .orderBy('match.startTime', 'DESC')
       .addOrderBy('match.matchId', 'DESC')

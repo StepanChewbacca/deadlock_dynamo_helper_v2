@@ -1,12 +1,12 @@
 import { LiveHeroBuildPolicyService } from '../src/deadlock-live/live-hero-build-policy.service';
 
 describe('LiveHeroBuildPolicyService', () => {
-  it('builds and caches a policy only for the requested canonical hero', async () => {
+  it('builds Victor policy from exact Valve hero id without Yamato matches', async () => {
     const queryBuilder = createQueryBuilder([
       {
         id: 10,
         matchId: 100,
-        heroId: 72,
+        heroId: 66,
         team: 2,
         won: true,
         kills: 1,
@@ -48,7 +48,7 @@ describe('LiveHeroBuildPolicyService', () => {
         {
           matchId: 100,
           playerId: 10,
-          heroId: 72,
+          heroId: 66,
           sourceActionCount: 1,
           canonicalStepCount: 1,
           ignoredActionCount: 0,
@@ -83,20 +83,39 @@ describe('LiveHeroBuildPolicyService', () => {
       { refreshRecipes: jest.fn(async () => undefined) } as any,
     );
 
-    await service.ensureReady(6);
+    await service.ensureReady(27);
 
     expect(queryBuilder.where).toHaveBeenCalledWith(
-      'player.heroId IN (:...heroIds)',
-      { heroIds: [6, 72] },
+      'player.heroId = :heroId',
+      { heroId: 66 },
     );
     expect(matchPlayerItemRepository.find).toHaveBeenCalledTimes(1);
     expect(normalizeMatch).toHaveBeenCalledTimes(1);
     expect(replayMatch).toHaveBeenCalledTimes(1);
     expect(canonicalizeMatch).toHaveBeenCalledTimes(1);
-    expect(service.getHeroPolicy(6)?.statesByKey.get('EMPTY')?.nextActions[0]).toMatchObject({
+    expect(service.getHeroPolicy(27)?.statesByKey.get('EMPTY')?.nextActions[0]).toMatchObject({
       actionKey: 'BUY:1000',
       count: 1,
     });
+  });
+
+  it('does not remap Abrams item history to Billy', async () => {
+    const queryBuilder = createQueryBuilder([]);
+    const service = new LiveHeroBuildPolicyService(
+      { createQueryBuilder: jest.fn(() => queryBuilder) } as any,
+      { find: jest.fn(async () => []) } as any,
+      { normalizeMatch: jest.fn() } as any,
+      { replayMatch: jest.fn() } as any,
+      { canonicalizeMatch: jest.fn() } as any,
+      { refreshRecipes: jest.fn(async () => undefined) } as any,
+    );
+
+    await service.ensureReady(6);
+
+    expect(queryBuilder.where).toHaveBeenCalledWith(
+      'player.heroId = :heroId',
+      { heroId: 6 },
+    );
   });
 });
 

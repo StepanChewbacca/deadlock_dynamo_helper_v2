@@ -1,11 +1,11 @@
 import { LiveHeroMatchupSourceService } from '../src/deadlock-live/live-hero-matchup-source.service';
 
 describe('LiveHeroMatchupSourceService', () => {
-  it('loads only requested hero item history while retaining the match roster', async () => {
+  it('loads only exact Victor item history while retaining the match roster', async () => {
     const requestedPlayer = {
       id: 10,
       matchId: 100,
-      heroId: 72,
+      heroId: 66,
       team: 2,
       won: true,
       kills: 1,
@@ -23,7 +23,7 @@ describe('LiveHeroMatchupSourceService', () => {
     const enemyPlayer = {
       id: 11,
       matchId: 100,
-      heroId: 35,
+      heroId: 27,
       team: 3,
       won: false,
       kills: 0,
@@ -58,25 +58,25 @@ describe('LiveHeroMatchupSourceService', () => {
       matchPlayerItemRepository as any,
     );
 
-    await service.ensureReady(6);
+    await service.ensureReady(27);
 
     expect(queryBuilder.where).toHaveBeenCalledWith(
-      'player.heroId IN (:...heroIds)',
-      { heroIds: [6, 72] },
+      'player.heroId = :heroId',
+      { heroId: 66 },
     );
     expect(matchPlayerRepository.find).toHaveBeenCalledTimes(1);
     expect(matchPlayerItemRepository.find).toHaveBeenCalledTimes(1);
-    const matches = service.getMatches(6);
+    const matches = service.getMatches(27);
     expect(matches).toHaveLength(1);
     expect(matches[0].players).toEqual([
       expect.objectContaining({
         id: 10,
-        heroId: 72,
+        heroId: 66,
         itemPurchases: [expect.objectContaining({ itemId: 1000 })],
       }),
       expect.objectContaining({
         id: 11,
-        heroId: 35,
+        heroId: 27,
         itemPurchases: [],
       }),
     ]);

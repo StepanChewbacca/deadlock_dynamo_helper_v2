@@ -2,6 +2,7 @@ import {
   canonicalHeroId,
   GEP_TO_VALVE_ID,
   heroIdAliases,
+  resolveValveHeroIdFromGep,
   VALVE_TO_GEP_ID,
 } from '../src/deadlock-live/hero-id-aliases';
 
@@ -21,8 +22,21 @@ describe('hero id aliases', () => {
     expect(heroIdAliases(999)).toEqual([999]);
   });
 
-  it('preserves compatibility mappings used at API boundaries', () => {
+  it('preserves the existing skill-build compatibility map', () => {
     expect(GEP_TO_VALVE_ID[2]).toBe(64);
+    expect(GEP_TO_VALVE_ID[6]).toBe(72);
+    expect(GEP_TO_VALVE_ID[16]).toBe(27);
+    expect(GEP_TO_VALVE_ID[27]).toBe(66);
     expect(VALVE_TO_GEP_ID[64]).toBe(2);
+    expect(VALVE_TO_GEP_ID[72]).toBe(72);
+  });
+
+  it('resolves item-build Victor and Yamato ids without remapping unrelated heroes', () => {
+    expect(resolveValveHeroIdFromGep(27)).toBe(66);
+    expect(resolveValveHeroIdFromGep(16)).toBe(27);
+    expect(resolveValveHeroIdFromGep(2)).toBe(2);
+    expect(resolveValveHeroIdFromGep(6)).toBe(6);
+    expect(resolveValveHeroIdFromGep(72)).toBe(72);
+    expect(resolveValveHeroIdFromGep(999)).toBe(999);
   });
 });

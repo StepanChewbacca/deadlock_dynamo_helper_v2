@@ -52,6 +52,7 @@ export function heroIdAliases(heroId: number): readonly number[] {
   return HERO_ID_ALIASES[canonicalId] ?? [heroId];
 }
 
+// This compatibility map is part of the skill-build API contract.
 export const GEP_TO_VALVE_ID: Readonly<Record<number, number>> = Object.freeze(
   Object.fromEntries(
     Object.entries(HERO_ID_ALIASES).map(([canonicalId, aliases]) => [
@@ -63,3 +64,13 @@ export const GEP_TO_VALVE_ID: Readonly<Record<number, number>> = Object.freeze(
 
 export const VALVE_TO_GEP_ID: Readonly<Record<number, number>> =
   HERO_ALIAS_TO_CANONICAL_ID;
+
+// Item history must not use the legacy alias list because active hero ids collide.
+const ITEM_BUILD_GEP_TO_VALVE_ID: Readonly<Record<number, number>> = Object.freeze({
+  16: 27,
+  27: 66,
+});
+
+export function resolveValveHeroIdFromGep(heroId: number): number {
+  return ITEM_BUILD_GEP_TO_VALVE_ID[heroId] ?? heroId;
+}

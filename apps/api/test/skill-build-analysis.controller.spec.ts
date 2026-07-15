@@ -23,7 +23,25 @@ describe('SkillBuildAnalysisController', () => {
     });
   });
 
-  it('resolves a GEP hero id to the Valve/API id without changing response identity', async () => {
+  it('resolves Victor GEP id to the Valve/API id without changing response identity', async () => {
+    const service = {
+      getHeroSkillBuild: jest.fn().mockResolvedValue({
+        ...SERVICE_RESPONSE,
+        heroId: 66,
+      }),
+    } as unknown as SkillBuildAnalysisService;
+    const controller = new SkillBuildAnalysisController(service);
+
+    await expect(
+      controller.getHeroSkillBuild('27', undefined, undefined, 'gep'),
+    ).resolves.toMatchObject({ heroId: 27, resolvedHeroId: 66 });
+    expect(service.getHeroSkillBuild).toHaveBeenCalledWith(66, {
+      maxPointBudget: 36,
+      currentLevels: undefined,
+    });
+  });
+
+  it('preserves existing GEP compatibility mappings for skill history', async () => {
     const service = {
       getHeroSkillBuild: jest.fn().mockResolvedValue({
         ...SERVICE_RESPONSE,
