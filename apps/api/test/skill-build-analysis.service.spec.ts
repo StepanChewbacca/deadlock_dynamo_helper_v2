@@ -5,9 +5,9 @@ import type {
   RecentMatchesWindowService,
 } from '../src/deadlock-live/recent-matches-window.service';
 
-const DYNAMO_SKILL_1 = 3760705623;
-const DYNAMO_SKILL_2 = 2031714424;
-const DYNAMO_SKILL_3 = 492030745;
+const STORED_SKILL_1 = 1;
+const STORED_SKILL_2 = 2;
+const STORED_SKILL_3 = 3;
 
 function createPlayer(
   id: number,
@@ -30,21 +30,21 @@ function createPlayer(
 }
 
 describe('SkillBuildAnalysisService', () => {
-  it('builds a state-conditioned skill path from the recent window', () => {
+  it('builds a state-conditioned skill path from persisted skill slot identifiers', () => {
     const players = [
       createPlayer(1, [
-        { id: 1, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1, upgradeTimeS: 10 },
-        { id: 2, abilityId: DYNAMO_SKILL_2, upgradeOrder: 2, upgradeTimeS: 20 },
-        { id: 3, abilityId: DYNAMO_SKILL_1, upgradeOrder: 3, upgradeTimeS: 30 },
+        { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1, upgradeTimeS: 10 },
+        { id: 2, abilityId: STORED_SKILL_2, upgradeOrder: 2, upgradeTimeS: 20 },
+        { id: 3, abilityId: STORED_SKILL_1, upgradeOrder: 3, upgradeTimeS: 30 },
       ]),
       createPlayer(2, [
-        { id: 4, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1, upgradeTimeS: 12 },
-        { id: 5, abilityId: DYNAMO_SKILL_2, upgradeOrder: 2, upgradeTimeS: 22 },
-        { id: 6, abilityId: DYNAMO_SKILL_1, upgradeOrder: 3, upgradeTimeS: 32 },
+        { id: 4, abilityId: STORED_SKILL_1, upgradeOrder: 1, upgradeTimeS: 12 },
+        { id: 5, abilityId: STORED_SKILL_2, upgradeOrder: 2, upgradeTimeS: 22 },
+        { id: 6, abilityId: STORED_SKILL_1, upgradeOrder: 3, upgradeTimeS: 32 },
       ]),
       createPlayer(3, [
-        { id: 7, abilityId: DYNAMO_SKILL_2, upgradeOrder: 1 },
-        { id: 8, abilityId: DYNAMO_SKILL_3, upgradeOrder: 2 },
+        { id: 7, abilityId: STORED_SKILL_2, upgradeOrder: 1 },
+        { id: 8, abilityId: STORED_SKILL_3, upgradeOrder: 2 },
       ]),
     ];
     const recentMatchesWindowService = {
@@ -65,7 +65,7 @@ describe('SkillBuildAnalysisService', () => {
 
   it('uses a valid prefix and reports diagnostics for a damaged sequence', () => {
     const player = createPlayer(1, [
-      { id: 1, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1 },
+      { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
       { id: 2, abilityId: 999, upgradeOrder: 2 },
     ]);
     const recentMatchesWindowService = {
@@ -83,10 +83,10 @@ describe('SkillBuildAnalysisService', () => {
 
   it('respects the requested point budget', () => {
     const player = createPlayer(1, [
-      { id: 1, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1 },
-      { id: 2, abilityId: DYNAMO_SKILL_1, upgradeOrder: 2 },
-      { id: 3, abilityId: DYNAMO_SKILL_1, upgradeOrder: 3 },
-      { id: 4, abilityId: DYNAMO_SKILL_1, upgradeOrder: 4 },
+      { id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 },
+      { id: 2, abilityId: STORED_SKILL_1, upgradeOrder: 2 },
+      { id: 3, abilityId: STORED_SKILL_1, upgradeOrder: 3 },
+      { id: 4, abilityId: STORED_SKILL_1, upgradeOrder: 4 },
     ]);
     const recentMatchesWindowService = {
       getPlayersByHeroIds: jest.fn().mockReturnValue([player]),
@@ -102,7 +102,7 @@ describe('SkillBuildAnalysisService', () => {
   it('does not merge matches from another hero through legacy aliases', () => {
     const recentMatchesWindowService = {
       getPlayersByHeroIds: jest.fn().mockReturnValue([
-        createPlayer(1, [{ id: 1, abilityId: DYNAMO_SKILL_1, upgradeOrder: 1 }]),
+        createPlayer(1, [{ id: 1, abilityId: STORED_SKILL_1, upgradeOrder: 1 }]),
       ]),
     } as unknown as RecentMatchesWindowService;
     const service = new SkillBuildAnalysisService(recentMatchesWindowService);
