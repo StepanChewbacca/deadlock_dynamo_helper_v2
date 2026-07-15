@@ -61,19 +61,9 @@ export const GEP_TO_VALVE_ID: Readonly<Record<number, number>> = Object.freeze(
   ),
 );
 
-export const VALVE_TO_GEP_ID: Readonly<Record<number, number>> = Object.freeze(
-  Object.fromEntries(
-    Object.entries(GEP_TO_VALVE_ID).map(([gepId, valveId]) => [
-      valveId,
-      Number(gepId),
-    ]),
-  ),
-);
+export const VALVE_TO_GEP_ID: Readonly<Record<number, number>> =
+  HERO_ALIAS_TO_CANONICAL_ID;
 
 export function resolveValveHeroIdFromGep(heroId: number): number {
   return GEP_TO_VALVE_ID[heroId] ?? heroId;
-}
-
-export function resolveGepHeroIdFromValve(heroId: number): number {
-  return VALVE_TO_GEP_ID[heroId] ?? heroId;
 }
