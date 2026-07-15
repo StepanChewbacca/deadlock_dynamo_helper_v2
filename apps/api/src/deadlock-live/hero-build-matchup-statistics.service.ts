@@ -2,11 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { canonicalHeroId } from './hero-id-aliases';
 import { InventoryTimelineReplayService } from './inventory-timeline-replay.service';
+import { LiveHeroMatchupSourceService } from './live-hero-matchup-source.service';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
-import {
-  RecentMatchSnapshot,
-  RecentMatchesWindowService,
-} from './recent-matches-window.service';
+import { RecentMatchSnapshot } from './recent-matches-window.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
 export const GRAPH_MATCHUP_MODEL_VERSION = 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1';
@@ -85,7 +83,7 @@ export class HeroBuildMatchupStatisticsService {
   private readonly refreshPromisesByHeroId = new Map<number, Promise<void>>();
 
   constructor(
-    private readonly recentMatchesWindowService: RecentMatchesWindowService,
+    private readonly liveHeroMatchupSourceService: LiveHeroMatchupSourceService,
     private readonly matchTimelineNormalizationService: MatchTimelineNormalizationService,
     private readonly inventoryTimelineReplayService: InventoryTimelineReplayService,
     private readonly canonicalBuildSequenceService: CanonicalBuildSequenceService,
@@ -159,12 +157,9 @@ export class HeroBuildMatchupStatisticsService {
   }
 
   private async ensureReady(heroId: number): Promise<void> {
-    let status = this.recentMatchesWindowService.getStatus();
-    if (!status.lastRefreshedAt) {
-      status = await this.recentMatchesWindowService.refresh();
-    }
+    await this.liveHeroMatchupSourceService.ensureReady(heroId);
 
-    const sourceVersionMs = status.lastRefreshedAt?.getTime() ?? 0;
+    const sourceVersionMs = this.liveHeroMatchupSourceService.getSourceVersionMs(heroId);
     const cached = this.indexesByHeroId.get(heroId);
     if (cached?.sourceVersionMs === sourceVersionMs) {
       return;
@@ -196,16 +191,12 @@ export class HeroBuildMatchupStatisticsService {
     try {
       await this.recipeAwareTimelineReconciliationService.refreshRecipes();
     } catch {
-      // The replay pipeline can use its existing recipe cache when refresh is unavailable.
+      // The replay pipeline can use the existing recipe cache when refresh is unavailable.
     }
 
     const nextIndex: HeroGraphStateIndex = new Map();
     let processedMatchCount = 0;
-    for (const matchId of this.recentMatchesWindowService.getMatchIdsByHeroId(heroId)) {
-      const match = this.recentMatchesWindowService.getMatch(matchId);
-      if (!match) {
-        continue;
-      }
+    for (const match of this.liveHeroMatchupSourceService.getMatches(heroId)) {
       this.addMatch(nextIndex, match, heroId);
       processedMatchCount += 1;
       if (processedMatchCount % GRAPH_MATCHUP_YIELD_INTERVAL === 0) {
