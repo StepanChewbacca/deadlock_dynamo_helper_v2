@@ -9,6 +9,9 @@ const OVERLAY_PANEL_ID = 'skill-build-overlay-panel';
 const STYLE_ID = 'skill-build-ui-styles';
 
 let desktopPresentation: SkillBuildPresentation = { state: 'EMPTY' };
+let observedDesktopRoot: HTMLElement | undefined;
+let desktopObserver: MutationObserver | undefined;
+let desktopRestoreScheduled = false;
 
 export function showDesktopSkillBuild(presentation: SkillBuildPresentation): void {
   desktopPresentation = presentation;
@@ -61,7 +64,9 @@ function renderDesktopSkillBuild(): void {
     return;
   }
 
-  let panel = document.getElementById(DESKTOP_PANEL_ID);
+  observeDesktopRoot(root);
+
+  let panel = root.querySelector(`#${DESKTOP_PANEL_ID}`) as HTMLElement | null;
   if (!panel) {
     panel = document.createElement('section');
     panel.id = DESKTOP_PANEL_ID;
@@ -70,6 +75,29 @@ function renderDesktopSkillBuild(): void {
   }
 
   panel.replaceChildren(createPresentationContent(desktopPresentation, false));
+}
+
+function observeDesktopRoot(root: HTMLElement): void {
+  if (observedDesktopRoot === root && desktopObserver) {
+    return;
+  }
+
+  desktopObserver?.disconnect();
+  observedDesktopRoot = root;
+  desktopObserver = new MutationObserver(() => {
+    if (root.querySelector(`#${DESKTOP_PANEL_ID}`) || desktopRestoreScheduled) {
+      return;
+    }
+
+    desktopRestoreScheduled = true;
+    queueMicrotask(() => {
+      desktopRestoreScheduled = false;
+      if (document.getElementById('live-build-desktop-root') === root) {
+        renderDesktopSkillBuild();
+      }
+    });
+  });
+  desktopObserver.observe(root, { childList: true });
 }
 
 function createPresentationContent(
