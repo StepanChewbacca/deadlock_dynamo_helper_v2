@@ -71,13 +71,17 @@ interface MutableGraphStateStats extends MutableOutcomeSample {
   actionsByKey: Map<string, MutableGraphActionStats>;
 }
 
-type HeroGraphMatchupIndex = Map<number, Map<string, MutableGraphStateStats>>;
+type HeroGraphStateIndex = Map<string, MutableGraphStateStats>;
+
+interface HeroGraphIndexCache {
+  index: HeroGraphStateIndex;
+  sourceVersionMs: number;
+}
 
 @Injectable()
 export class HeroBuildMatchupStatisticsService {
-  private index: HeroGraphMatchupIndex = new Map();
-  private sourceVersionMs = 0;
-  private refreshPromise?: Promise<void>;
+  private readonly indexesByHeroId = new Map<number, HeroGraphIndexCache>();
+  private readonly refreshPromisesByHeroId = new Map<number, Promise<void>>();
 
   constructor(
     private readonly recentMatchesWindowService: RecentMatchesWindowService,
@@ -94,11 +98,11 @@ export class HeroBuildMatchupStatisticsService {
     actionKey: string;
     enemyHeroIds: number[];
   }): Promise<GraphMatchupEvaluation> {
-    await this.ensureReady();
-
     const heroId = canonicalHeroId(input.heroId);
+    await this.ensureReady(heroId);
+
     const enemyHeroIds = normalizeHeroIds(input.enemyHeroIds);
-    const state = this.index.get(heroId)?.get(input.stateKey);
+    const state = this.indexesByHeroId.get(heroId)?.index.get(input.stateKey);
     const action = state?.actionsByKey.get(input.actionKey);
 
     if (!state || !action) {
@@ -153,52 +157,64 @@ export class HeroBuildMatchupStatisticsService {
     };
   }
 
-  private async ensureReady(): Promise<void> {
+  private async ensureReady(heroId: number): Promise<void> {
     let status = this.recentMatchesWindowService.getStatus();
     if (!status.lastRefreshedAt) {
       status = await this.recentMatchesWindowService.refresh();
     }
 
     const sourceVersionMs = status.lastRefreshedAt?.getTime() ?? 0;
-    if (this.sourceVersionMs === sourceVersionMs && this.index.size > 0) {
+    const cached = this.indexesByHeroId.get(heroId);
+    if (cached?.sourceVersionMs === sourceVersionMs) {
       return;
     }
 
-    if (!this.refreshPromise) {
-      this.refreshPromise = this.rebuild(sourceVersionMs).finally(() => {
-        this.refreshPromise = undefined;
+    let refreshPromise = this.refreshPromisesByHeroId.get(heroId);
+    if (!refreshPromise) {
+      refreshPromise = this.rebuildHero(heroId, sourceVersionMs).finally(() => {
+        this.refreshPromisesByHeroId.delete(heroId);
       });
+      this.refreshPromisesByHeroId.set(heroId, refreshPromise);
     }
-    await this.refreshPromise;
+    await refreshPromise;
   }
 
-  private async rebuild(sourceVersionMs: number): Promise<void> {
+  private async rebuildHero(heroId: number, sourceVersionMs: number): Promise<void> {
     try {
       await this.recipeAwareTimelineReconciliationService.refreshRecipes();
     } catch {
       // The replay pipeline can use its existing recipe cache when refresh is unavailable.
     }
 
-    const nextIndex: HeroGraphMatchupIndex = new Map();
-    for (const matchId of this.recentMatchesWindowService.getMatchIds()) {
+    const nextIndex: HeroGraphStateIndex = new Map();
+    for (const matchId of this.recentMatchesWindowService.getMatchIdsByHeroId(heroId)) {
       const match = this.recentMatchesWindowService.getMatch(matchId);
       if (!match) {
         continue;
       }
-      this.addMatch(nextIndex, match);
+      this.addMatch(nextIndex, match, heroId);
     }
 
-    this.index = nextIndex;
-    this.sourceVersionMs = sourceVersionMs;
+    this.indexesByHeroId.set(heroId, {
+      index: nextIndex,
+      sourceVersionMs,
+    });
   }
 
-  private addMatch(index: HeroGraphMatchupIndex, match: RecentMatchSnapshot): void {
+  private addMatch(
+    index: HeroGraphStateIndex,
+    match: RecentMatchSnapshot,
+    requestedHeroId: number,
+  ): void {
     const timelines = this.matchTimelineNormalizationService.normalizeMatch(match);
     const replay = this.inventoryTimelineReplayService.replayMatch(timelines);
     const sequences = this.canonicalBuildSequenceService.canonicalizeMatch(replay);
     const playersById = new Map(match.players.map((player) => [player.id, player]));
 
     for (const sequence of sequences.players) {
+      if (canonicalHeroId(sequence.heroId) !== requestedHeroId) {
+        continue;
+      }
       if (sequence.replayDiagnosticCount > 0 || sequence.steps.length === 0) {
         continue;
       }
@@ -213,11 +229,9 @@ export class HeroBuildMatchupStatisticsService {
           .filter((candidate) => candidate.team !== player.team)
           .map((candidate) => candidate.heroId),
       );
-      const heroId = canonicalHeroId(sequence.heroId);
-      const statesByKey = index.get(heroId) ?? new Map<string, MutableGraphStateStats>();
 
       for (const step of sequence.steps) {
-        const state = statesByKey.get(step.beforeStateKey) ?? createStateStats();
+        const state = index.get(step.beforeStateKey) ?? createStateStats();
         incrementSample(state, player.won);
         incrementEnemySamples(state.byEnemyHeroId, enemyHeroIds, player.won);
 
@@ -226,10 +240,8 @@ export class HeroBuildMatchupStatisticsService {
         incrementEnemySamples(action.byEnemyHeroId, enemyHeroIds, player.won);
 
         state.actionsByKey.set(step.actionKey, action);
-        statesByKey.set(step.beforeStateKey, state);
+        index.set(step.beforeStateKey, state);
       }
-
-      index.set(heroId, statesByKey);
     }
   }
 }
