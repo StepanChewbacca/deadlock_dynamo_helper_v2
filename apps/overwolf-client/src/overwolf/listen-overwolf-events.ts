@@ -4,7 +4,10 @@ import { parseJsonSafely } from './parse-json-safely';
 
 export type EventCallback = (event: OverwolfLiveEventDto) => void;
 
+const INVENTORY_SAFETY_POLL_INTERVAL_MS = 15_000;
+
 let diagnosticCapture: DiagnosticCapture | undefined;
+let inventorySafetyTimer: ReturnType<typeof setInterval> | undefined;
 
 export function listenOverwolfEvents(onEvent: EventCallback): void {
   if (typeof overwolf === 'undefined' || !overwolf.games || !overwolf.games.events) {
@@ -18,40 +21,13 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
 
   overwolf.games.events.onInfoUpdates2.addListener((infoUpdate: any) => {
     try {
-      const { info, feature } = infoUpdate;
-      if (!info || typeof info !== 'object') {
-        return;
-      }
-
-      // Iterate through categories (e.g., match_info, roster, items)
-      for (const [category, categoryData] of Object.entries(info)) {
-        if (!categoryData || typeof categoryData !== 'object') {
-          continue;
-        }
-
-        // Iterate through key-values inside category
-        for (const [key, rawValue] of Object.entries(categoryData)) {
-          const receivedAt = Date.now();
-          capture.captureRaw({
-            receivedAt,
-            source: 'onInfoUpdates2',
-            feature,
-            category,
-            key,
-            rawPayload: rawValue,
-          });
-          const parsedValue = parseJsonSafely(rawValue);
-
-          onEvent({
-            receivedAt,
-            source: 'onInfoUpdates2',
-            feature,
-            category,
-            key,
-            payload: parsedValue,
-          });
-        }
-      }
+      emitInfoEntries(
+        infoUpdate?.info,
+        infoUpdate?.feature,
+        onEvent,
+        capture,
+        false,
+      );
     } catch (err) {
       console.error('Error handling onInfoUpdates2 event:', err);
     }
@@ -91,4 +67,86 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
       console.error('Error handling onNewEvents event:', err);
     }
   });
+
+  startInventorySafetyPolling(onEvent, capture);
+}
+
+function startInventorySafetyPolling(
+  onEvent: EventCallback,
+  capture: DiagnosticCapture,
+): void {
+  if (
+    inventorySafetyTimer ||
+    typeof overwolf.games.events.getInfo !== 'function'
+  ) {
+    return;
+  }
+
+  inventorySafetyTimer = setInterval(() => {
+    overwolf.games.events.getInfo((result: any) => {
+      try {
+        if (
+          !result ||
+          (result.success !== true && result.status !== 'success') ||
+          !result.res
+        ) {
+          return;
+        }
+
+        emitInfoEntries(
+          result.res,
+          'inventory_safety_poll',
+          onEvent,
+          capture,
+          true,
+        );
+      } catch (err) {
+        console.error('Error handling inventory safety snapshot:', err);
+      }
+    });
+  }, INVENTORY_SAFETY_POLL_INTERVAL_MS);
+}
+
+function emitInfoEntries(
+  info: unknown,
+  feature: string | undefined,
+  onEvent: EventCallback,
+  capture: DiagnosticCapture,
+  inventoryOnly: boolean,
+): void {
+  if (!info || typeof info !== 'object') {
+    return;
+  }
+
+  for (const [category, categoryData] of Object.entries(info)) {
+    if (!categoryData || typeof categoryData !== 'object') {
+      continue;
+    }
+
+    for (const [key, rawValue] of Object.entries(categoryData)) {
+      if (inventoryOnly && !key.startsWith('items')) {
+        continue;
+      }
+
+      const receivedAt = Date.now();
+      capture.captureRaw({
+        receivedAt,
+        source: 'onInfoUpdates2',
+        feature,
+        category,
+        key,
+        rawPayload: rawValue,
+      });
+      const parsedValue = parseJsonSafely(rawValue);
+
+      onEvent({
+        receivedAt,
+        source: 'onInfoUpdates2',
+        feature,
+        category,
+        key,
+        payload: parsedValue,
+      });
+    }
+  }
 }
