@@ -7,6 +7,7 @@ import {
   HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_HISTORICAL_COUNT,
   HeroBuildRecommendationWithAlternativeFilter,
 } from './hero-build-recommendation-alternative-filter';
+import { HeroBuildRecommendationOwnershipFilterService } from './hero-build-recommendation-ownership-filter.service';
 import {
   HeroBuildPresentedRecommendation,
   HeroBuildRecommendationPresentationService,
@@ -98,6 +99,8 @@ export class LiveBuildRecommendationTraversalService {
     private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
     private readonly heroBuildRecommendationPresentationService:
       HeroBuildRecommendationPresentationService,
+    private readonly heroBuildRecommendationOwnershipFilterService:
+      HeroBuildRecommendationOwnershipFilterService,
   ) {}
 
   observeState(state: MinimalMatchState | undefined): void {
@@ -131,10 +134,22 @@ export class LiveBuildRecommendationTraversalService {
       return;
     }
 
+    const inventoryChanged =
+      runtime.snapshot.inventoryStateKey !== undefined &&
+      runtime.snapshot.inventoryStateKey !== input.inventoryStateKey;
+    const optimisticRecommendation =
+      inventoryChanged && runtime.snapshot.recommendation
+        ? createOptimisticRecommendation(
+            runtime.snapshot.recommendation,
+            input,
+            this.heroBuildRecommendationOwnershipFilterService,
+          )
+        : runtime.snapshot.recommendation;
+
     runtime.desiredInput = input;
     runtime.snapshot = {
       ...runtime.snapshot,
-      state: runtime.snapshot.recommendation ? 'READY' : 'REFRESHING',
+      state: optimisticRecommendation ? 'READY' : 'REFRESHING',
       matchId: input.matchId,
       steamId: input.steamId,
       heroId: input.heroId,
@@ -145,8 +160,9 @@ export class LiveBuildRecommendationTraversalService {
       timeBucket: input.timeBucket,
       traversalKey: input.traversalKey,
       isStale:
-        runtime.snapshot.recommendation !== undefined &&
+        optimisticRecommendation !== undefined &&
         runtime.resolvedKey !== input.traversalKey,
+      recommendation: optimisticRecommendation,
       lastError: undefined,
     };
 
@@ -300,6 +316,12 @@ export class LiveBuildRecommendationTraversalService {
           minHistoricalCount: HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_HISTORICAL_COUNT,
           minConfidence: HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
         });
+
+        if (runtime.desiredInput?.traversalKey !== input.traversalKey) {
+          runtime.snapshot.discardedResultCount += 1;
+          continue;
+        }
+
         const presented = await this.heroBuildRecommendationPresentationService.present(filtered);
 
         if (runtime.desiredInput?.traversalKey !== input.traversalKey) {
@@ -413,6 +435,86 @@ export function createTraversalInput(
     timeBucket,
     traversalKey,
   };
+}
+
+function createOptimisticRecommendation(
+  recommendation: LiveBuildPresentedRecommendation,
+  input: LiveBuildRecommendationTraversalInput,
+  ownershipFilterService: HeroBuildRecommendationOwnershipFilterService,
+): LiveBuildPresentedRecommendation {
+  const legalActions = [recommendation.action, ...recommendation.alternatives].filter((action) =>
+    ownershipFilterService.isActionLegalForState(action, input.inventoryStateKey),
+  );
+
+  if (legalActions.length === 0) {
+    return {
+      ...recommendation,
+      mode: 'NO_MATCH',
+      requestedStateKey: input.inventoryStateKey,
+      gameTimeS: input.gameTimeS,
+      action: createOptimisticHoldAction(recommendation.action, input),
+      alternatives: [],
+      noMatchReason: 'NO_LEGAL_ACTION',
+    };
+  }
+
+  const action = legalActions[0];
+  return {
+    ...recommendation,
+    requestedStateKey: input.inventoryStateKey,
+    gameTimeS: input.gameTimeS,
+    matchedStateKey: action.matchedStateKey,
+    stateDistance: action.stateDistance,
+    missingItemCount: action.missingItemCount,
+    extraItemCount: action.extraItemCount,
+    matchedBySubset: action.matchedBySubset,
+    observationCount: action.matchedStateObservationCount,
+    action: { ...action },
+    alternatives: legalActions.slice(1).map((alternative) => ({ ...alternative })),
+  };
+}
+
+function createOptimisticHoldAction(
+  previousAction: LiveBuildPresentedRecommendation['action'],
+  input: LiveBuildRecommendationTraversalInput,
+): LiveBuildPresentedRecommendation['action'] {
+  return {
+    ...previousAction,
+    type: 'HOLD',
+    itemId: undefined,
+    actionKey: 'HOLD',
+    label: 'Recalculating next item',
+    confidencePercent: 0,
+    historicalProbabilityPercent: 0,
+    typicalGameTimeLabel: formatGameTime(input.gameTimeS),
+    item: undefined,
+    historicalCount: 0,
+    historicalProbability: 0,
+    averageGameTimeS: input.gameTimeS,
+    matchedStateKey: input.inventoryStateKey,
+    matchedStateObservationCount: 0,
+    stateDistance: 0,
+    missingItemCount: 0,
+    extraItemCount: 0,
+    matchedBySubset: true,
+    currentOwnedCount: undefined,
+    observedOwnedCountLimit: undefined,
+    predictedStateKey: input.inventoryStateKey,
+    score: 0,
+    confidence: 0,
+    explanation: {
+      code: 'NO_LEGAL_ACTION',
+      evidenceLevel: 'INFERRED',
+      text: 'The purchased item was detected. Recalculating the next build action.',
+    },
+  };
+}
+
+function formatGameTime(value: number): string {
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function findLocalPlayer(state: MinimalMatchState): MinimalPlayerState | undefined {
