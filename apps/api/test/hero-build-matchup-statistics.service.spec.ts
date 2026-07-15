@@ -108,13 +108,13 @@ describe('graph matchup statistics', () => {
           players: [
             {
               playerId: 1,
-              heroId: 19,
+              heroId: 81,
               replayDiagnosticCount: 0,
               steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:OTHER' }],
             },
             {
               playerId: 1,
-              heroId: 15,
+              heroId: 80,
               replayDiagnosticCount: 0,
               steps: [{ beforeStateKey: 'EMPTY', actionKey: 'BUY:TARGET' }],
             },
@@ -142,6 +142,35 @@ describe('graph matchup statistics', () => {
     expect(other.stateObservationCount).toBe(1);
     expect(other.actionObservationCount).toBe(0);
   });
+
+  it('does not include Yamato in the Victor matchup replay', async () => {
+    const match = createVictorAndYamatoMatch(4);
+    const normalizeMatch = jest.fn(() => ({ players: [] }));
+    const service = new HeroBuildMatchupStatisticsService(
+      {
+        ensureReady: async () => undefined,
+        getSourceVersionMs: () => 1,
+        getMatches: () => [match],
+      } as any,
+      { normalizeMatch } as any,
+      { replayMatch: () => ({ players: [] }) } as any,
+      { canonicalizeMatch: () => ({ players: [] }) } as any,
+      { refreshRecipes: jest.fn(async () => undefined) } as any,
+    );
+
+    await service.evaluate({
+      heroId: 27,
+      stateKey: 'EMPTY',
+      actionKey: 'BUY:1',
+      enemyHeroIds: [16],
+    });
+
+    expect(normalizeMatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        players: [expect.objectContaining({ heroId: 66 })],
+      }),
+    );
+  });
 });
 
 function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
@@ -155,7 +184,7 @@ function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
       {
         id: 1,
         matchId,
-        heroId: 15,
+        heroId: 80,
         team: 2,
         won: true,
         kills: 0,
@@ -168,7 +197,45 @@ function createMatchWithPlayers(matchId: number): RecentMatchSnapshot {
       {
         id: 2,
         matchId,
-        heroId: 35,
+        heroId: 60,
+        team: 3,
+        won: false,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        netWorth: 0,
+        itemPurchases: [],
+        skillUpgrades: [],
+      },
+    ],
+  };
+}
+
+function createVictorAndYamatoMatch(matchId: number): RecentMatchSnapshot {
+  return {
+    matchId,
+    startTime: new Date(matchId),
+    durationS: 0,
+    averageBadge: 0,
+    winningTeam: 2,
+    players: [
+      {
+        id: 1,
+        matchId,
+        heroId: 66,
+        team: 2,
+        won: true,
+        kills: 0,
+        deaths: 0,
+        assists: 0,
+        netWorth: 0,
+        itemPurchases: [],
+        skillUpgrades: [],
+      },
+      {
+        id: 2,
+        matchId,
+        heroId: 27,
         team: 3,
         won: false,
         kills: 0,
