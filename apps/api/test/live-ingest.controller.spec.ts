@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { InventoryShadowReplayService } from '../src/deadlock-live/inventory-shadow-replay.service';
 import { LiveBuildRecommendationTraversalService } from '../src/deadlock-live/live-build-recommendation-traversal.service';
 import { LiveIngestController } from '../src/deadlock-live/live-ingest.controller';
+import { LiveInventoryEventNormalizerService } from '../src/deadlock-live/live-inventory-event-normalizer.service';
 import { LiveMatchStateService } from '../src/deadlock-live/live-match-state.service';
 import { RawEventLogService } from '../src/deadlock-live/raw-event-log.service';
 import { RecentLiveEventsService } from '../src/deadlock-live/recent-live-events.service';
@@ -12,6 +13,7 @@ describe('LiveIngestController', () => {
       controllers: [LiveIngestController],
       providers: [
         LiveMatchStateService,
+        LiveInventoryEventNormalizerService,
         RecentLiveEventsService,
         {
           provide: RawEventLogService,
