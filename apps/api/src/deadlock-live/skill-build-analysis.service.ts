@@ -14,6 +14,13 @@ import {
 
 export const SKILL_BUILD_MAX_POINT_BUDGET = 36;
 
+const STORED_SKILL_SLOT_BY_ID: Readonly<Record<number, SkillSlot>> = {
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+};
+
 export interface HeroSkillBuildDiagnosticSummary {
   code: SkillBuildDiagnostic['code'];
   count: number;
@@ -39,8 +46,7 @@ export class SkillBuildAnalysisService {
     heroId: number,
     maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET,
   ): HeroSkillBuildResponse {
-    const abilityMap = HERO_ABILITY_MAP[heroId];
-    if (!abilityMap) {
+    if (!HERO_ABILITY_MAP[heroId]) {
       throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
     }
 
@@ -66,7 +72,7 @@ export class SkillBuildAnalysisService {
 
       const replay = accumulator.addPath(
         player.skillUpgrades,
-        abilityMap as Readonly<Record<number, SkillSlot>>,
+        STORED_SKILL_SLOT_BY_ID,
       );
 
       for (const diagnostic of replay.diagnostics) {
