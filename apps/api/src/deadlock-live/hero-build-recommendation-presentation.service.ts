@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { Hero } from './entities/hero.entity';
 import { Item } from './entities/item.entity';
+import { canonicalHeroId, heroIdAliases } from './hero-id-aliases';
 import {
   HeroBuildRecommendationAction,
   HeroBuildRecommendationResponse,
@@ -37,6 +39,7 @@ export type HeroBuildPresentedAction = HeroBuildRecommendationAction & {
   historicalProbabilityPercent: number;
   typicalGameTimeLabel: string;
   item?: HeroBuildPresentedItem;
+  situationalAgainstHeroName?: string;
   explanation: HeroBuildPresentationExplanation;
 };
 
@@ -63,28 +66,42 @@ export interface HeroBuildPresentationItemSource {
   itemTier: number;
 }
 
-@Injectable()
+export interface HeroBuildPresentationHeroSource {
+  heroId: number;
+  name: string;
+}
+
+@ Injectable()
 export class HeroBuildRecommendationPresentationService {
   constructor(
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(Hero)
+    private readonly heroRepository: Repository<Hero>,
   ) {}
 
   async present<T extends HeroBuildRecommendationResponse>(
     response: T,
   ): Promise<HeroBuildPresentedRecommendation<T>> {
     const itemIds = collectRecommendationItemIds(response);
-    const items = itemIds.length > 0
-      ? await this.itemRepository.find({ where: { itemId: In(itemIds) } })
-      : [];
+    const heroIds = collectSituationalHeroLookupIds(response);
+    const [items, heroes] = await Promise.all([
+      itemIds.length > 0
+        ? this.itemRepository.find({ where: { itemId: In(itemIds) } })
+        : Promise.resolve([]),
+      heroIds.length > 0
+        ? this.heroRepository.find({ where: { heroId: In(heroIds) } })
+        : Promise.resolve([]),
+    ]);
 
-    return presentHeroBuildRecommendation(response, items);
+    return presentHeroBuildRecommendation(response, items, heroes);
   }
 }
 
 export function presentHeroBuildRecommendation<T extends HeroBuildRecommendationResponse>(
   response: T,
   items: readonly HeroBuildPresentationItemSource[],
+  heroes: readonly HeroBuildPresentationHeroSource[] = [],
 ): HeroBuildPresentedRecommendation<T> {
   const itemById = new Map<number, HeroBuildPresentedItem>();
   for (const item of items) {
@@ -102,14 +119,24 @@ export function presentHeroBuildRecommendation<T extends HeroBuildRecommendation
     });
   }
 
+  const heroNameByCanonicalId = new Map<number, string>();
+  for (const hero of heroes) {
+    const heroId = Number(hero.heroId);
+    const name = typeof hero.name === 'string' ? hero.name.trim() : '';
+    if (!Number.isSafeInteger(heroId) || heroId <= 0 || !name) {
+      continue;
+    }
+    heroNameByCanonicalId.set(canonicalHeroId(heroId), name);
+  }
+
   const itemIds = collectRecommendationItemIds(response);
   const missingItemIds = itemIds.filter((itemId) => !itemById.has(itemId));
 
   return {
     ...response,
-    action: presentAction(response.action, response, itemById),
+    action: presentAction(response.action, response, itemById, heroNameByCanonicalId),
     alternatives: response.alternatives.map((action) =>
-      presentAction(action, response, itemById),
+      presentAction(action, response, itemById, heroNameByCanonicalId),
     ),
     itemMetadata: {
       requestedCount: itemIds.length,
@@ -123,8 +150,14 @@ function presentAction(
   action: HeroBuildRecommendationAction,
   response: HeroBuildRecommendationResponse,
   itemById: ReadonlyMap<number, HeroBuildPresentedItem>,
+  heroNameByCanonicalId: ReadonlyMap<number, string>,
 ): HeroBuildPresentedAction {
   const item = action.itemId ? itemById.get(action.itemId) : undefined;
+  const situationalAgainstHeroId = getSituationalAgainstHeroId(action);
+  const situationalAgainstHeroName = situationalAgainstHeroId === undefined
+    ? undefined
+    : heroNameByCanonicalId.get(canonicalHeroId(situationalAgainstHeroId));
+
   return {
     ...action,
     label: createActionLabel(action, item),
@@ -132,6 +165,7 @@ function presentAction(
     historicalProbabilityPercent: toPercent(action.historicalProbability),
     typicalGameTimeLabel: formatGameTime(action.averageGameTimeS),
     item,
+    situationalAgainstHeroName,
     explanation: createExplanation(action, response),
   };
 }
@@ -214,6 +248,27 @@ function collectRecommendationItemIds(
       Number.isSafeInteger(itemId) && Number(itemId) > 0,
     );
   return [...new Set(itemIds)].sort((left, right) => left - right);
+}
+
+function collectSituationalHeroLookupIds(
+  response: HeroBuildRecommendationResponse,
+): number[] {
+  const heroIds = [response.action, ...response.alternatives]
+    .map(getSituationalAgainstHeroId)
+    .filter((heroId): heroId is number => heroId !== undefined)
+    .flatMap((heroId) => heroIdAliases(heroId));
+  return [...new Set(heroIds)].sort((left, right) => left - right);
+}
+
+function getSituationalAgainstHeroId(
+  action: HeroBuildRecommendationAction,
+): number | undefined {
+  const value = Number(
+    (action as HeroBuildRecommendationAction & {
+      situationalAgainstHeroId?: number;
+    }).situationalAgainstHeroId,
+  );
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function toPercent(value: number): number {
