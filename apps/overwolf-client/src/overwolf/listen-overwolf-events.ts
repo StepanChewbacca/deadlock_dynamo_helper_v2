@@ -4,10 +4,16 @@ import { parseJsonSafely } from './parse-json-safely';
 
 export type EventCallback = (event: OverwolfLiveEventDto) => void;
 
-const INVENTORY_SAFETY_POLL_INTERVAL_MS = 15_000;
+const STATE_SAFETY_POLL_INTERVAL_MS = 15_000;
+const STATE_SAFETY_CATEGORIES = new Set([
+  'match_info',
+  'game_info',
+  'roster',
+  'items',
+]);
 
 let diagnosticCapture: DiagnosticCapture | undefined;
-let inventorySafetyTimer: ReturnType<typeof setInterval> | undefined;
+let stateSafetyTimer: ReturnType<typeof setInterval> | undefined;
 
 export function listenOverwolfEvents(onEvent: EventCallback): void {
   if (typeof overwolf === 'undefined' || !overwolf.games || !overwolf.games.events) {
@@ -68,22 +74,19 @@ export function listenOverwolfEvents(onEvent: EventCallback): void {
     }
   });
 
-  startInventorySafetyPolling(onEvent, capture);
+  startStateSafetyPolling(onEvent, capture);
 }
 
-function startInventorySafetyPolling(
+function startStateSafetyPolling(
   onEvent: EventCallback,
   capture: DiagnosticCapture,
 ): void {
   const eventsApi = overwolf.games.events as any;
-  if (
-    inventorySafetyTimer ||
-    typeof eventsApi.getInfo !== 'function'
-  ) {
+  if (stateSafetyTimer || typeof eventsApi.getInfo !== 'function') {
     return;
   }
 
-  inventorySafetyTimer = setInterval(() => {
+  const reconcileCurrentState = (): void => {
     eventsApi.getInfo((result: any) => {
       try {
         if (
@@ -96,16 +99,22 @@ function startInventorySafetyPolling(
 
         emitInfoEntries(
           result.res,
-          'inventory_safety_poll',
+          'state_safety_poll',
           onEvent,
           capture,
           true,
         );
       } catch (err) {
-        console.error('Error handling inventory safety snapshot:', err);
+        console.error('Error handling live state safety snapshot:', err);
       }
     });
-  }, INVENTORY_SAFETY_POLL_INTERVAL_MS);
+  };
+
+  stateSafetyTimer = setInterval(
+    reconcileCurrentState,
+    STATE_SAFETY_POLL_INTERVAL_MS,
+  );
+  reconcileCurrentState();
 }
 
 function emitInfoEntries(
@@ -113,7 +122,7 @@ function emitInfoEntries(
   feature: string | undefined,
   onEvent: EventCallback,
   capture: DiagnosticCapture,
-  inventoryOnly: boolean,
+  stateSafetyOnly: boolean,
 ): void {
   if (!info || typeof info !== 'object') {
     return;
@@ -124,11 +133,11 @@ function emitInfoEntries(
       continue;
     }
 
-    for (const [key, rawValue] of Object.entries(categoryData)) {
-      if (inventoryOnly && !key.startsWith('items')) {
-        continue;
-      }
+    if (stateSafetyOnly && !STATE_SAFETY_CATEGORIES.has(category)) {
+      continue;
+    }
 
+    for (const [key, rawValue] of Object.entries(categoryData)) {
       const receivedAt = Date.now();
       capture.captureRaw({
         receivedAt,
