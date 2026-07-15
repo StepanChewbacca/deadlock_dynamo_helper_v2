@@ -37,18 +37,20 @@ export interface HeroSkillBuildResponse {
 export class SkillBuildAnalysisService {
   constructor(private readonly recentMatchesWindowService: RecentMatchesWindowService) {}
 
-  getHeroSkillBuild(
+  async getHeroSkillBuild(
     heroId: number,
     maxPointBudget = SKILL_BUILD_MAX_POINT_BUDGET,
-  ): HeroSkillBuildResponse {
+  ): Promise<HeroSkillBuildResponse> {
     const abilitySlotById = HERO_ABILITY_MAP[heroId] as
       | Readonly<Record<number, SkillSlot>>
       | undefined;
     if (!abilitySlotById) {
       throw new NotFoundException(`No ability mapping exists for hero ${heroId}.`);
     }
-    const abilityIdByStoredSlot = createAbilityIdByStoredSlot(abilitySlotById);
 
+    await this.ensureRecentMatchesLoaded();
+
+    const abilityIdByStoredSlot = createAbilityIdByStoredSlot(abilitySlotById);
     const players = this.recentMatchesWindowService.getPlayersByHeroIds([heroId]);
 
     if (players.length === 0) {
@@ -114,6 +116,14 @@ export class SkillBuildAnalysisService {
       totalPointCost: actions[actions.length - 1]?.cumulativePointCost ?? 0,
       actions,
     };
+  }
+
+  private async ensureRecentMatchesLoaded(): Promise<void> {
+    if (this.recentMatchesWindowService.getStatus().lastRefreshedAt) {
+      return;
+    }
+
+    await this.recentMatchesWindowService.refresh();
   }
 }
 
