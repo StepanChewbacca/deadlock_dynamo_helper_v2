@@ -1,7 +1,7 @@
 import { LiveInventoryEventNormalizerService } from '../src/deadlock-live/live-inventory-event-normalizer.service';
 
 describe('LiveInventoryEventNormalizerService', () => {
-  it('keeps an item when a fast inventory update only contains its id', () => {
+  it('keeps a partial item and recovers its player from the roster slot', () => {
     const service = new LiveInventoryEventNormalizerService();
 
     service.normalizeBatch({
@@ -9,6 +9,12 @@ describe('LiveInventoryEventNormalizerService', () => {
       events: [
         {
           receivedAt: 1,
+          source: 'onInfoUpdates2',
+          key: 'roster_0',
+          payload: { steam_id: 's1' },
+        },
+        {
+          receivedAt: 2,
           source: 'onInfoUpdates2',
           key: 'items_0',
           payload: {
@@ -30,11 +36,10 @@ describe('LiveInventoryEventNormalizerService', () => {
       clientId: 'client-1',
       events: [
         {
-          receivedAt: 2,
+          receivedAt: 3,
           source: 'onInfoUpdates2',
           key: 'items_0',
           payload: {
-            steam_id: 's1',
             items: [{ id: '100' }, { item_id: 200 }],
           },
         },
