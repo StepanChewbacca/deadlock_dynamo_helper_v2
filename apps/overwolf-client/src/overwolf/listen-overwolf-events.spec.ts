@@ -8,17 +8,21 @@ jest.mock('../diagnostics/diagnostic-capture', () => ({
 import { listenOverwolfEvents } from './listen-overwolf-events';
 
 describe('listenOverwolfEvents', () => {
-  it('reconciles the current inventory through getInfo every fifteen seconds', () => {
+  it('reconciles the full live state immediately and every fifteen seconds', () => {
     jest.useFakeTimers();
     const onEvent = jest.fn();
     const getInfo = jest.fn((callback: (result: unknown) => void) => {
       callback({
         success: true,
         res: {
+          match_info: {
+            match_id: '93946399',
+          },
           roster: {
             roster_12: JSON.stringify({
               steam_id: '76561198000000001',
               hero_id: 15,
+              team_id: 2,
             }),
           },
           items: {
@@ -32,6 +36,9 @@ describe('listenOverwolfEvents', () => {
                 },
               ],
             }),
+          },
+          unsupported: {
+            ignored: 'value',
           },
         },
       });
@@ -48,28 +55,33 @@ describe('listenOverwolfEvents', () => {
     };
 
     listenOverwolfEvents(onEvent);
-    jest.advanceTimersByTime(15_000);
 
     expect(getInfo).toHaveBeenCalledTimes(1);
-    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledTimes(3);
+    expect(onEvent.mock.calls.map(([event]) => event.category)).toEqual([
+      'match_info',
+      'roster',
+      'items',
+    ]);
     expect(onEvent).toHaveBeenCalledWith({
       receivedAt: expect.any(Number),
       source: 'onInfoUpdates2',
-      feature: 'inventory_safety_poll',
-      category: 'items',
-      key: 'items_12',
+      feature: 'state_safety_poll',
+      category: 'roster',
+      key: 'roster_12',
       payload: {
         steam_id: '76561198000000001',
-        items: [
-          {
-            id: 100,
-            name: 'Extra Regen',
-            class_name: 'extra_regen',
-          },
-        ],
+        hero_id: 15,
+        team_id: 2,
       },
     });
 
+    jest.advanceTimersByTime(15_000);
+
+    expect(getInfo).toHaveBeenCalledTimes(2);
+    expect(onEvent).toHaveBeenCalledTimes(6);
+
+    jest.clearAllTimers();
     jest.useRealTimers();
     delete (globalThis as any).overwolf;
   });
