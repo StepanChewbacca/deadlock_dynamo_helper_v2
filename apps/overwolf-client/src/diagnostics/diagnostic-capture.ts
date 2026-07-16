@@ -10,8 +10,10 @@ export interface DiagnosticRawEvent {
 }
 
 type EntrySource = DiagnosticRawSource | 'getInfo' | 'runningGameInfo' | 'manifest' | 'system';
+type StorageStatus = 'INITIALIZING' | 'RECORDING' | 'COMPLETE' | 'STORAGE_ERROR';
 
 type DiagnosticEntry = {
+  id?: number;
   sequence: number;
   appSessionId: string;
   receivedAt: string;
@@ -32,7 +34,27 @@ type DiagnosticNote = {
   note?: string;
 };
 
+type AppSession = {
+  id: string;
+  clientId: string;
+  startedAt: string;
+};
+
 type DiagnosticState = {
+  schemaVersion: 2;
+  createdAt: string;
+  updatedAt: string;
+  currentMatchId?: string;
+  manualSteamBuildId?: string;
+  legacyTruncated: boolean;
+  sequence: number;
+  persistedEntryCount: number;
+  estimatedBytes: number;
+  appSessions: AppSession[];
+  notes: DiagnosticNote[];
+};
+
+type LegacyDiagnosticState = {
   schemaVersion: 1;
   createdAt: string;
   updatedAt: string;
@@ -40,17 +62,27 @@ type DiagnosticState = {
   manualSteamBuildId?: string;
   truncated: boolean;
   sequence: number;
-  appSessions: Array<{ id: string; clientId: string; startedAt: string }>;
+  appSessions: AppSession[];
   entries: DiagnosticEntry[];
   notes: DiagnosticNote[];
 };
 
+type StoredMetaRecord = {
+  key: 'state';
+  value: DiagnosticState;
+};
+
 type ZipFile = { name: string; content: string; modifiedAt?: Date };
 
-const STORAGE_KEY = 'deadlock-live-probe-diagnostics-v1';
-const MAX_PERSISTED_CHARS = 4_200_000;
-const MAX_ENTRIES = 12_000;
-const PERSIST_DELAY_MS = 750;
+const LEGACY_STORAGE_KEY = 'deadlock-live-probe-diagnostics-v1';
+const DATABASE_NAME = 'deadlock-live-probe-diagnostics';
+const DATABASE_VERSION = 1;
+const ENTRY_STORE = 'entries';
+const META_STORE = 'meta';
+const META_KEY = 'state';
+const FLUSH_DELAY_MS = 500;
+const MAX_BATCH_SIZE = 250;
+const ROSTER_THROTTLE_MS = 1_000;
 
 const nowIso = (): string => new Date().toISOString();
 const randomId = (prefix: string): string =>
@@ -79,6 +111,10 @@ function sanitize(value: unknown, seen = new WeakSet<object>()): unknown {
 }
 
 const stringify = (value: unknown, space?: number): string => JSON.stringify(sanitize(value), null, space);
+
+function estimateBytes(value: unknown): number {
+  return new TextEncoder().encode(stringify(value)).byteLength + 1;
+}
 
 function primitiveString(value: unknown): string | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
@@ -139,17 +175,39 @@ function collectVersionCandidates(value: unknown, result = new Set<string>(), de
   return result;
 }
 
-function shouldCapture(event: DiagnosticRawEvent): boolean {
+export function shouldCaptureDiagnosticEvent(event: DiagnosticRawEvent): boolean {
   if (event.source === 'onNewEvents') return true;
-  const category = event.category || '';
-  const key = event.key || '';
+  return Boolean(event.category || event.key || event.feature);
+}
+
+export function createDiagnosticChannel(event: DiagnosticRawEvent): string {
+  return [event.category || '', event.key || event.feature || ''].join('|');
+}
+
+export function isCriticalDiagnosticEvent(event: Pick<DiagnosticRawEvent, 'source' | 'category' | 'key'>): boolean {
+  const key = (event.key || '').toLowerCase();
+  const category = (event.category || '').toLowerCase();
   return (
-    ['match_info', 'game_info', 'roster', 'items'].includes(category) ||
+    event.source === 'onNewEvents' ||
     key === 'match_id' ||
+    key === 'match_start' ||
+    key === 'match_end' ||
+    key === 'match_outcome' ||
     key === 'match_state' ||
     key.startsWith('items_') ||
-    key.startsWith('roster_')
+    category === 'items'
   );
+}
+
+function isRosterEvent(event: Pick<DiagnosticRawEvent, 'category' | 'key'>): boolean {
+  const category = (event.category || '').toLowerCase();
+  const key = (event.key || '').toLowerCase();
+  return category === 'roster' || key.startsWith('roster_');
+}
+
+function isMatchCompleteKey(key?: string): boolean {
+  const normalized = (key || '').toLowerCase();
+  return normalized === 'match_end' || normalized === 'match_outcome';
 }
 
 function write16(view: DataView, offset: number, value: number): void {
@@ -257,137 +315,328 @@ export function createStoredZipBytes(files: ZipFile[]): Uint8Array {
 function initialState(clientId: string, appSessionId: string): DiagnosticState {
   const timestamp = nowIso();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     createdAt: timestamp,
     updatedAt: timestamp,
-    truncated: false,
+    legacyTruncated: false,
     sequence: 0,
+    persistedEntryCount: 0,
+    estimatedBytes: 0,
     appSessions: [{ id: appSessionId, clientId, startedAt: timestamp }],
-    entries: [],
     notes: [],
   };
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+  });
+}
+
+function transactionComplete(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+  });
+}
+
+function openDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB is not available'));
+      return;
+    }
+
+    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(ENTRY_STORE)) {
+        const entries = database.createObjectStore(ENTRY_STORE, { keyPath: 'id', autoIncrement: true });
+        entries.createIndex('sequence', 'sequence', { unique: true });
+      }
+      if (!database.objectStoreNames.contains(META_STORE)) {
+        database.createObjectStore(META_STORE, { keyPath: 'key' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB'));
+    request.onblocked = () => reject(new Error('IndexedDB upgrade is blocked by another app window'));
+  });
+}
+
+async function readStoredState(database: IDBDatabase): Promise<DiagnosticState | undefined> {
+  const transaction = database.transaction(META_STORE, 'readonly');
+  const record = await requestResult(
+    transaction.objectStore(META_STORE).get(META_KEY) as IDBRequest<StoredMetaRecord | undefined>,
+  );
+  await transactionComplete(transaction);
+  return record?.value;
+}
+
+async function readAllEntries(database: IDBDatabase): Promise<DiagnosticEntry[]> {
+  const transaction = database.transaction(ENTRY_STORE, 'readonly');
+  const entries = await requestResult(
+    transaction.objectStore(ENTRY_STORE).getAll() as IDBRequest<DiagnosticEntry[]>,
+  );
+  await transactionComplete(transaction);
+  return entries.sort((left, right) => left.sequence - right.sequence);
+}
+
+function loadLegacyState(): LegacyDiagnosticState | undefined {
+  try {
+    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as LegacyDiagnosticState;
+    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.entries) || !Array.isArray(parsed.notes)) {
+      return undefined;
+    }
+    return parsed;
+  } catch (error) {
+    console.error('Failed to read legacy diagnostic state:', error);
+    return undefined;
+  }
 }
 
 export class DiagnosticCapture {
   private readonly appSessionId = randomId('session');
   private state: DiagnosticState;
-  private persistTimerId?: number;
-  private estimatedChars = 0;
+  private database?: IDBDatabase;
+  private storageStatus: StorageStatus = 'INITIALIZING';
+  private storageError?: string;
+  private matchComplete = false;
   private initialized = false;
+  private flushTimerId?: number;
+  private pendingEntries: DiagnosticEntry[] = [];
+  private memoryFallbackEntries: DiagnosticEntry[] = [];
+  private flushChain: Promise<void> = Promise.resolve();
   private readonly fingerprints = new Map<string, string>();
+  private readonly lastRosterCaptureAt = new Map<string, number>();
+  private readonly ready: Promise<void>;
 
   constructor(private readonly clientId: string) {
-    this.state = this.load();
-    if (!this.state.appSessions.some((session) => session.id === this.appSessionId)) {
-      this.state.appSessions.push({ id: this.appSessionId, clientId, startedAt: nowIso() });
-    }
-    this.state.appSessions = this.state.appSessions.slice(-100);
-    this.captureSystem('system', 'app_session_started', { clientId, appSessionId: this.appSessionId });
+    this.state = initialState(clientId, this.appSessionId);
+    this.ready = this.initializeStorage();
+    void this.ready.then(() => {
+      this.captureSystem('system', 'app_session_started', {
+        clientId,
+        appSessionId: this.appSessionId,
+      });
+    });
   }
 
   initialize(overwolfApi: any): void {
     if (this.initialized) return;
     this.initialized = true;
     this.mountPanel();
-    overwolfApi?.games?.events?.getInfo?.((value: unknown) => this.captureSystem('getInfo', 'initial_snapshot', value));
-    overwolfApi?.games?.getRunningGameInfo?.((value: unknown) =>
-      this.captureSystem('runningGameInfo', 'running_game_info', value),
-    );
-    overwolfApi?.extensions?.current?.getManifest?.((value: unknown) =>
-      this.captureSystem('manifest', 'overwolf_manifest', value),
-    );
+
+    void this.ready.then(() => {
+      overwolfApi?.games?.events?.getInfo?.((value: unknown) =>
+        this.captureSystem('getInfo', 'initial_snapshot', value),
+      );
+      overwolfApi?.games?.getRunningGameInfo?.((value: unknown) =>
+        this.captureSystem('runningGameInfo', 'running_game_info', value),
+      );
+      overwolfApi?.extensions?.current?.getManifest?.((value: unknown) =>
+        this.captureSystem('manifest', 'overwolf_manifest', value),
+      );
+      this.refreshPanel();
+    });
   }
 
   captureRaw(event: DiagnosticRawEvent): void {
-    if (!shouldCapture(event)) return;
+    if (!shouldCaptureDiagnosticEvent(event)) return;
+
     const rawPayload = sanitize(event.rawPayload);
     const fingerprint = stringify(rawPayload);
-    const channel = [event.source, event.feature || '', event.category || '', event.key || ''].join('|');
+    const channel = createDiagnosticChannel(event);
     if (this.fingerprints.get(channel) === fingerprint) return;
-    this.fingerprints.set(channel, fingerprint);
 
-    if (event.key === 'match_id') this.state.currentMatchId = primitiveString(rawPayload) || this.state.currentMatchId;
-    this.append({
-      sequence: ++this.state.sequence,
-      appSessionId: this.appSessionId,
-      receivedAt: new Date(event.receivedAt).toISOString(),
-      source: event.source,
-      matchId: this.state.currentMatchId,
-      feature: event.feature,
-      category: event.category,
-      key: event.key,
-      rawPayload,
-    });
+    if (isRosterEvent(event)) {
+      const previousCaptureAt = this.lastRosterCaptureAt.get(channel) || 0;
+      if (event.receivedAt - previousCaptureAt < ROSTER_THROTTLE_MS) return;
+      this.lastRosterCaptureAt.set(channel, event.receivedAt);
+    }
+
+    this.fingerprints.set(channel, fingerprint);
+    if (event.key === 'match_id') {
+      this.state.currentMatchId = primitiveString(rawPayload) || this.state.currentMatchId;
+    }
+    if (isMatchCompleteKey(event.key)) {
+      this.matchComplete = true;
+    }
+
+    this.append(
+      {
+        sequence: ++this.state.sequence,
+        appSessionId: this.appSessionId,
+        receivedAt: new Date(event.receivedAt).toISOString(),
+        source: event.source,
+        matchId: this.state.currentMatchId,
+        feature: event.feature,
+        category: event.category,
+        key: event.key,
+        rawPayload,
+      },
+      isCriticalDiagnosticEvent(event),
+    );
+  }
+
+  private async initializeStorage(): Promise<void> {
+    try {
+      this.database = await openDatabase();
+      const storedState = await readStoredState(this.database);
+      const legacyState = storedState ? undefined : loadLegacyState();
+
+      if (storedState?.schemaVersion === 2) {
+        this.state = storedState;
+      } else if (legacyState) {
+        await this.migrateLegacyState(legacyState);
+      }
+
+      if (!this.state.appSessions.some((session) => session.id === this.appSessionId)) {
+        this.state.appSessions.push({ id: this.appSessionId, clientId: this.clientId, startedAt: nowIso() });
+      }
+      this.state.appSessions = this.state.appSessions.slice(-100);
+      this.storageStatus = 'RECORDING';
+      await this.persistMetadata();
+    } catch (error) {
+      this.enterStorageError(error);
+    } finally {
+      this.refreshPanel();
+    }
+  }
+
+  private async migrateLegacyState(legacy: LegacyDiagnosticState): Promise<void> {
+    if (!this.database) return;
+
+    const entries = Array.isArray(legacy.entries) ? legacy.entries : [];
+    const migratedState: DiagnosticState = {
+      schemaVersion: 2,
+      createdAt: legacy.createdAt || nowIso(),
+      updatedAt: legacy.updatedAt || nowIso(),
+      currentMatchId: legacy.currentMatchId,
+      manualSteamBuildId: legacy.manualSteamBuildId,
+      legacyTruncated: Boolean(legacy.truncated),
+      sequence: Math.max(legacy.sequence || 0, ...entries.map((entry) => entry.sequence || 0), 0),
+      persistedEntryCount: entries.length,
+      estimatedBytes: entries.reduce((sum, entry) => sum + estimateBytes(entry), 0),
+      appSessions: Array.isArray(legacy.appSessions) ? legacy.appSessions : [],
+      notes: Array.isArray(legacy.notes) ? legacy.notes : [],
+    };
+
+    const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+    const entryStore = transaction.objectStore(ENTRY_STORE);
+    for (const entry of entries) {
+      const copy = { ...entry };
+      delete copy.id;
+      entryStore.add(copy);
+    }
+    transaction.objectStore(META_STORE).put({ key: META_KEY, value: migratedState } as StoredMetaRecord);
+    await transactionComplete(transaction);
+
+    this.state = migratedState;
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   }
 
   private captureSystem(source: EntrySource, key: string, rawPayload: unknown): void {
     const payload = sanitize(rawPayload);
     this.state.currentMatchId = findMatchId(payload) || this.state.currentMatchId;
-    this.append({
-      sequence: ++this.state.sequence,
-      appSessionId: this.appSessionId,
-      receivedAt: nowIso(),
-      source,
-      matchId: this.state.currentMatchId,
-      key,
-      rawPayload: payload,
-    });
+    this.append(
+      {
+        sequence: ++this.state.sequence,
+        appSessionId: this.appSessionId,
+        receivedAt: nowIso(),
+        source,
+        matchId: this.state.currentMatchId,
+        key,
+        rawPayload: payload,
+      },
+      true,
+    );
   }
 
-  private append(entry: DiagnosticEntry): void {
-    const length = stringify(entry).length + 1;
-    this.state.entries.push(entry);
-    this.estimatedChars += length;
-    while (this.state.entries.length > MAX_ENTRIES || this.estimatedChars > MAX_PERSISTED_CHARS) {
-      const removed = this.state.entries.shift();
-      if (!removed) break;
-      this.estimatedChars = Math.max(0, this.estimatedChars - stringify(removed).length - 1);
-      this.state.truncated = true;
-    }
+  private append(entry: DiagnosticEntry, critical: boolean): void {
+    this.pendingEntries.push(entry);
     this.state.updatedAt = nowIso();
-    this.schedulePersist();
+
+    if (critical || this.pendingEntries.length >= MAX_BATCH_SIZE) {
+      void this.flushPendingEntries();
+    } else {
+      this.scheduleFlush();
+    }
     this.refreshPanel();
   }
 
-  private load(): DiagnosticState {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return initialState(this.clientId, this.appSessionId);
-      const parsed = JSON.parse(raw) as DiagnosticState;
-      if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.entries) || !Array.isArray(parsed.notes)) {
-        return initialState(this.clientId, this.appSessionId);
-      }
-      parsed.appSessions = Array.isArray(parsed.appSessions) ? parsed.appSessions : [];
-      this.estimatedChars = parsed.entries.reduce((sum, entry) => sum + stringify(entry).length + 1, 0);
-      return parsed;
-    } catch (error) {
-      console.error('Failed to restore diagnostic capture state:', error);
-      return initialState(this.clientId, this.appSessionId);
-    }
+  private scheduleFlush(): void {
+    if (this.flushTimerId !== undefined) return;
+    this.flushTimerId = window.setTimeout(() => {
+      this.flushTimerId = undefined;
+      void this.flushPendingEntries();
+    }, FLUSH_DELAY_MS);
   }
 
-  private schedulePersist(): void {
-    if (this.persistTimerId !== undefined) return;
-    this.persistTimerId = window.setTimeout(() => {
-      this.persistTimerId = undefined;
-      this.persist();
-    }, PERSIST_DELAY_MS);
+  private flushPendingEntries(): Promise<void> {
+    if (!this.pendingEntries.length) return this.flushChain;
+    if (this.flushTimerId !== undefined) {
+      window.clearTimeout(this.flushTimerId);
+      this.flushTimerId = undefined;
+    }
+
+    const batch = this.pendingEntries.splice(0, this.pendingEntries.length);
+    this.flushChain = this.flushChain
+      .then(() => this.ready)
+      .then(() => this.writeBatch(batch))
+      .catch((error) => {
+        this.memoryFallbackEntries.push(...batch);
+        this.enterStorageError(error);
+      });
+    return this.flushChain;
   }
 
-  private persist(): void {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, stringify(this.state));
-    } catch (error) {
-      console.error('Failed to persist diagnostic capture state:', error);
-      this.state.truncated = true;
-      this.state.entries = this.state.entries.slice(-100);
-      this.estimatedChars = this.state.entries.reduce((sum, entry) => sum + stringify(entry).length + 1, 0);
-      try {
-        window.localStorage.setItem(STORAGE_KEY, stringify(this.state));
-      } catch (retryError) {
-        console.error('Failed to persist reduced diagnostic state:', retryError);
-      }
+  private async writeBatch(batch: DiagnosticEntry[]): Promise<void> {
+    if (!batch.length) return;
+    if (!this.database || this.storageStatus === 'STORAGE_ERROR') {
+      this.memoryFallbackEntries.push(...batch);
+      return;
     }
+
+    const batchBytes = batch.reduce((sum, entry) => sum + estimateBytes(entry), 0);
+    const nextState: DiagnosticState = {
+      ...this.state,
+      updatedAt: nowIso(),
+      persistedEntryCount: this.state.persistedEntryCount + batch.length,
+      estimatedBytes: this.state.estimatedBytes + batchBytes,
+      appSessions: [...this.state.appSessions],
+      notes: [...this.state.notes],
+    };
+
+    const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+    const entryStore = transaction.objectStore(ENTRY_STORE);
+    for (const entry of batch) {
+      entryStore.add(entry);
+    }
+    transaction.objectStore(META_STORE).put({ key: META_KEY, value: nextState } as StoredMetaRecord);
+    await transactionComplete(transaction);
+    this.state = nextState;
+    this.storageStatus = this.matchComplete ? 'COMPLETE' : 'RECORDING';
+    this.refreshPanel();
+  }
+
+  private async persistMetadata(): Promise<void> {
+    if (!this.database || this.storageStatus === 'STORAGE_ERROR') return;
+    const transaction = this.database.transaction(META_STORE, 'readwrite');
+    transaction.objectStore(META_STORE).put({ key: META_KEY, value: this.state } as StoredMetaRecord);
+    await transactionComplete(transaction);
+  }
+
+  private enterStorageError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.storageStatus = 'STORAGE_ERROR';
+    this.storageError = message;
+    console.error('Diagnostic capture storage error:', error);
+    this.refreshPanel();
   }
 
   private addNote(): void {
@@ -406,90 +655,143 @@ export class DiagnosticCapture {
       note: note?.value.trim() || undefined,
     });
     this.state.updatedAt = nowIso();
-    this.persist();
+    void this.persistMetadata().catch((error) => this.enterStorageError(error));
     if (item) item.value = '';
     if (gameTime) gameTime.value = '';
     if (note) note.value = '';
     this.refreshPanel();
   }
 
-  private clear(): void {
+  private async clear(): Promise<void> {
     if (!window.confirm('Clear all captured diagnostic events and notes?')) return;
-    this.state = initialState(this.clientId, this.appSessionId);
+
+    await this.flushPendingEntries();
+    this.pendingEntries = [];
+    this.memoryFallbackEntries = [];
     this.fingerprints.clear();
-    this.estimatedChars = 0;
-    this.persist();
+    this.lastRosterCaptureAt.clear();
+    this.matchComplete = false;
+    this.storageError = undefined;
+
+    if (this.database) {
+      const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+      transaction.objectStore(ENTRY_STORE).clear();
+      transaction.objectStore(META_STORE).clear();
+      await transactionComplete(transaction);
+    }
+
+    this.state = initialState(this.clientId, this.appSessionId);
+    this.storageStatus = this.database ? 'RECORDING' : 'STORAGE_ERROR';
+    await this.persistMetadata();
     this.refreshPanel();
   }
 
-  private exportArchive(): void {
-    this.persist();
-    const matchIds = Array.from(
-      new Set(this.state.entries.map((entry) => entry.matchId).filter((value): value is string => !!value)),
-    );
-    const candidates = Array.from(
-      this.state.entries.reduce((result, entry) => collectVersionCandidates(entry.rawPayload, result), new Set<string>()),
-    ).sort();
-    const sessionInfo = {
-      schemaVersion: 1,
-      createdAt: this.state.createdAt,
-      updatedAt: this.state.updatedAt,
-      exportedAt: nowIso(),
-      currentMatchId: this.state.currentMatchId,
-      matchIds,
-      manualSteamBuildId: this.state.manualSteamBuildId,
-      truncated: this.state.truncated,
-      entryCount: this.state.entries.length,
-      appSessions: this.state.appSessions,
-    };
-    const zipBytes = createStoredZipBytes([
-      { name: 'overwolf-events.ndjson', content: this.state.entries.map((entry) => stringify(entry)).join('\n') },
-      { name: 'session-info.json', content: stringify(sessionInfo, 2) },
-      { name: 'notes.json', content: stringify(this.state.notes, 2) },
-      {
-        name: 'steam-build.txt',
-        content: [
-          `Manual Steam build ID: ${this.state.manualSteamBuildId || 'not provided'}`,
-          '',
-          'Detected build/version candidates:',
-          ...(candidates.length ? candidates.map((candidate) => `- ${candidate}`) : ['- none']),
-        ].join('\n'),
-      },
-      {
-        name: 'README.txt',
-        content: [
-          'Deadlock Live Probe diagnostic capture',
-          '',
-          'Upload this ZIP without editing it.',
-          'It contains raw deduplicated GEP values, startup snapshots, match IDs, and manual action markers.',
-        ].join('\n'),
-      },
-    ]);
+  private async exportArchive(): Promise<void> {
+    const exportButton = document.getElementById('diagnostic-export') as HTMLButtonElement | null;
+    if (exportButton) {
+      exportButton.disabled = true;
+      exportButton.textContent = 'Exporting...';
+    }
 
-    const zipBuffer = new ArrayBuffer(zipBytes.byteLength);
-    new Uint8Array(zipBuffer).set(zipBytes);
-    const objectUrl = URL.createObjectURL(new Blob([zipBuffer], { type: 'application/zip' }));
-    const anchor = document.createElement('a');
-    const matchLabel = matchIds.length === 1 ? matchIds[0] : matchIds.length > 1 ? 'multiple-matches' : 'unknown-match';
-    anchor.href = objectUrl;
-    anchor.download = `deadlock-diagnostics-${matchLabel}-${nowIso().replace(/[:.]/g, '-')}.zip`;
-    anchor.style.display = 'none';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    try {
+      await this.flushPendingEntries();
+      const persistedEntries = this.database ? await readAllEntries(this.database) : [];
+      const entries = [...persistedEntries, ...this.memoryFallbackEntries].sort(
+        (left, right) => left.sequence - right.sequence,
+      );
+      const matchIds = Array.from(
+        new Set(entries.map((entry) => entry.matchId).filter((value): value is string => !!value)),
+      );
+      const candidates = Array.from(
+        entries.reduce((result, entry) => collectVersionCandidates(entry.rawPayload, result), new Set<string>()),
+      ).sort();
+      const sessionInfo = {
+        schemaVersion: 2,
+        createdAt: this.state.createdAt,
+        updatedAt: this.state.updatedAt,
+        exportedAt: nowIso(),
+        currentMatchId: this.state.currentMatchId,
+        matchIds,
+        manualSteamBuildId: this.state.manualSteamBuildId,
+        truncated: this.state.legacyTruncated,
+        legacyTruncated: this.state.legacyTruncated,
+        storageStatus: this.storageStatus,
+        storageError: this.storageError,
+        entryCount: entries.length,
+        persistedEntryCount: persistedEntries.length,
+        memoryFallbackEntryCount: this.memoryFallbackEntries.length,
+        estimatedBytes: entries.reduce((sum, entry) => sum + estimateBytes(entry), 0),
+        appSessions: this.state.appSessions,
+      };
+      const zipBytes = createStoredZipBytes([
+        { name: 'overwolf-events.ndjson', content: entries.map((entry) => stringify(entry)).join('\n') },
+        { name: 'session-info.json', content: stringify(sessionInfo, 2) },
+        { name: 'notes.json', content: stringify(this.state.notes, 2) },
+        {
+          name: 'steam-build.txt',
+          content: [
+            `Manual Steam build ID: ${this.state.manualSteamBuildId || 'not provided'}`,
+            '',
+            'Detected build/version candidates:',
+            ...(candidates.length ? candidates.map((candidate) => `- ${candidate}`) : ['- none']),
+          ].join('\n'),
+        },
+        {
+          name: 'README.txt',
+          content: [
+            'Deadlock Live Probe diagnostic capture',
+            '',
+            'Upload this ZIP without editing it.',
+            'Events are stored in IndexedDB and exported in sequence order.',
+            'The archive contains raw deduplicated GEP values, startup snapshots, match IDs, and manual action markers.',
+          ].join('\n'),
+        },
+      ]);
+
+      const zipBuffer = new ArrayBuffer(zipBytes.byteLength);
+      new Uint8Array(zipBuffer).set(zipBytes);
+      const objectUrl = URL.createObjectURL(new Blob([zipBuffer], { type: 'application/zip' }));
+      const anchor = document.createElement('a');
+      const matchLabel =
+        matchIds.length === 1 ? matchIds[0] : matchIds.length > 1 ? 'multiple-matches' : 'unknown-match';
+      anchor.href = objectUrl;
+      anchor.download = `deadlock-diagnostics-${matchLabel}-${nowIso().replace(/[:.]/g, '-')}.zip`;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      this.enterStorageError(error);
+      window.alert(`Failed to export diagnostics: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (exportButton) {
+        exportButton.disabled = false;
+        exportButton.textContent = 'Export ZIP';
+      }
+    }
   }
 
   private mountPanel(): void {
-    if (document.getElementById('diagnostic-capture-panel')) return this.refreshPanel();
+    if (document.getElementById('diagnostic-capture-panel')) {
+      this.refreshPanel();
+      return;
+    }
+
     const style = document.createElement('style');
     style.textContent = `
       #diagnostic-capture-panel{border:1px solid #3b3b4b;border-radius:10px;background:#14141a;padding:10px 12px;display:flex;flex-direction:column;gap:8px;font-family:'Outfit',sans-serif}
       #diagnostic-capture-panel .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
       #diagnostic-capture-panel .title{font-size:12px;font-weight:700;color:#ff6b4a;margin-right:auto}
       #diagnostic-capture-panel .status{font-size:11px;color:#9ca3af}
+      #diagnostic-capture-panel .badge{border-radius:999px;padding:2px 7px;font-size:10px;font-weight:700;letter-spacing:.04em}
+      #diagnostic-capture-panel .badge.recording{background:#164e3d;color:#86efac}
+      #diagnostic-capture-panel .badge.complete{background:#1e3a5f;color:#93c5fd}
+      #diagnostic-capture-panel .badge.initializing{background:#3f3f46;color:#d4d4d8}
+      #diagnostic-capture-panel .badge.error{background:#5f1d26;color:#fca5a5}
       #diagnostic-capture-panel input,#diagnostic-capture-panel select,#diagnostic-capture-panel button{border:1px solid #343444;border-radius:5px;background:#1b1b22;color:#f3f4f6;padding:5px 7px;font:inherit;font-size:11px}
       #diagnostic-capture-panel input{min-width:90px;flex:1}#diagnostic-capture-panel button{cursor:pointer}
+      #diagnostic-capture-panel button:disabled{opacity:.6;cursor:default}
       #diagnostic-capture-panel .primary{background:#ff6b4a;border-color:#ff6b4a;color:#111;font-weight:700}
       #diagnostic-capture-panel .danger{color:#f87171}
     `;
@@ -498,18 +800,18 @@ export class DiagnosticCapture {
     const panel = document.createElement('section');
     panel.id = 'diagnostic-capture-panel';
     panel.innerHTML = `
-      <div class="row"><span class="title">Diagnostic Capture</span><span class="status" id="diagnostic-status"></span><button class="primary" id="diagnostic-export">Export ZIP</button><button class="danger" id="diagnostic-clear">Clear</button></div>
+      <div class="row"><span class="title">Diagnostic Capture</span><span class="badge initializing" id="diagnostic-storage-status">INITIALIZING</span><span class="status" id="diagnostic-status"></span><button class="primary" id="diagnostic-export">Export ZIP</button><button class="danger" id="diagnostic-clear">Clear</button></div>
       <div class="row"><input id="diagnostic-steam-build" placeholder="Steam build ID (optional)"><select id="diagnostic-action"><option>BUY</option><option>UPGRADE</option><option>SELL</option><option>REBUY</option><option>CONSUME</option><option>RECONNECT</option><option>OTHER</option></select><input id="diagnostic-item" placeholder="Item name"><input id="diagnostic-game-time" placeholder="Game time MM:SS"><input id="diagnostic-note" placeholder="Optional note"><button id="diagnostic-add-note">Add marker</button></div>
     `;
     const appLayout = document.querySelector('.app-layout');
     appLayout?.parentElement ? appLayout.parentElement.insertBefore(panel, appLayout) : document.body.prepend(panel);
-    document.getElementById('diagnostic-export')?.addEventListener('click', () => this.exportArchive());
-    document.getElementById('diagnostic-clear')?.addEventListener('click', () => this.clear());
+    document.getElementById('diagnostic-export')?.addEventListener('click', () => void this.exportArchive());
+    document.getElementById('diagnostic-clear')?.addEventListener('click', () => void this.clear());
     document.getElementById('diagnostic-add-note')?.addEventListener('click', () => this.addNote());
     document.getElementById('diagnostic-steam-build')?.addEventListener('input', (event) => {
       this.state.manualSteamBuildId = (event.target as HTMLInputElement).value.trim() || undefined;
       this.state.updatedAt = nowIso();
-      this.schedulePersist();
+      void this.persistMetadata().catch((error) => this.enterStorageError(error));
     });
     const buildInput = document.getElementById('diagnostic-steam-build') as HTMLInputElement | null;
     if (buildInput) buildInput.value = this.state.manualSteamBuildId || '';
@@ -518,7 +820,32 @@ export class DiagnosticCapture {
 
   private refreshPanel(): void {
     const status = document.getElementById('diagnostic-status');
-    if (!status) return;
-    status.textContent = `match ${this.state.currentMatchId || 'unknown'} | ${this.state.entries.length} events | ${this.state.notes.length} markers | ~${Math.round(this.estimatedChars / 1024)} KB${this.state.truncated ? ' | TRUNCATED' : ''}`;
+    const storageStatus = document.getElementById('diagnostic-storage-status');
+    if (!status || !storageStatus) return;
+
+    const totalEntries =
+      this.state.persistedEntryCount + this.pendingEntries.length + this.memoryFallbackEntries.length;
+    const pendingBytes = this.pendingEntries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
+    const fallbackBytes = this.memoryFallbackEntries.reduce((sum, entry) => sum + estimateBytes(entry), 0);
+    const totalBytes = this.state.estimatedBytes + pendingBytes + fallbackBytes;
+    const displayedStatus: StorageStatus =
+      this.storageStatus === 'STORAGE_ERROR'
+        ? 'STORAGE_ERROR'
+        : this.matchComplete
+          ? 'COMPLETE'
+          : this.storageStatus;
+
+    storageStatus.textContent = displayedStatus;
+    storageStatus.className = `badge ${
+      displayedStatus === 'STORAGE_ERROR'
+        ? 'error'
+        : displayedStatus === 'COMPLETE'
+          ? 'complete'
+          : displayedStatus === 'RECORDING'
+            ? 'recording'
+            : 'initializing'
+    }`;
+    storageStatus.title = this.storageError || '';
+    status.textContent = `match ${this.state.currentMatchId || 'unknown'} | ${totalEntries} events | ${this.state.notes.length} markers | ~${(totalBytes / 1024 / 1024).toFixed(1)} MB${this.state.legacyTruncated ? ' | LEGACY TRUNCATED' : ''}`;
   }
 }
