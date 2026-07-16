@@ -76,35 +76,69 @@ type ZipFile = { name: string; content: string; modifiedAt?: Date };
 
 const LEGACY_STORAGE_KEY = 'deadlock-live-probe-diagnostics-v1';
 const DATABASE_NAME = 'deadlock-live-probe-diagnostics';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const ENTRY_STORE = 'entries';
 const META_STORE = 'meta';
 const META_KEY = 'state';
 const FLUSH_DELAY_MS = 500;
 const MAX_BATCH_SIZE = 250;
 const ROSTER_THROTTLE_MS = 1_000;
+const MAX_SANITIZE_DEPTH = 24;
 
 const nowIso = (): string => new Date().toISOString();
 const randomId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 
-function sanitize(value: unknown, seen = new WeakSet<object>()): unknown {
+function sanitize(value: unknown, seen = new WeakSet<object>(), depth = 0): unknown {
   if (value === null || value === undefined) return value ?? null;
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value !== 'object') return value;
-  if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
+  if (depth > MAX_SANITIZE_DEPTH) return '[MaxDepth]';
+
+  const valueType = typeof value;
+  if (valueType === 'bigint') return String(value);
+  if (valueType === 'symbol') return `[Symbol ${String((value as symbol).description || '')}]`;
+  if (valueType === 'function') {
+    const name = (value as (...args: unknown[]) => unknown).name;
+    return `[Function${name ? ` ${name}` : ''}]`;
+  }
+  if (valueType !== 'object') return value;
+
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message, stack: value.stack };
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '[Invalid Date]' : value.toISOString();
+  }
+  if (value instanceof ArrayBuffer) {
+    return Array.from(new Uint8Array(value));
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    return Array.from(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  }
+  if (value instanceof Map) {
+    return Array.from(value.entries()).map(([key, item]) => [
+      sanitize(key, seen, depth + 1),
+      sanitize(item, seen, depth + 1),
+    ]);
+  }
+  if (value instanceof Set) {
+    return Array.from(value.values()).map((item) => sanitize(item, seen, depth + 1));
+  }
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return { type: value.type, size: value.size };
+  }
   if (seen.has(value)) return '[Circular]';
 
   seen.add(value);
   if (Array.isArray(value)) {
-    const result = value.map((item) => sanitize(item, seen));
+    const result = value.map((item) => sanitize(item, seen, depth + 1));
     seen.delete(value);
     return result;
   }
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = sanitize(item, seen);
+    result[key] = sanitize(item, seen, depth + 1);
   }
   seen.delete(value);
   return result;
@@ -184,7 +218,9 @@ export function createDiagnosticChannel(event: DiagnosticRawEvent): string {
   return [event.category || '', event.key || event.feature || ''].join('|');
 }
 
-export function isCriticalDiagnosticEvent(event: Pick<DiagnosticRawEvent, 'source' | 'category' | 'key'>): boolean {
+export function isCriticalDiagnosticEvent(
+  event: Pick<DiagnosticRawEvent, 'source' | 'category' | 'key'>,
+): boolean {
   const key = (event.key || '').toLowerCase();
   const category = (event.category || '').toLowerCase();
   return (
@@ -222,7 +258,9 @@ function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
   for (const byte of bytes) {
     crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -327,18 +365,38 @@ function initialState(clientId: string, appSessionId: string): DiagnosticState {
   };
 }
 
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+function indexedDbError(error: DOMException | null, fallback: string): Error {
+  if (!error) return new Error(fallback);
+  return new Error(`${error.name}: ${error.message || fallback}`);
+}
+
+function requestResult<T>(request: IDBRequest<T>, context: string): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+    request.onerror = () => reject(indexedDbError(request.error, `${context} request failed`));
   });
 }
 
-function transactionComplete(transaction: IDBTransaction): Promise<void> {
+function transactionComplete(
+  transaction: IDBTransaction,
+  context: string,
+  getRequestError?: () => Error | undefined,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
-    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+    let settled = false;
+    const fail = (fallback: string): void => {
+      if (settled) return;
+      settled = true;
+      reject(getRequestError?.() || indexedDbError(transaction.error, fallback));
+    };
+
+    transaction.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    transaction.onerror = () => fail(`${context} transaction failed`);
+    transaction.onabort = () => fail(`${context} transaction aborted`);
   });
 }
 
@@ -352,36 +410,67 @@ function openDatabase(): Promise<IDBDatabase> {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       const database = request.result;
+      let entries: IDBObjectStore;
+
       if (!database.objectStoreNames.contains(ENTRY_STORE)) {
-        const entries = database.createObjectStore(ENTRY_STORE, { keyPath: 'id', autoIncrement: true });
-        entries.createIndex('sequence', 'sequence', { unique: true });
+        entries = database.createObjectStore(ENTRY_STORE, { keyPath: 'id', autoIncrement: true });
+      } else {
+        const upgradeTransaction = request.transaction;
+        if (!upgradeTransaction) throw new Error('IndexedDB upgrade transaction is unavailable');
+        entries = upgradeTransaction.objectStore(ENTRY_STORE);
       }
+
+      if (entries.indexNames.contains('sequence')) {
+        entries.deleteIndex('sequence');
+      }
+
       if (!database.objectStoreNames.contains(META_STORE)) {
         database.createObjectStore(META_STORE, { keyPath: 'key' });
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB'));
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
+    request.onerror = () => reject(indexedDbError(request.error, 'Failed to open IndexedDB'));
     request.onblocked = () => reject(new Error('IndexedDB upgrade is blocked by another app window'));
   });
 }
 
 async function readStoredState(database: IDBDatabase): Promise<DiagnosticState | undefined> {
   const transaction = database.transaction(META_STORE, 'readonly');
+  const completed = transactionComplete(transaction, 'read metadata');
   const record = await requestResult(
     transaction.objectStore(META_STORE).get(META_KEY) as IDBRequest<StoredMetaRecord | undefined>,
+    'read metadata',
   );
-  await transactionComplete(transaction);
+  await completed;
   return record?.value;
 }
 
 async function readAllEntries(database: IDBDatabase): Promise<DiagnosticEntry[]> {
   const transaction = database.transaction(ENTRY_STORE, 'readonly');
+  const completed = transactionComplete(transaction, 'read entries');
   const entries = await requestResult(
     transaction.objectStore(ENTRY_STORE).getAll() as IDBRequest<DiagnosticEntry[]>,
+    'read entries',
   );
-  await transactionComplete(transaction);
-  return entries.sort((left, right) => left.sequence - right.sequence);
+  await completed;
+  return entries.sort(compareEntries);
+}
+
+function compareEntries(left: DiagnosticEntry, right: DiagnosticEntry): number {
+  if (left.id !== undefined && right.id !== undefined && left.id !== right.id) {
+    return left.id - right.id;
+  }
+  if (left.receivedAt !== right.receivedAt) {
+    return left.receivedAt.localeCompare(right.receivedAt);
+  }
+  if (left.sequence !== right.sequence) {
+    return left.sequence - right.sequence;
+  }
+  return left.appSessionId.localeCompare(right.appSessionId);
 }
 
 function loadLegacyState(): LegacyDiagnosticState | undefined {
@@ -399,6 +488,31 @@ function loadLegacyState(): LegacyDiagnosticState | undefined {
   }
 }
 
+function entryIdentity(entry: DiagnosticEntry): string {
+  return [
+    entry.appSessionId,
+    entry.sequence,
+    entry.receivedAt,
+    entry.source,
+    entry.category || '',
+    entry.key || '',
+  ].join('|');
+}
+
+function mergeEntries(...groups: DiagnosticEntry[][]): DiagnosticEntry[] {
+  const result: DiagnosticEntry[] = [];
+  const identities = new Set<string>();
+  for (const group of groups) {
+    for (const entry of group) {
+      const identity = entryIdentity(entry);
+      if (identities.has(identity)) continue;
+      identities.add(identity);
+      result.push(entry);
+    }
+  }
+  return result.sort(compareEntries);
+}
+
 export class DiagnosticCapture {
   private readonly appSessionId = randomId('session');
   private state: DiagnosticState;
@@ -410,7 +524,7 @@ export class DiagnosticCapture {
   private flushTimerId?: number;
   private pendingEntries: DiagnosticEntry[] = [];
   private memoryFallbackEntries: DiagnosticEntry[] = [];
-  private flushChain: Promise<void> = Promise.resolve();
+  private storageChain: Promise<void> = Promise.resolve();
   private readonly fingerprints = new Map<string, string>();
   private readonly lastRosterCaptureAt = new Map<string, number>();
   private readonly ready: Promise<void>;
@@ -469,7 +583,7 @@ export class DiagnosticCapture {
 
     this.append(
       {
-        sequence: ++this.state.sequence,
+        sequence: this.nextSequence(),
         appSessionId: this.appSessionId,
         receivedAt: new Date(event.receivedAt).toISOString(),
         source: event.source,
@@ -483,24 +597,33 @@ export class DiagnosticCapture {
     );
   }
 
+  private nextSequence(): number {
+    this.state.sequence += 1;
+    return this.state.sequence;
+  }
+
   private async initializeStorage(): Promise<void> {
     try {
       this.database = await openDatabase();
       const storedState = await readStoredState(this.database);
+      const existingEntries = await readAllEntries(this.database);
       const legacyState = storedState ? undefined : loadLegacyState();
 
-      if (storedState?.schemaVersion === 2) {
-        this.state = storedState;
-      } else if (legacyState) {
-        await this.migrateLegacyState(legacyState);
+      if (legacyState) {
+        await this.migrateLegacyState(legacyState, existingEntries);
+      } else if (storedState?.schemaVersion === 2) {
+        this.state = this.reconcileStoredState(storedState, existingEntries);
+      } else if (existingEntries.length) {
+        this.state = this.reconcileStoredState(this.state, existingEntries);
       }
 
       if (!this.state.appSessions.some((session) => session.id === this.appSessionId)) {
         this.state.appSessions.push({ id: this.appSessionId, clientId: this.clientId, startedAt: nowIso() });
       }
       this.state.appSessions = this.state.appSessions.slice(-100);
-      this.storageStatus = 'RECORDING';
-      await this.persistMetadata();
+      this.matchComplete = existingEntries.some((entry) => isMatchCompleteKey(entry.key));
+      this.storageStatus = this.matchComplete ? 'COMPLETE' : 'RECORDING';
+      await this.persistMetadataNow();
     } catch (error) {
       this.enterStorageError(error);
     } finally {
@@ -508,10 +631,34 @@ export class DiagnosticCapture {
     }
   }
 
-  private async migrateLegacyState(legacy: LegacyDiagnosticState): Promise<void> {
+  private reconcileStoredState(state: DiagnosticState, entries: DiagnosticEntry[]): DiagnosticState {
+    const maxSequence = entries.reduce((maximum, entry) => Math.max(maximum, entry.sequence || 0), 0);
+    const latestMatchId = [...entries]
+      .reverse()
+      .map((entry) => entry.matchId || findMatchId(entry.rawPayload))
+      .find((matchId): matchId is string => Boolean(matchId));
+
+    return {
+      ...state,
+      schemaVersion: 2,
+      currentMatchId: state.currentMatchId || latestMatchId,
+      legacyTruncated: Boolean(state.legacyTruncated),
+      sequence: Math.max(state.sequence || 0, maxSequence),
+      persistedEntryCount: entries.length,
+      estimatedBytes: entries.reduce((sum, entry) => sum + estimateBytes(entry), 0),
+      appSessions: Array.isArray(state.appSessions) ? state.appSessions : [],
+      notes: Array.isArray(state.notes) ? state.notes : [],
+    };
+  }
+
+  private async migrateLegacyState(
+    legacy: LegacyDiagnosticState,
+    existingEntries: DiagnosticEntry[],
+  ): Promise<void> {
     if (!this.database) return;
 
-    const entries = Array.isArray(legacy.entries) ? legacy.entries : [];
+    const legacyEntries = Array.isArray(legacy.entries) ? legacy.entries : [];
+    const entries = mergeEntries(existingEntries, legacyEntries);
     const migratedState: DiagnosticState = {
       schemaVersion: 2,
       createdAt: legacy.createdAt || nowIso(),
@@ -526,15 +673,26 @@ export class DiagnosticCapture {
       notes: Array.isArray(legacy.notes) ? legacy.notes : [],
     };
 
+    let requestFailure: Error | undefined;
     const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+    const completed = transactionComplete(transaction, 'migrate legacy diagnostics', () => requestFailure);
     const entryStore = transaction.objectStore(ENTRY_STORE);
+    entryStore.clear();
     for (const entry of entries) {
       const copy = { ...entry };
       delete copy.id;
-      entryStore.add(copy);
+      const request = entryStore.add(copy);
+      request.onerror = () => {
+        requestFailure ||= indexedDbError(request.error, 'Failed to migrate a diagnostic entry');
+      };
     }
-    transaction.objectStore(META_STORE).put({ key: META_KEY, value: migratedState } as StoredMetaRecord);
-    await transactionComplete(transaction);
+    const metadataRequest = transaction
+      .objectStore(META_STORE)
+      .put({ key: META_KEY, value: migratedState } as StoredMetaRecord);
+    metadataRequest.onerror = () => {
+      requestFailure ||= indexedDbError(metadataRequest.error, 'Failed to migrate diagnostic metadata');
+    };
+    await completed;
 
     this.state = migratedState;
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -545,7 +703,7 @@ export class DiagnosticCapture {
     this.state.currentMatchId = findMatchId(payload) || this.state.currentMatchId;
     this.append(
       {
-        sequence: ++this.state.sequence,
+        sequence: this.nextSequence(),
         appSessionId: this.appSessionId,
         receivedAt: nowIso(),
         source,
@@ -578,29 +736,59 @@ export class DiagnosticCapture {
   }
 
   private flushPendingEntries(): Promise<void> {
-    if (!this.pendingEntries.length) return this.flushChain;
+    if (!this.pendingEntries.length) return this.storageChain;
     if (this.flushTimerId !== undefined) {
       window.clearTimeout(this.flushTimerId);
       this.flushTimerId = undefined;
     }
 
     const batch = this.pendingEntries.splice(0, this.pendingEntries.length);
-    this.flushChain = this.flushChain
-      .then(() => this.ready)
-      .then(() => this.writeBatch(batch))
-      .catch((error) => {
-        this.memoryFallbackEntries.push(...batch);
+    return this.enqueueStorageOperation(async () => {
+      try {
+        await this.writeBatchWithRetry(batch);
+      } catch (error) {
+        this.rememberFallback(batch);
         this.enterStorageError(error);
-      });
-    return this.flushChain;
+      }
+    });
   }
 
-  private async writeBatch(batch: DiagnosticEntry[]): Promise<void> {
-    if (!batch.length) return;
-    if (!this.database || this.storageStatus === 'STORAGE_ERROR') {
-      this.memoryFallbackEntries.push(...batch);
-      return;
+  private enqueueStorageOperation(operation: () => Promise<void>): Promise<void> {
+    this.storageChain = this.storageChain
+      .then(() => this.ready)
+      .then(operation)
+      .catch((error) => this.enterStorageError(error));
+    return this.storageChain;
+  }
+
+  private async writeBatchWithRetry(batch: DiagnosticEntry[]): Promise<void> {
+    const entries = mergeEntries(this.memoryFallbackEntries, batch);
+    if (!entries.length) return;
+
+    let firstError: unknown;
+    try {
+      await this.ensureDatabase();
+      await this.writeBatchOnce(entries);
+    } catch (error) {
+      firstError = error;
+      await this.reopenDatabase();
+      try {
+        await this.writeBatchOnce(entries);
+      } catch (retryError) {
+        const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+        const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+        throw new Error(`IndexedDB write failed twice: ${firstMessage}; retry: ${retryMessage}`);
+      }
     }
+
+    this.memoryFallbackEntries = [];
+    this.storageError = undefined;
+    this.storageStatus = this.matchComplete ? 'COMPLETE' : 'RECORDING';
+    this.refreshPanel();
+  }
+
+  private async writeBatchOnce(batch: DiagnosticEntry[]): Promise<void> {
+    if (!this.database) throw new Error('IndexedDB connection is unavailable');
 
     const batchBytes = batch.reduce((sum, entry) => sum + estimateBytes(entry), 0);
     const nextState: DiagnosticState = {
@@ -612,23 +800,76 @@ export class DiagnosticCapture {
       notes: [...this.state.notes],
     };
 
+    let requestFailure: Error | undefined;
     const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
+    const completed = transactionComplete(transaction, 'write diagnostic batch', () => requestFailure);
     const entryStore = transaction.objectStore(ENTRY_STORE);
     for (const entry of batch) {
-      entryStore.add(entry);
+      const copy = { ...entry };
+      delete copy.id;
+      const request = entryStore.add(copy);
+      request.onerror = () => {
+        requestFailure ||= indexedDbError(
+          request.error,
+          `Failed to store diagnostic entry ${entry.appSessionId}/${entry.sequence}`,
+        );
+      };
     }
-    transaction.objectStore(META_STORE).put({ key: META_KEY, value: nextState } as StoredMetaRecord);
-    await transactionComplete(transaction);
+    const metadataRequest = transaction
+      .objectStore(META_STORE)
+      .put({ key: META_KEY, value: nextState } as StoredMetaRecord);
+    metadataRequest.onerror = () => {
+      requestFailure ||= indexedDbError(metadataRequest.error, 'Failed to store diagnostic metadata');
+    };
+    await completed;
+
     this.state = nextState;
-    this.storageStatus = this.matchComplete ? 'COMPLETE' : 'RECORDING';
-    this.refreshPanel();
   }
 
-  private async persistMetadata(): Promise<void> {
-    if (!this.database || this.storageStatus === 'STORAGE_ERROR') return;
+  private rememberFallback(entries: DiagnosticEntry[]): void {
+    this.memoryFallbackEntries = mergeEntries(this.memoryFallbackEntries, entries);
+  }
+
+  private async ensureDatabase(): Promise<void> {
+    if (this.database) return;
+    this.database = await openDatabase();
+  }
+
+  private async reopenDatabase(): Promise<void> {
+    this.database?.close();
+    this.database = undefined;
+    this.database = await openDatabase();
+  }
+
+  private async persistMetadataNow(): Promise<void> {
+    await this.ensureDatabase();
+    if (!this.database) throw new Error('IndexedDB connection is unavailable');
+
+    let requestFailure: Error | undefined;
     const transaction = this.database.transaction(META_STORE, 'readwrite');
-    transaction.objectStore(META_STORE).put({ key: META_KEY, value: this.state } as StoredMetaRecord);
-    await transactionComplete(transaction);
+    const completed = transactionComplete(transaction, 'write diagnostic metadata', () => requestFailure);
+    const request = transaction
+      .objectStore(META_STORE)
+      .put({ key: META_KEY, value: this.state } as StoredMetaRecord);
+    request.onerror = () => {
+      requestFailure ||= indexedDbError(request.error, 'Failed to store diagnostic metadata');
+    };
+    await completed;
+  }
+
+  private queueMetadataPersist(): void {
+    void this.enqueueStorageOperation(async () => {
+      try {
+        await this.persistMetadataNow();
+      } catch (error) {
+        await this.reopenDatabase();
+        await this.persistMetadataNow().catch((retryError) => {
+          const firstMessage = error instanceof Error ? error.message : String(error);
+          const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+          throw new Error(`IndexedDB metadata write failed twice: ${firstMessage}; retry: ${retryMessage}`);
+        });
+      }
+    });
   }
 
   private enterStorageError(error: unknown): void {
@@ -655,7 +896,7 @@ export class DiagnosticCapture {
       note: note?.value.trim() || undefined,
     });
     this.state.updatedAt = nowIso();
-    void this.persistMetadata().catch((error) => this.enterStorageError(error));
+    this.queueMetadataPersist();
     if (item) item.value = '';
     if (gameTime) gameTime.value = '';
     if (note) note.value = '';
@@ -665,25 +906,41 @@ export class DiagnosticCapture {
   private async clear(): Promise<void> {
     if (!window.confirm('Clear all captured diagnostic events and notes?')) return;
 
-    await this.flushPendingEntries();
-    this.pendingEntries = [];
-    this.memoryFallbackEntries = [];
-    this.fingerprints.clear();
-    this.lastRosterCaptureAt.clear();
-    this.matchComplete = false;
-    this.storageError = undefined;
+    try {
+      await this.flushPendingEntries();
+      await this.storageChain;
+      this.pendingEntries = [];
+      this.memoryFallbackEntries = [];
+      this.fingerprints.clear();
+      this.lastRosterCaptureAt.clear();
+      this.matchComplete = false;
+      this.storageError = undefined;
 
-    if (this.database) {
+      await this.ensureDatabase();
+      if (!this.database) throw new Error('IndexedDB connection is unavailable');
+
+      let requestFailure: Error | undefined;
       const transaction = this.database.transaction([ENTRY_STORE, META_STORE], 'readwrite');
-      transaction.objectStore(ENTRY_STORE).clear();
-      transaction.objectStore(META_STORE).clear();
-      await transactionComplete(transaction);
-    }
+      const completed = transactionComplete(transaction, 'clear diagnostics', () => requestFailure);
+      const clearEntriesRequest = transaction.objectStore(ENTRY_STORE).clear();
+      clearEntriesRequest.onerror = () => {
+        requestFailure ||= indexedDbError(clearEntriesRequest.error, 'Failed to clear diagnostic entries');
+      };
+      const clearMetaRequest = transaction.objectStore(META_STORE).clear();
+      clearMetaRequest.onerror = () => {
+        requestFailure ||= indexedDbError(clearMetaRequest.error, 'Failed to clear diagnostic metadata');
+      };
+      await completed;
 
-    this.state = initialState(this.clientId, this.appSessionId);
-    this.storageStatus = this.database ? 'RECORDING' : 'STORAGE_ERROR';
-    await this.persistMetadata();
-    this.refreshPanel();
+      this.state = initialState(this.clientId, this.appSessionId);
+      this.storageStatus = 'RECORDING';
+      await this.persistMetadataNow();
+    } catch (error) {
+      this.enterStorageError(error);
+      window.alert(`Failed to clear diagnostics: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.refreshPanel();
+    }
   }
 
   private async exportArchive(): Promise<void> {
@@ -695,10 +952,9 @@ export class DiagnosticCapture {
 
     try {
       await this.flushPendingEntries();
+      await this.storageChain;
       const persistedEntries = this.database ? await readAllEntries(this.database) : [];
-      const entries = [...persistedEntries, ...this.memoryFallbackEntries].sort(
-        (left, right) => left.sequence - right.sequence,
-      );
+      const entries = mergeEntries(persistedEntries, this.memoryFallbackEntries);
       const matchIds = Array.from(
         new Set(entries.map((entry) => entry.matchId).filter((value): value is string => !!value)),
       );
@@ -742,7 +998,7 @@ export class DiagnosticCapture {
             'Deadlock Live Probe diagnostic capture',
             '',
             'Upload this ZIP without editing it.',
-            'Events are stored in IndexedDB and exported in sequence order.',
+            'Events are stored in IndexedDB and exported in insertion order.',
             'The archive contains raw deduplicated GEP values, startup snapshots, match IDs, and manual action markers.',
           ].join('\n'),
         },
@@ -811,7 +1067,7 @@ export class DiagnosticCapture {
     document.getElementById('diagnostic-steam-build')?.addEventListener('input', (event) => {
       this.state.manualSteamBuildId = (event.target as HTMLInputElement).value.trim() || undefined;
       this.state.updatedAt = nowIso();
-      void this.persistMetadata().catch((error) => this.enterStorageError(error));
+      this.queueMetadataPersist();
     });
     const buildInput = document.getElementById('diagnostic-steam-build') as HTMLInputElement | null;
     if (buildInput) buildInput.value = this.state.manualSteamBuildId || '';
