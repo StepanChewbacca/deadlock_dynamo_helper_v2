@@ -29,8 +29,10 @@ Configuration:
 ```env
 DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=true
 DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE=0.1
+DEADLOCK_CONTEXTUAL_SHADOW_MAX_IN_FLIGHT=2
 ```
 
+The concurrency limit prevents shadow evaluation from building an unbounded request backlog.
 Shadow records use the event name `hero_build_contextual_shadow` and include the baseline and contextual top actions, ordered top-3 lists, matchup promotion counts, enemy roster, and contextual latency.
 
 ## Evaluator V2 foundation
