@@ -1,4 +1,10 @@
-import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Inject,
+  Post,
+} from '@nestjs/common';
 import { canonicalHeroId } from './hero-id-aliases';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
@@ -12,6 +18,7 @@ import { HeroBuildRecommendationPresentationService } from './hero-build-recomme
 import {
   HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
+  HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
 import { preferUpgradeOverComponentSell } from './hero-build-upgrade-preference';
 import { LiveMatchStateService } from './live-match-state.service';
@@ -35,8 +42,8 @@ interface ValidatedRecommendHeroBuildRequest {
 @Controller('deadlock/analysis/build-recommendation')
 export class HeroBuildRecommendationController {
   constructor(
-    private readonly heroBuildRecommendationService:
-      ProductionHeroBuildRecommendationService,
+    @Inject(ProductionHeroBuildRecommendationService)
+    private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
     private readonly heroBuildRecommendationPresentationService:
       HeroBuildRecommendationPresentationService,
     private readonly liveMatchStateService: LiveMatchStateService,
