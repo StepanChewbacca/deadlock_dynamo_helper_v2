@@ -1,7 +1,7 @@
 import type {
-  ContextualHeroBuildRecommendationResponse,
-  ContextualHeroBuildRecommendationService,
-} from '../src/deadlock-live/contextual-hero-build-recommendation.service';
+  ContextualHeroBuildRecommendationV2Service,
+  HeroBuildContextualV2RecommendationResponse,
+} from '../src/deadlock-live/contextual-hero-build-recommendation-v2.service';
 import {
   adjustPValuesBenjaminiHochberg,
   buildHeroBuildOfflinePairedStatisticalSummary,
@@ -10,7 +10,6 @@ import {
   HeroBuildOfflinePairedStepOutcome,
   splitHeroBuildEvaluationMatchesThreeWay,
 } from '../src/deadlock-live/hero-build-offline-evaluation-v2';
-import type { HeroBuildRecommendationResponse } from '../src/deadlock-live/hero-build-recommendation.service';
 import type {
   HeroBuildPolicy,
   HeroBuildTransitionAggregationService,
@@ -52,8 +51,8 @@ describe('contextual v2 foundation', () => {
     } as unknown as RecipeAwareTimelineReconciliationService;
     const contextualResponse = createContextualResponse();
     const contextualService = {
-      recommend: jest.fn(async () => contextualResponse),
-    } as unknown as ContextualHeroBuildRecommendationService;
+      rerank: jest.fn(async () => contextualResponse),
+    } as unknown as ContextualHeroBuildRecommendationV2Service;
     const service = new ProductionHeroBuildRecommendationService(
       transitionService,
       recipeService,
@@ -70,7 +69,7 @@ describe('contextual v2 foundation', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(response.action.actionKey).toBe('BUY:100');
-    expect(contextualService.recommend).toHaveBeenCalledTimes(1);
+    expect(contextualService.rerank).toHaveBeenCalledTimes(1);
     expect(contextualResponse.action.actionKey).toBe('BUY:200');
   });
 
@@ -212,7 +211,7 @@ function createPolicy(): HeroBuildPolicy {
   };
 }
 
-function createContextualResponse(): ContextualHeroBuildRecommendationResponse {
+function createContextualResponse(): HeroBuildContextualV2RecommendationResponse {
   const action = {
     type: 'BUY',
     sourceActionType: 'BUY',
@@ -234,17 +233,16 @@ function createContextualResponse(): ContextualHeroBuildRecommendationResponse {
     contextualScore: 0.7,
     baseRank: 2,
     contextualRank: 1,
-    wasInBaseBuild: true,
-    isSituational: true,
-    wasPromotedByMatchup: true,
-    wasInsertedByMatchup: false,
-    situationalAgainstHeroId: 2,
-    situationalInteractionOddsRatio: 2,
-    situationalLower95OddsRatio: 1.2,
-    matchupObservationCount: 100,
-    matchupModelVersion: 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1',
-    matchupEvidence: [],
-  } as ContextualHeroBuildRecommendationResponse['action'];
+    contextualLogitBonus: 0.1,
+    rosterInteractionLogOdds: 0.5,
+    observedEnemyCount: 5,
+    eligibleEnemyCount: 3,
+    wasPromotedByContext: true,
+    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2',
+    configId: 'test',
+    enemySignals: [],
+    contextEvidence: [],
+  } as HeroBuildContextualV2RecommendationResponse['action'];
 
   return {
     mode: 'EXACT',
@@ -259,11 +257,21 @@ function createContextualResponse(): ContextualHeroBuildRecommendationResponse {
     observationCount: 10,
     candidateStateCount: 1,
     enemyHeroIds: [2, 3, 4, 5, 6],
-    matchupModelVersion: 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1',
+    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2',
+    config: {
+      id: 'test',
+      candidateLimit: 5,
+      minimumActionObservations: 1,
+      minimumContextObservations: 1,
+      shrinkageStrength: 1,
+      lambda: 0.1,
+      maximumLogitBonus: 0.1,
+      maximumPromotionDistance: 1,
+    },
     evaluatedCandidateCount: 2,
-    situationalCandidateCount: 1,
-    promotedSituationalCandidateCount: 1,
-    insertedSituationalCandidateCount: 0,
+    promotedCandidateCount: 1,
+    changedTop1: true,
+    changedTop3: true,
     action,
     alternatives: [],
   };

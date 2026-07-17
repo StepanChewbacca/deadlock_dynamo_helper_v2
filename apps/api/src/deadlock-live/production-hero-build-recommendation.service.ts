@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  ContextualHeroBuildRecommendationResponse,
-  ContextualHeroBuildRecommendationService,
-  HeroBuildContextualRecommendationRequest,
-} from './contextual-hero-build-recommendation.service';
+  ContextualHeroBuildRecommendationV2Service,
+  HeroBuildContextualV2RecommendationResponse,
+} from './contextual-hero-build-recommendation-v2.service';
+import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import { canonicalHeroId } from './hero-id-aliases';
 import {
   HeroBuildRecommendationResponse,
@@ -18,14 +18,16 @@ const SHADOW_MAX_IN_FLIGHT_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_MAX_IN_FLIGHT';
 const DEFAULT_SHADOW_SAMPLE_RATE = 0.1;
 const DEFAULT_SHADOW_MAX_IN_FLIGHT = 2;
 
-interface ContextualShadowLog {
-  event: 'hero_build_contextual_shadow';
+interface ContextualV2ShadowLog {
+  event: 'hero_build_contextual_v2_shadow';
+  modelVersion: HeroBuildContextualV2RecommendationResponse['modelVersion'];
+  configId: string;
   heroId: number;
   canonicalHeroId: number;
   gameTimeS: number;
   enemyHeroIds: number[];
   baselineMode: HeroBuildRecommendationResponse['mode'];
-  contextualMode: ContextualHeroBuildRecommendationResponse['mode'];
+  contextualMode: HeroBuildContextualV2RecommendationResponse['mode'];
   baselineTopActionKey: string;
   contextualTopActionKey: string;
   baselineTop3ActionKeys: string[];
@@ -34,9 +36,11 @@ interface ContextualShadowLog {
   changedTop3: boolean;
   baselineTopScore: number;
   contextualTopScore: number;
-  situationalCandidateCount: number;
-  promotedSituationalCandidateCount: number;
-  insertedSituationalCandidateCount: number;
+  contextualLogitBonus: number;
+  rosterInteractionLogOdds: number;
+  observedEnemyCount: number;
+  eligibleEnemyCount: number;
+  promotedCandidateCount: number;
   elapsedMs: number;
 }
 
@@ -66,8 +70,8 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   constructor(
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
-    private readonly contextualHeroBuildRecommendationService:
-      ContextualHeroBuildRecommendationService,
+    private readonly contextualHeroBuildRecommendationV2Service:
+      ContextualHeroBuildRecommendationV2Service,
   ) {
     super(
       heroBuildTransitionAggregationService,
@@ -111,12 +115,15 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
 
     this.shadowInFlight += 1;
     const startedAt = Date.now();
-    void this.contextualHeroBuildRecommendationService
-      .recommend({
-        ...request,
-        itemIds: [...request.itemIds],
-        enemyHeroIds: [...request.enemyHeroIds],
-      })
+    void this.contextualHeroBuildRecommendationV2Service
+      .rerank(
+        {
+          ...request,
+          itemIds: [...request.itemIds],
+          enemyHeroIds: [...request.enemyHeroIds],
+        },
+        baseline,
+      )
       .then((contextual) => {
         const log = createContextualShadowLog(
           request,
@@ -128,14 +135,14 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
         if (
           log.changedTop1 ||
           log.changedTop3 ||
-          log.situationalCandidateCount > 0
+          log.promotedCandidateCount > 0
         ) {
           this.logger.log(JSON.stringify(log));
         }
       })
       .catch((error: unknown) => {
         this.logger.warn(
-          `Contextual shadow evaluation failed: ${getErrorMessage(error)}`,
+          `Contextual V2 shadow evaluation failed: ${getErrorMessage(error)}`,
         );
       })
       .finally(() => {
@@ -159,9 +166,9 @@ function createContextualShadowLog(
   request: HeroBuildContextualRecommendationRequest,
   requestedHeroId: number,
   baseline: HeroBuildRecommendationResponse,
-  contextual: ContextualHeroBuildRecommendationResponse,
+  contextual: HeroBuildContextualV2RecommendationResponse,
   elapsedMs: number,
-): ContextualShadowLog {
+): ContextualV2ShadowLog {
   const baselineActionKeys = [
     baseline.action.actionKey,
     ...baseline.alternatives.map((action) => action.actionKey),
@@ -174,7 +181,9 @@ function createContextualShadowLog(
   const contextualTop3ActionKeys = contextualActionKeys.slice(0, 3);
 
   return {
-    event: 'hero_build_contextual_shadow',
+    event: 'hero_build_contextual_v2_shadow',
+    modelVersion: contextual.modelVersion,
+    configId: contextual.config.id,
     heroId: requestedHeroId,
     canonicalHeroId: request.heroId,
     gameTimeS: request.gameTimeS,
@@ -189,11 +198,11 @@ function createContextualShadowLog(
     changedTop3: !sameValues(baselineTop3ActionKeys, contextualTop3ActionKeys),
     baselineTopScore: baseline.action.score,
     contextualTopScore: contextual.action.contextualScore,
-    situationalCandidateCount: contextual.situationalCandidateCount,
-    promotedSituationalCandidateCount:
-      contextual.promotedSituationalCandidateCount,
-    insertedSituationalCandidateCount:
-      contextual.insertedSituationalCandidateCount,
+    contextualLogitBonus: contextual.action.contextualLogitBonus,
+    rosterInteractionLogOdds: contextual.action.rosterInteractionLogOdds,
+    observedEnemyCount: contextual.action.observedEnemyCount,
+    eligibleEnemyCount: contextual.action.eligibleEnemyCount,
+    promotedCandidateCount: contextual.promotedCandidateCount,
     elapsedMs,
   };
 }
