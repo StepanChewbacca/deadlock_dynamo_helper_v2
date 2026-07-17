@@ -20,6 +20,8 @@ import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
+import { HeroBuildOfflineEvaluationController } from './hero-build-offline-evaluation.controller';
+import { HeroBuildOfflineEvaluationService } from './hero-build-offline-evaluation.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
 import { HeroBuildRecommendationOwnershipFilterService } from './hero-build-recommendation-ownership-filter.service';
 import { HeroBuildRecommendationPresentationService } from './hero-build-recommendation-presentation.service';
@@ -91,6 +93,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     MatchTimelineNormalizationController,
     HeroBuildTransitionAggregationController,
     HeroBuildRecommendationController,
+    HeroBuildOfflineEvaluationController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -110,6 +113,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       useExisting: LazyBuildTransitionAggregationService,
     },
     HeroBuildMatchupStatisticsService,
+    HeroBuildOfflineEvaluationService,
     {
       provide: HeroBuildRecommendationService,
       useClass: ContextualHeroBuildRecommendationService,
@@ -157,6 +161,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     LiveHeroMatchupSourceService,
     HeroBuildTransitionAggregationService,
     HeroBuildMatchupStatisticsService,
+    HeroBuildOfflineEvaluationService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
