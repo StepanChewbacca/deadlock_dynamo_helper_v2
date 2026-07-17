@@ -49,6 +49,55 @@ The status response includes:
 
 The completed report includes the same execution information under `execution`.
 
+## Checkpoint and recovery
+
+The evaluator writes an atomic checkpoint after every completed hero. A crash while processing a hero repeats only that hero after restart; metrics from earlier completed heroes are restored from the checkpoint.
+
+The final report is written before the checkpoint is removed. Both files use the persistent `deadlock-storage` Docker volume, so API container recreation does not remove them.
+
+Docker Compose defaults:
+
+```env
+DEADLOCK_BUILD_EVALUATION_STORAGE_DIR=/app/apps/api/storage/build-evaluation
+DEADLOCK_BUILD_EVALUATION_AUTO_RESUME=true
+DEADLOCK_BUILD_EVALUATION_DB_RETRY_COUNT=5
+DEADLOCK_BUILD_EVALUATION_DB_RETRY_DELAY_MS=500
+```
+
+Persistent files:
+
+- `checkpoint.json` - partial aggregate metrics and the index of the next hero
+- `report.json` - completed report returned by the report endpoint after API restarts
+
+Starting a new evaluation deletes the previous checkpoint and report. When `DEADLOCK_BUILD_EVALUATION_AUTO_RESUME=true`, API startup automatically resumes a compatible checkpoint. Incompatible checkpoint versions are ignored rather than mixed with a newer evaluator model.
+
+The status response additionally includes:
+
+- `persistenceMode: CHECKPOINT_PER_HERO`
+- `storageDirectory`
+- `autoResume`
+- `resumedFromCheckpoint`
+- `checkpointAvailable`
+- `databaseRetryCount`
+- `databaseRetryDelayMs`
+
+## PostgreSQL resilience
+
+Read-only evaluation queries retry transient PostgreSQL connection failures with exponential backoff. The retry count is the number of retries after the initial attempt.
+
+The application database pool enables TCP keepalive and handles idle pool errors without allowing a temporary connection loss to become an uncaught process-level error.
+
+Docker Compose defaults:
+
+```env
+DB_CONNECT_TIMEOUT_MS=10000
+DB_POOL_SIZE=10
+DB_KEEP_ALIVE_INITIAL_DELAY_MS=10000
+DB_IDLE_TIMEOUT_MS=30000
+```
+
+Permanent query errors, invalid SQL, schema errors, memory-limit failures, and exhausted transient retries still move the evaluation to `FAILED`.
+
 ## Data split
 
 Matches are sorted by start time. The older portion is used for training and the newer portion is used only for evaluation.
@@ -95,13 +144,7 @@ The report also includes:
 Start a full evaluation:
 
 ```bash
-curl -X POST http://localhost:3000/deadlock/analysis/build-evaluation/start \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "trainFraction": 0.8,
-    "maxMatches": 10000,
-    "errorExampleLimit": 100
-  }'
+curl -X POST http://localhost:3000/deadlock/analysis/build-evaluation/start -H 'Content-Type: application/json' -d '{"trainFraction":0.8,"maxMatches":10000,"errorExampleLimit":100}'
 ```
 
 The endpoint returns `202 Accepted`. The evaluation runs in the API process without blocking the request.
@@ -115,8 +158,7 @@ curl http://localhost:3000/deadlock/analysis/build-evaluation/status
 Read the completed report:
 
 ```bash
-curl http://localhost:3000/deadlock/analysis/build-evaluation/report \
-  -o hero-build-offline-evaluation.json
+curl http://localhost:3000/deadlock/analysis/build-evaluation/report -o hero-build-offline-evaluation.json
 ```
 
 The report endpoint returns:
