@@ -12,10 +12,10 @@ import { HeroBuildRecommendationPresentationService } from './hero-build-recomme
 import {
   HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
-  HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
 import { preferUpgradeOverComponentSell } from './hero-build-upgrade-preference';
 import { LiveMatchStateService } from './live-match-state.service';
+import { ProductionHeroBuildRecommendationService } from './production-hero-build-recommendation.service';
 
 export class RecommendHeroBuildDto {
   heroId!: number;
@@ -35,7 +35,8 @@ interface ValidatedRecommendHeroBuildRequest {
 @Controller('deadlock/analysis/build-recommendation')
 export class HeroBuildRecommendationController {
   constructor(
-    private readonly heroBuildRecommendationService: HeroBuildRecommendationService,
+    private readonly heroBuildRecommendationService:
+      ProductionHeroBuildRecommendationService,
     private readonly heroBuildRecommendationPresentationService:
       HeroBuildRecommendationPresentationService,
     private readonly liveMatchStateService: LiveMatchStateService,
