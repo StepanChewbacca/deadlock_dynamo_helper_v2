@@ -6,7 +6,7 @@ It does not claim that the observed player action was objectively optimal. The t
 
 ## Low-memory execution
 
-The evaluator is designed to run on a small server without loading the full historical match window into RAM.
+The evaluator is designed to run without loading the full historical match window into RAM.
 
 It:
 
@@ -20,19 +20,21 @@ It:
 
 It does not call `RecentMatchesWindowService`, so starting an evaluation does not cause the 10,000-match in-memory window to be loaded.
 
-Default runtime limits:
+The Docker Compose defaults are:
 
 - database batch size: `100` matches
-- RSS safety limit: `1200 MB`
+- RSS safety limit: `2500 MB`
 
-They can be changed with environment variables:
+They can be overridden in `.env`:
 
 ```env
-DEADLOCK_BUILD_EVALUATION_BATCH_SIZE=50
-DEADLOCK_BUILD_EVALUATION_MAX_RSS_MB=1000
+DEADLOCK_BUILD_EVALUATION_BATCH_SIZE=100
+DEADLOCK_BUILD_EVALUATION_MAX_RSS_MB=2500
 ```
 
-For a server with about 2 GB RAM, the defaults leave memory for the API process, operating system, database connections, and temporary query allocations. Lower the batch size when the status endpoint shows RSS approaching the configured limit.
+The RSS limit applies to the entire Node.js API process, not only the evaluator. A server should retain enough free memory for the operating system, database, other containers, and temporary query allocations.
+
+For a server with about 16 GB RAM and several gigabytes available, the Docker Compose defaults are suitable for the full 10,000-match run. Lower the batch size or RSS limit when the status endpoint shows memory pressure or the server hosts other memory-heavy workloads.
 
 The status response includes:
 
@@ -90,7 +92,7 @@ The report also includes:
 
 ## API
 
-Start an evaluation:
+Start a full evaluation:
 
 ```bash
 curl -X POST http://localhost:3000/deadlock/analysis/build-evaluation/start \
