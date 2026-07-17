@@ -13,7 +13,9 @@ import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timelin
 
 const SHADOW_ENABLED_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_ENABLED';
 const SHADOW_SAMPLE_RATE_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE';
+const SHADOW_MAX_IN_FLIGHT_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_MAX_IN_FLIGHT';
 const DEFAULT_SHADOW_SAMPLE_RATE = 0.1;
+const DEFAULT_SHADOW_MAX_IN_FLIGHT = 2;
 
 interface ContextualShadowLog {
   event: 'hero_build_contextual_shadow';
@@ -51,6 +53,13 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     0,
     1,
   );
+  private readonly shadowMaxInFlight = readBoundedIntegerEnvironmentValue(
+    SHADOW_MAX_IN_FLIGHT_ENV,
+    DEFAULT_SHADOW_MAX_IN_FLIGHT,
+    1,
+    32,
+  );
+  private shadowInFlight = 0;
 
   constructor(
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
@@ -79,6 +88,7 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     if (
       !this.shadowEnabled ||
       this.shadowSampleRate <= 0 ||
+      this.shadowInFlight >= this.shadowMaxInFlight ||
       Math.random() >= this.shadowSampleRate ||
       !request.enemyHeroIds ||
       request.enemyHeroIds.length === 0
@@ -86,6 +96,7 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       return;
     }
 
+    this.shadowInFlight += 1;
     const startedAt = Date.now();
     void this.contextualHeroBuildRecommendationService
       .recommend({
@@ -112,6 +123,9 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
         this.logger.warn(
           `Contextual shadow evaluation failed: ${getErrorMessage(error)}`,
         );
+      })
+      .finally(() => {
+        this.shadowInFlight -= 1;
       });
   }
 }
@@ -186,6 +200,19 @@ function readBoundedNumberEnvironmentValue(
 ): number {
   const parsed = Number(process.env[name]);
   if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+    return defaultValue;
+  }
+  return parsed;
+}
+
+function readBoundedIntegerEnvironmentValue(
+  name: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(process.env[name]);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
     return defaultValue;
   }
   return parsed;
