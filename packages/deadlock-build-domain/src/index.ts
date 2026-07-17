@@ -4,3 +4,5 @@ export * from './inventory-reducer';
 export * from './snapshot-normalizer';
 export * from './skill-build';
 export * from './skill-build-path-search';
+export * from './diagnostic-match-parser';
+export * from './diagnostic-baseline-model';
