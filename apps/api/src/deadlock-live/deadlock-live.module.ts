@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalysisOperationsController } from './analysis-operations.controller';
 import { CanonicalBuildSequenceService } from './canonical-build-sequence.service';
 import { CatalogContentService } from './catalog-content.service';
+import { ContextualHeroBuildRecommendationV2Service } from './contextual-hero-build-recommendation-v2.service';
 import { ContextualHeroBuildRecommendationService } from './contextual-hero-build-recommendation.service';
 import { DebugPageController } from './debug-page.controller';
 import { CrawlerRun } from './entities/crawler-run.entity';
@@ -20,6 +21,7 @@ import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
+import { HeroBuildNextActionContextStatisticsService } from './hero-build-next-action-context-statistics.service';
 import { HeroBuildOfflineEvaluationController } from './hero-build-offline-evaluation.controller';
 import { HeroBuildOfflineEvaluationResilientService } from './hero-build-offline-evaluation-resilient.service';
 import { HeroBuildOfflineEvaluationService } from './hero-build-offline-evaluation.service';
@@ -115,12 +117,14 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       useExisting: LazyBuildTransitionAggregationService,
     },
     HeroBuildMatchupStatisticsService,
+    HeroBuildNextActionContextStatisticsService,
     HeroBuildOfflineEvaluationResilientService,
     {
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
     },
     ContextualHeroBuildRecommendationService,
+    ContextualHeroBuildRecommendationV2Service,
     ProductionHeroBuildRecommendationService,
     {
       provide: HeroBuildRecommendationService,
@@ -169,6 +173,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     LiveHeroMatchupSourceService,
     HeroBuildTransitionAggregationService,
     HeroBuildMatchupStatisticsService,
+    HeroBuildNextActionContextStatisticsService,
     HeroBuildOfflineEvaluationService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
