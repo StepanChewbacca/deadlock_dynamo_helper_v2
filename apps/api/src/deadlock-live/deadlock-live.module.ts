@@ -47,6 +47,7 @@ import { LiveInventoryEventNormalizerService } from './live-inventory-event-norm
 import { LiveMatchStateService } from './live-match-state.service';
 import { MatchTimelineNormalizationController } from './match-timeline-normalization.controller';
 import { MatchTimelineNormalizationService } from './match-timeline-normalization.service';
+import { ProductionHeroBuildRecommendationService } from './production-hero-build-recommendation.service';
 import { RawEventLogService } from './raw-event-log.service';
 import { RawMatchMetadataNormalizerService } from './raw-match-metadata-normalizer.service';
 import { RawMatchMetadataService } from './raw-match-metadata.service';
@@ -119,9 +120,11 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
     },
+    ContextualHeroBuildRecommendationService,
+    ProductionHeroBuildRecommendationService,
     {
       provide: HeroBuildRecommendationService,
-      useClass: ContextualHeroBuildRecommendationService,
+      useExisting: ContextualHeroBuildRecommendationService,
     },
     HeroBuildRecommendationOwnershipFilterService,
     LiveHeroBuildRecommendationPresentationService,
