@@ -4,6 +4,49 @@ The offline evaluator measures how well the existing item recommendation graph p
 
 It does not claim that the observed player action was objectively optimal. The target is agreement with held-out historical behavior.
 
+## Low-memory execution
+
+The evaluator is designed to run on a small server without loading the full historical match window into RAM.
+
+It:
+
+- reads match, player, roster, and item rows directly from the database in bounded batches
+- processes one hero at a time
+- keeps only the current hero policy and matchup index in memory
+- creates a fresh bounded prediction cache for each test batch
+- immediately reduces predictions into aggregate metrics
+- stores only the requested number of error examples
+- aborts before the process exceeds a configurable RSS safety limit
+
+It does not call `RecentMatchesWindowService`, so starting an evaluation does not cause the 10,000-match in-memory window to be loaded.
+
+Default runtime limits:
+
+- database batch size: `100` matches
+- RSS safety limit: `1200 MB`
+
+They can be changed with environment variables:
+
+```env
+DEADLOCK_BUILD_EVALUATION_BATCH_SIZE=50
+DEADLOCK_BUILD_EVALUATION_MAX_RSS_MB=1000
+```
+
+For a server with about 2 GB RAM, the defaults leave memory for the API process, operating system, database connections, and temporary query allocations. Lower the batch size when the status endpoint shows RSS approaching the configured limit.
+
+The status response includes:
+
+- `memoryMode: LOW_MEMORY_PER_HERO`
+- `batchSize`
+- `maxRssMb`
+- `currentRssMb`
+- `peakRssMb`
+- `currentHeroId`
+- `processedHeroCount`
+- `totalHeroCount`
+
+The completed report includes the same execution information under `execution`.
+
 ## Data split
 
 Matches are sorted by start time. The older portion is used for training and the newer portion is used only for evaluation.
@@ -12,7 +55,7 @@ The default split is:
 
 - 80% training matches
 - 20% test matches
-- up to 10,000 matches from the current recent-match window
+- up to 10,000 recent matches selected directly from the database
 
 A match ID is never present in both sets.
 
@@ -61,7 +104,7 @@ curl -X POST http://localhost:3000/deadlock/analysis/build-evaluation/start \
 
 The endpoint returns `202 Accepted`. The evaluation runs in the API process without blocking the request.
 
-Check progress:
+Check progress and memory:
 
 ```bash
 curl http://localhost:3000/deadlock/analysis/build-evaluation/status
