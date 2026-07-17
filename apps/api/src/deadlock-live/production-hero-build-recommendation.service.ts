@@ -4,6 +4,7 @@ import {
   ContextualHeroBuildRecommendationService,
   HeroBuildContextualRecommendationRequest,
 } from './contextual-hero-build-recommendation.service';
+import { canonicalHeroId } from './hero-id-aliases';
 import {
   HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
@@ -20,6 +21,7 @@ const DEFAULT_SHADOW_MAX_IN_FLIGHT = 2;
 interface ContextualShadowLog {
   event: 'hero_build_contextual_shadow';
   heroId: number;
+  canonicalHeroId: number;
   gameTimeS: number;
   enemyHeroIds: number[];
   baselineMode: HeroBuildRecommendationResponse['mode'];
@@ -76,13 +78,24 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   override async recommend(
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<HeroBuildRecommendationResponse> {
-    const baseline = await super.recommend(request);
-    this.scheduleContextualShadow(request, baseline);
+    const requestedHeroId = request.heroId;
+    const canonicalRequest = createCanonicalRequest(request);
+    const canonicalBaseline = await super.recommend(canonicalRequest);
+    const baseline = {
+      ...canonicalBaseline,
+      heroId: requestedHeroId,
+    };
+    this.scheduleContextualShadow(
+      canonicalRequest,
+      requestedHeroId,
+      baseline,
+    );
     return baseline;
   }
 
   private scheduleContextualShadow(
     request: HeroBuildContextualRecommendationRequest,
+    requestedHeroId: number,
     baseline: HeroBuildRecommendationResponse,
   ): void {
     if (
@@ -107,6 +120,7 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       .then((contextual) => {
         const log = createContextualShadowLog(
           request,
+          requestedHeroId,
           baseline,
           contextual,
           Date.now() - startedAt,
@@ -130,8 +144,20 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   }
 }
 
+function createCanonicalRequest(
+  request: HeroBuildContextualRecommendationRequest,
+): HeroBuildContextualRecommendationRequest {
+  return {
+    ...request,
+    heroId: canonicalHeroId(request.heroId),
+    itemIds: [...request.itemIds],
+    enemyHeroIds: request.enemyHeroIds ? [...request.enemyHeroIds] : undefined,
+  };
+}
+
 function createContextualShadowLog(
   request: HeroBuildContextualRecommendationRequest,
+  requestedHeroId: number,
   baseline: HeroBuildRecommendationResponse,
   contextual: ContextualHeroBuildRecommendationResponse,
   elapsedMs: number,
@@ -149,7 +175,8 @@ function createContextualShadowLog(
 
   return {
     event: 'hero_build_contextual_shadow',
-    heroId: request.heroId,
+    heroId: requestedHeroId,
+    canonicalHeroId: request.heroId,
     gameTimeS: request.gameTimeS,
     enemyHeroIds: [...(request.enemyHeroIds ?? [])],
     baselineMode: baseline.mode,
