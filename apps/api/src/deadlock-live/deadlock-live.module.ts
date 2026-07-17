@@ -21,6 +21,7 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
 import { HeroBuildOfflineEvaluationController } from './hero-build-offline-evaluation.controller';
+import { HeroBuildOfflineEvaluationLowMemoryService } from './hero-build-offline-evaluation-low-memory.service';
 import { HeroBuildOfflineEvaluationService } from './hero-build-offline-evaluation.service';
 import { HeroBuildRecommendationController } from './hero-build-recommendation.controller';
 import { HeroBuildRecommendationOwnershipFilterService } from './hero-build-recommendation-ownership-filter.service';
@@ -113,7 +114,11 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
       useExisting: LazyBuildTransitionAggregationService,
     },
     HeroBuildMatchupStatisticsService,
-    HeroBuildOfflineEvaluationService,
+    HeroBuildOfflineEvaluationLowMemoryService,
+    {
+      provide: HeroBuildOfflineEvaluationService,
+      useExisting: HeroBuildOfflineEvaluationLowMemoryService,
+    },
     {
       provide: HeroBuildRecommendationService,
       useClass: ContextualHeroBuildRecommendationService,
