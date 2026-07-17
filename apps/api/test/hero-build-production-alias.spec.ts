@@ -1,4 +1,5 @@
-import type { ContextualHeroBuildRecommendationService } from '../src/deadlock-live/contextual-hero-build-recommendation.service';
+import type { ContextualHeroBuildRecommendationV2Service } from '../src/deadlock-live/contextual-hero-build-recommendation-v2.service';
+import type { HeroBuildRecommendationResponse } from '../src/deadlock-live/hero-build-recommendation.service';
 import type {
   HeroBuildPolicy,
   HeroBuildTransitionAggregationService,
@@ -46,11 +47,13 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
         getComponentItemIds: jest.fn(() => []),
       } as unknown as RecipeAwareTimelineReconciliationService;
       const contextualService = {
-        recommend: jest.fn(async (request: { heroId: number }) => ({
-          ...createContextualResponse(canonicalHeroId),
-          heroId: request.heroId,
-        })),
-      } as unknown as ContextualHeroBuildRecommendationService;
+        rerank: jest.fn(
+          async (
+            request: { heroId: number; enemyHeroIds?: number[] },
+            baseline: HeroBuildRecommendationResponse,
+          ) => createContextualResponse(request, baseline),
+        ),
+      } as unknown as ContextualHeroBuildRecommendationV2Service;
       const service = new ProductionHeroBuildRecommendationService(
         transitionService,
         recipeService,
@@ -70,8 +73,9 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
       expect(response.mode).toBe('EXACT');
       expect(response.action.actionKey).toBe('BUY:100');
       expect(transitionService.getHeroPolicy).toHaveBeenCalledWith(canonicalHeroId);
-      expect(contextualService.recommend).toHaveBeenCalledWith(
+      expect(contextualService.rerank).toHaveBeenCalledWith(
         expect.objectContaining({ heroId: canonicalHeroId }),
+        expect.objectContaining({ heroId: requestedHeroId }),
       );
     },
   );
@@ -89,8 +93,8 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
       getComponentItemIds: jest.fn(() => []),
     } as unknown as RecipeAwareTimelineReconciliationService;
     const contextualService = {
-      recommend: jest.fn(),
-    } as unknown as ContextualHeroBuildRecommendationService;
+      rerank: jest.fn(),
+    } as unknown as ContextualHeroBuildRecommendationV2Service;
     const service = new ProductionHeroBuildRecommendationService(
       transitionService,
       recipeService,
@@ -107,7 +111,7 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
 
     expect(response.heroId).toBe(2);
     expect(transitionService.getHeroPolicy).toHaveBeenCalledWith(2);
-    expect(contextualService.recommend).not.toHaveBeenCalled();
+    expect(contextualService.rerank).not.toHaveBeenCalled();
   });
 });
 
@@ -148,55 +152,45 @@ function createPolicy(heroId: number): HeroBuildPolicy {
   };
 }
 
-function createContextualResponse(heroId: number) {
+function createContextualResponse(
+  request: { heroId: number; enemyHeroIds?: number[] },
+  baseline: HeroBuildRecommendationResponse,
+) {
   const action = {
-    type: 'BUY' as const,
-    sourceActionType: 'BUY' as const,
-    itemId: 100,
-    actionKey: 'BUY:100',
-    historicalCount: 10,
-    historicalProbability: 1,
-    averageGameTimeS: 60,
-    matchedStateKey: 'EMPTY',
-    matchedStateObservationCount: 10,
-    stateDistance: 0,
-    missingItemCount: 0,
-    extraItemCount: 0,
-    matchedBySubset: true,
-    predictedStateKey: '100x1',
-    score: 1,
-    confidence: 1,
-    baseScore: 1,
-    contextualScore: 1,
+    ...baseline.action,
+    baseScore: baseline.action.score,
+    contextualScore: baseline.action.score,
     baseRank: 1,
     contextualRank: 1,
-    wasInBaseBuild: true,
-    isSituational: false,
-    wasPromotedByMatchup: false,
-    wasInsertedByMatchup: false,
-    matchupObservationCount: 0,
-    matchupModelVersion: 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1' as const,
-    matchupEvidence: [],
+    contextualLogitBonus: 0,
+    rosterInteractionLogOdds: 0,
+    observedEnemyCount: request.enemyHeroIds?.length ?? 0,
+    eligibleEnemyCount: 0,
+    wasPromotedByContext: false,
+    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2' as const,
+    configId: 'test',
+    enemySignals: [],
+    contextEvidence: [],
   };
-
   return {
-    mode: 'EXACT' as const,
-    heroId,
-    requestedStateKey: 'EMPTY',
-    gameTimeS: 60,
-    matchedStateKey: 'EMPTY',
-    stateDistance: 0,
-    missingItemCount: 0,
-    extraItemCount: 0,
-    matchedBySubset: true,
-    observationCount: 10,
-    candidateStateCount: 1,
-    enemyHeroIds: [3, 4, 5, 6, 7],
-    matchupModelVersion: 'GRAPH_EDGE_INTERACTION_ODDS_RATIO_V1' as const,
+    ...baseline,
+    heroId: request.heroId,
+    enemyHeroIds: [...(request.enemyHeroIds ?? [])],
+    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2' as const,
+    config: {
+      id: 'test',
+      candidateLimit: 5,
+      minimumActionObservations: 1,
+      minimumContextObservations: 1,
+      shrinkageStrength: 1,
+      lambda: 0,
+      maximumLogitBonus: 0,
+      maximumPromotionDistance: 1,
+    },
     evaluatedCandidateCount: 1,
-    situationalCandidateCount: 0,
-    promotedSituationalCandidateCount: 0,
-    insertedSituationalCandidateCount: 0,
+    promotedCandidateCount: 0,
+    changedTop1: false,
+    changedTop3: false,
     action,
     alternatives: [],
   };
