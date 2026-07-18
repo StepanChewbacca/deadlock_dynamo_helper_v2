@@ -9,7 +9,7 @@ import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.e
 import { canonicalHeroId } from './hero-id-aliases';
 
 export const RECENT_MATCH_WINDOW_DAYS = 14;
-export const RECENT_MATCH_TARGET_COUNT = 10_000;
+export const RECENT_MATCH_TARGET_COUNT = 13_000;
 export const RECENT_MATCH_REFRESH_INTERVAL_MS = 5 * 60_000;
 export const RECENT_MATCH_QUERY_BATCH_SIZE = 500;
 
