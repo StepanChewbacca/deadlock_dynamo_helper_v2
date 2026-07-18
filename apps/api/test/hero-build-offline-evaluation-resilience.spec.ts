@@ -179,13 +179,18 @@ function createEmptyComparison() {
 async function waitForEvaluation(
   service: HeroBuildOfflineEvaluationResilientService,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 3_000;
+
+  while (Date.now() < deadline) {
     if (service.getStatus().state !== 'RUNNING') {
       return;
     }
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error('Resilient offline evaluation did not complete in time.');
+
+  throw new Error(
+    `Resilient offline evaluation did not complete in time. Current state: ${service.getStatus().state}`,
+  );
 }
 
 function restoreEnvironmentValue(name: string, value: string | undefined): void {
