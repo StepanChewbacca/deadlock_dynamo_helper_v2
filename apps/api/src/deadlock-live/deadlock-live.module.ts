@@ -22,6 +22,9 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildMatchupStatisticsService } from './hero-build-matchup-statistics.service';
 import { HeroBuildNextActionContextStatisticsService } from './hero-build-next-action-context-statistics.service';
+import { HeroBuildOfflineEvaluationDataLoaderService } from './hero-build-offline-evaluation-data-loader.service';
+import { HeroBuildOfflineEvaluationV2Controller } from './hero-build-offline-evaluation-v2.controller';
+import { HeroBuildOfflineEvaluationV2ResilientService } from './hero-build-offline-evaluation-v2-resilient.service';
 import { HeroBuildOfflineEvaluationController } from './hero-build-offline-evaluation.controller';
 import { HeroBuildOfflineEvaluationResilientService } from './hero-build-offline-evaluation-resilient.service';
 import { HeroBuildOfflineEvaluationService } from './hero-build-offline-evaluation.service';
@@ -98,6 +101,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildTransitionAggregationController,
     HeroBuildRecommendationController,
     HeroBuildOfflineEvaluationController,
+    HeroBuildOfflineEvaluationV2Controller,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -118,6 +122,8 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     },
     HeroBuildMatchupStatisticsService,
     HeroBuildNextActionContextStatisticsService,
+    HeroBuildOfflineEvaluationDataLoaderService,
+    HeroBuildOfflineEvaluationV2ResilientService,
     HeroBuildOfflineEvaluationResilientService,
     {
       provide: HeroBuildOfflineEvaluationService,
@@ -174,6 +180,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildTransitionAggregationService,
     HeroBuildMatchupStatisticsService,
     HeroBuildNextActionContextStatisticsService,
+    HeroBuildOfflineEvaluationV2ResilientService,
     HeroBuildOfflineEvaluationService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
