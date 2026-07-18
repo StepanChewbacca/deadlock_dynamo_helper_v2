@@ -124,7 +124,7 @@ describe('offline evaluation V2 runtime', () => {
       runMode: 'VALIDATION_ONLY',
       trainFraction: 0.7,
       validationFraction: 0.15,
-      maxMatches: 10_000,
+      maxMatches: 13_000,
       changedPredictionLimit: 100,
       bootstrapIterations: 2_000,
       bootstrapSeed: 20_260_717,
