@@ -13,11 +13,11 @@ import {
 } from '../src/deadlock-live/recent-matches-window.service';
 
 describe('recent matches window', () => {
-  it('uses an exact rolling fourteen-day cutoff capped at 10,000 matches', () => {
+  it('uses an exact rolling fourteen-day cutoff capped at 13,000 matches', () => {
     const now = new Date('2026-07-12T12:00:00.000Z');
 
     expect(RECENT_MATCH_WINDOW_DAYS).toBe(14);
-    expect(RECENT_MATCH_TARGET_COUNT).toBe(10_000);
+    expect(RECENT_MATCH_TARGET_COUNT).toBe(13_000);
     expect(RECENT_MATCH_REFRESH_INTERVAL_MS).toBe(300_000);
     expect(getRecentMatchCutoff(now).toISOString()).toBe('2026-06-28T12:00:00.000Z');
   });
