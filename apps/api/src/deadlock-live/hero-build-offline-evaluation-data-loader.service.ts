@@ -5,6 +5,7 @@ import {
   CanonicalBuildSequenceService,
   CanonicalPlayerBuildSequence,
 } from './canonical-build-sequence.service';
+import { Hero } from './entities/hero.entity';
 import { MatchPlayerItem } from './entities/match-player-item.entity';
 import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
@@ -67,6 +68,8 @@ export class HeroBuildOfflineEvaluationDataLoaderService {
     private readonly matchPlayerRepository: Repository<MatchPlayer>,
     @InjectRepository(MatchPlayerItem)
     private readonly matchPlayerItemRepository: Repository<MatchPlayerItem>,
+    @InjectRepository(Hero)
+    private readonly heroRepository: Repository<Hero>,
     private readonly matchTimelineNormalizationService:
       MatchTimelineNormalizationService,
     private readonly inventoryTimelineReplayService:
@@ -111,34 +114,22 @@ export class HeroBuildOfflineEvaluationDataLoaderService {
   }
 
   async collectHeroIds(
-    descriptors: readonly HeroBuildOfflineEvaluationMatchDescriptor[],
-    batchSize: number,
+    _descriptors: readonly HeroBuildOfflineEvaluationMatchDescriptor[],
+    _batchSize: number,
   ): Promise<number[]> {
-    const heroIds = new Set<number>();
-    for (const [index, batch] of chunkValues(
-      descriptors,
-      batchSize,
-    ).entries()) {
-      const players = await this.withDatabaseRetry(
-        `collecting hero ids, batch ${index + 1}`,
-        () =>
-          this.matchPlayerRepository.find({
-            where: {
-              matchId: In(
-                batch.map((descriptor) => descriptor.matchId),
-              ),
-            },
-          }),
-      );
-      for (const player of players) {
-        const heroId = Number(player.heroId);
-        if (Number.isSafeInteger(heroId) && heroId > 0) {
-          heroIds.add(heroId);
-        }
-      }
-      await yieldToEventLoop();
-    }
-    return [...heroIds].sort((left, right) => left - right);
+    const heroes = await this.withDatabaseRetry(
+      'loading the evaluation hero catalog',
+      () => this.heroRepository.find({ order: { heroId: 'ASC' } }),
+    );
+    return [
+      ...new Set(
+        heroes
+          .map((hero) => Number(hero.heroId))
+          .filter(
+            (heroId) => Number.isSafeInteger(heroId) && heroId > 0,
+          ),
+      ),
+    ].sort((left, right) => left - right);
   }
 
   async loadHeroBatch(
