@@ -1,0 +1,52 @@
+name: Patch evaluation V2 to 13k
+
+on:
+  push:
+    branches:
+      - agent/evaluation-v2-13k-matches
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/evaluation-v2-13k-matches
+          fetch-depth: 0
+      - name: Update evaluator limits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service_path = Path('apps/api/src/deadlock-live/hero-build-offline-evaluation-v2-resilient.service.ts')
+          service = service_path.read_text()
+          replacements = {
+              'export const HERO_BUILD_OFFLINE_EVALUATION_V2_DEFAULT_MAX_MATCHES = 10_000;': 'export const HERO_BUILD_OFFLINE_EVALUATION_V2_DEFAULT_MAX_MATCHES = 13_000;',
+              'export const HERO_BUILD_OFFLINE_EVALUATION_V2_MAX_MATCHES = 10_000;': 'export const HERO_BUILD_OFFLINE_EVALUATION_V2_MAX_MATCHES = 13_000;',
+          }
+          for old, new in replacements.items():
+              if service.count(old) != 1:
+                  raise RuntimeError(f'Expected exactly one occurrence of: {old}')
+              service = service.replace(old, new)
+          service_path.write_text(service)
+
+          test_path = Path('apps/api/test/hero-build-offline-evaluation-v2-runtime.spec.ts')
+          test = test_path.read_text()
+          old = '      maxMatches: 10_000,'
+          new = '      maxMatches: 13_000,'
+          if test.count(old) != 1:
+              raise RuntimeError(f'Expected exactly one occurrence of: {old}')
+          test_path.write_text(test.replace(old, new))
+
+          Path('.github/workflows/patch-evaluation-v2-13k.yml').unlink()
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/api/src/deadlock-live/hero-build-offline-evaluation-v2-resilient.service.ts apps/api/test/hero-build-offline-evaluation-v2-runtime.spec.ts .github/workflows/patch-evaluation-v2-13k.yml
+          git commit -m "chore: raise evaluator v2 match limit to 13k"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
