@@ -30,4 +30,8 @@ export class LazyRecentMatchesWindowService extends RecentMatchesWindowService {
   override onModuleInit(): void {
     // The full historical window is loaded lazily by situational matchup warmup.
   }
+
+  override refreshOnInterval(): void {
+    // Disable background full-window refreshes for the lazy variant.
+  }
 }

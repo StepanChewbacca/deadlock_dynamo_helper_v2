@@ -22,8 +22,13 @@ import {
 } from './recent-matches-window.service';
 
 const API_BASE_URL = 'https://api.deadlock-api.com';
-const REQUEST_DELAY_MS = 2_000;
-const RATE_LIMIT_WAIT_MS = 60_000;
+const MATCH_LIST_DELAY_WITH_KEY_MS = 6_500;
+const MATCH_LIST_DELAY_WITHOUT_KEY_MS = 6_500;
+const MATCH_DETAILS_DELAY_WITH_KEY_MS = 11_000;
+const MATCH_DETAILS_DELAY_WITHOUT_KEY_MS = 1_250_000;
+const MATCH_LIST_RATE_LIMIT_WAIT_MS = 12_000;
+const MATCH_DETAILS_RATE_LIMIT_WAIT_MS = 20_000;
+const RATE_LIMIT_MAX_WAIT_MS = 3 * 60_000;
 const RETENTION_DELETE_BATCH_SIZE = 500;
 
 export const RECENT_MATCH_CRAWL_CRON = '0 0 */4 * * *';
@@ -57,6 +62,11 @@ interface ParsedSkillItem {
   gameTimeS: number;
 }
 
+interface CrawlBatchResult {
+  discoveredMatches: number;
+  processedMatches: number;
+}
+
 export function calculateMissingRecentMatchCount(currentMatchCount: number): number {
   return Math.max(0, RECENT_MATCH_TARGET_COUNT - currentMatchCount);
 }
@@ -66,6 +76,7 @@ export class RecentMatchCrawlerService implements OnModuleInit {
   private readonly logger = new Logger(RecentMatchCrawlerService.name);
   private readonly crawlerType = 'all_heroes';
   private readonly itemsById = new Map<number, ItemReference>();
+  private readonly hasApiKey = Boolean(process.env.DEADLOCK_API_KEY?.trim());
 
   private isCrawling = false;
   private activeRunId?: number;
@@ -141,6 +152,41 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     await this.startCrawling();
   }
 
+  private getMatchListDelayMs(): number {
+    return this.hasApiKey
+      ? MATCH_LIST_DELAY_WITH_KEY_MS
+      : MATCH_LIST_DELAY_WITHOUT_KEY_MS;
+  }
+
+  private getMatchDetailsDelayMs(): number {
+    return this.hasApiKey
+      ? MATCH_DETAILS_DELAY_WITH_KEY_MS
+      : MATCH_DETAILS_DELAY_WITHOUT_KEY_MS;
+  }
+
+  private getRateLimitWaitMs(scope: 'list' | 'details', attempt: number): number {
+    const baseWaitMs =
+      scope === 'list' ? MATCH_LIST_RATE_LIMIT_WAIT_MS : MATCH_DETAILS_RATE_LIMIT_WAIT_MS;
+    return Math.min(
+      RATE_LIMIT_MAX_WAIT_MS,
+      baseWaitMs * 2 ** Math.max(0, attempt - 1),
+    );
+  }
+
+  private async waitForRateLimit(
+    scope: 'list' | 'details',
+    attempt: number,
+    error?: unknown,
+    matchId?: number,
+  ): Promise<void> {
+    const waitMs =
+      getRetryAfterWaitMs(error) ?? this.getRateLimitWaitMs(scope, attempt);
+    const scopeLabel = scope === 'list' ? 'match list' : `match ${matchId ?? 'details'}`;
+    this.progress.status = `Rate limited on ${scopeLabel}, waiting ${Math.round(waitMs / 1000)} seconds...`;
+    await this.syncCrawlerState(matchId);
+    await this.sleep(waitMs);
+  }
+
   private async runCrawl(): Promise<void> {
     try {
       this.progress.status = `Applying ${RECENT_MATCH_WINDOW_DAYS}-day retention...`;
@@ -170,57 +216,22 @@ export class RecentMatchCrawlerService implements OnModuleInit {
           : 'The recent match window is already full.';
       await this.syncCrawlerState();
 
-      const newMatchIds =
+      this.progress.total = missingMatchCount;
+      await this.updateCrawlerRun({
+        targetMatches: missingMatchCount,
+        discoveredMatches: 0,
+        processedMatches: 0,
+      });
+      await this.syncCrawlerState();
+
+      const crawlBatchResult =
         missingMatchCount > 0
-          ? await this.fetchCandidateMatchIds(
+          ? await this.crawlCandidateMatches(
               processedMatchIds,
               missingMatchCount,
               cutoff,
             )
-          : [];
-
-      this.progress.total = newMatchIds.length;
-      await this.updateCrawlerRun({
-        targetMatches: missingMatchCount,
-        discoveredMatches: newMatchIds.length,
-      });
-      await this.syncCrawlerState();
-
-      for (let index = 0; index < newMatchIds.length; index += 1) {
-        const matchId = newMatchIds[index];
-        this.progress.current = index + 1;
-        this.progress.status =
-          `Processing match ${index + 1}/${newMatchIds.length}: ${matchId}`;
-        await this.updateCrawlerRun({
-          processedMatches: index,
-          currentMatchId: matchId,
-          statusMessage: this.progress.status,
-        });
-        await this.syncCrawlerState(matchId);
-
-        try {
-          await this.processMatch(matchId, cutoff);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.logger.warn(`Failed to process match ${matchId}: ${message}`);
-
-          if (getHttpStatus(error) === 429) {
-            this.progress.status = 'Rate limited, waiting 60 seconds...';
-            await this.syncCrawlerState(matchId);
-            await this.sleep(RATE_LIMIT_WAIT_MS);
-
-            try {
-              await this.processMatch(matchId, cutoff);
-            } catch (retryError) {
-              const retryMessage =
-                retryError instanceof Error ? retryError.message : String(retryError);
-              this.logger.warn(`Retry failed for match ${matchId}: ${retryMessage}`);
-            }
-          }
-        }
-
-        await this.sleep(REQUEST_DELAY_MS);
-      }
+          : { discoveredMatches: 0, processedMatches: 0 };
 
       this.progress.status = 'Applying final two-week retention...';
       await this.syncCrawlerState();
@@ -234,7 +245,7 @@ export class RecentMatchCrawlerService implements OnModuleInit {
           `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`
         : `Crawl finished with partial window: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
           `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days. ` +
-          `The source returned ${newMatchIds.length} new candidates.`;
+          `The source returned ${crawlBatchResult.discoveredMatches} new candidates.`;
       this.logger.log(
         `${this.progress.status} Removed ${removedAfterCrawl} matches after processing.`,
       );
@@ -254,24 +265,25 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     }
   }
 
-  private async fetchCandidateMatchIds(
+  private async crawlCandidateMatches(
     processedMatchIds: ReadonlySet<number>,
     targetCount: number,
     cutoff: Date,
-  ): Promise<number[]> {
-    const newMatchIds: number[] = [];
+  ): Promise<CrawlBatchResult> {
     const seenMatchIds = new Set<number>();
     let maxMatchId: number | undefined;
+    let rateLimitAttempts = 0;
+    let discoveredMatches = 0;
+    let processedMatches = 0;
 
-    while (newMatchIds.length < targetCount) {
+    while (discoveredMatches < targetCount) {
       try {
         const response = await axios.get(`${API_BASE_URL}/v1/matches/metadata`, {
           ...getDeadlockApiRequestConfig(),
           params: {
-            min_unix_timestamp: Math.floor(cutoff.getTime() / 1000),
             order_by: 'match_id',
             order_direction: 'desc',
-            limit: Math.min(1_000, targetCount - newMatchIds.length),
+            limit: Math.min(1_000, targetCount - discoveredMatches),
             ...(maxMatchId !== undefined ? { max_match_id: maxMatchId } : {}),
           },
         });
@@ -281,22 +293,34 @@ export class RecentMatchCrawlerService implements OnModuleInit {
         }
 
         let oldestMatchId: number | undefined;
+        let pageHasRecentMatches = false;
+        const pageMatchIds: number[] = [];
         for (const candidate of matches) {
           const matchId = toPositiveSafeInteger(candidate?.match_id);
           if (matchId === undefined) {
             continue;
           }
 
+          const candidateStartTime = parseMatchListStartTime(candidate?.start_time);
+          if (candidateStartTime && candidateStartTime >= cutoff) {
+            pageHasRecentMatches = true;
+          }
+
           oldestMatchId =
             oldestMatchId === undefined ? matchId : Math.min(oldestMatchId, matchId);
+
+          if (candidateStartTime && candidateStartTime < cutoff) {
+            continue;
+          }
 
           if (processedMatchIds.has(matchId) || seenMatchIds.has(matchId)) {
             continue;
           }
 
           seenMatchIds.add(matchId);
-          newMatchIds.push(matchId);
-          if (newMatchIds.length >= targetCount) {
+          pageMatchIds.push(matchId);
+          discoveredMatches += 1;
+          if (discoveredMatches >= targetCount) {
             break;
           }
         }
@@ -314,22 +338,99 @@ export class RecentMatchCrawlerService implements OnModuleInit {
         }
 
         maxMatchId = nextMaxMatchId;
-        await this.sleep(REQUEST_DELAY_MS);
+        rateLimitAttempts = 0;
+        await this.updateCrawlerRun({
+          discoveredMatches,
+          processedMatches,
+          currentMatchId: null,
+          statusMessage:
+            processedMatches > 0
+              ? `Processing matches ${processedMatches}/${targetCount} ` +
+                `(discovered ${discoveredMatches}/${targetCount})`
+              : `Discovering matches ${discoveredMatches}/${targetCount}...`,
+        });
+        if (pageMatchIds.length > 0) {
+          processedMatches = await this.processDiscoveredMatchIds(
+            pageMatchIds,
+            processedMatches,
+            targetCount,
+            cutoff,
+          );
+        }
+        if (!pageHasRecentMatches) {
+          break;
+        }
+        await this.sleep(this.getMatchListDelayMs());
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.warn(
           `Failed to fetch match list before ${maxMatchId ?? 'latest'}: ${message}`,
         );
         if (getHttpStatus(error) === 429) {
-          this.progress.status = 'Rate limited, waiting 60 seconds...';
-          await this.sleep(RATE_LIMIT_WAIT_MS);
+          rateLimitAttempts += 1;
+          await this.waitForRateLimit('list', rateLimitAttempts, error);
           continue;
         }
         break;
       }
     }
 
-    return newMatchIds;
+    return {
+      discoveredMatches,
+      processedMatches,
+    };
+  }
+
+  private async processDiscoveredMatchIds(
+    matchIds: readonly number[],
+    processedMatches: number,
+    targetCount: number,
+    cutoff: Date,
+  ): Promise<number> {
+    let nextProcessedMatches = processedMatches;
+
+    for (const matchId of matchIds) {
+      nextProcessedMatches += 1;
+      this.progress.current = nextProcessedMatches;
+      this.progress.status =
+        `Processing match ${nextProcessedMatches}/${targetCount}: ${matchId}`;
+      await this.updateCrawlerRun({
+        processedMatches: nextProcessedMatches,
+        currentMatchId: matchId,
+        statusMessage: this.progress.status,
+      });
+      await this.syncCrawlerState(matchId);
+
+      try {
+        await this.processMatchWithRetry(matchId, cutoff);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Failed to process match ${matchId}: ${message}`);
+      }
+
+      await this.sleep(this.getMatchDetailsDelayMs());
+    }
+
+    return nextProcessedMatches;
+  }
+
+  private async processMatchWithRetry(matchId: number, cutoff: Date): Promise<boolean> {
+    let attempt = 0;
+
+    while (true) {
+      try {
+        return await this.processMatch(matchId, cutoff);
+      } catch (error) {
+        if (getHttpStatus(error) !== 429) {
+          throw error;
+        }
+
+        attempt += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Rate limited while fetching match ${matchId}: ${message}`);
+        await this.waitForRateLimit('details', attempt, error, matchId);
+      }
+    }
   }
 
   private async processMatch(matchId: number, cutoff: Date): Promise<boolean> {
@@ -654,4 +755,89 @@ function getHttpStatus(error: unknown): number | undefined {
   const response = (error as { response?: { status?: unknown } }).response;
   const status = Number(response?.status);
   return Number.isSafeInteger(status) ? status : undefined;
+}
+
+function getRetryAfterWaitMs(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  const response = (
+    error as {
+      response?: {
+        headers?: Record<string, unknown> & {
+          get?: (name: string) => unknown;
+        };
+      };
+    }
+  ).response;
+  const headers = response?.headers;
+  const retryAfterValue = getHeaderValue(headers, 'retry-after');
+  const limitValue = Number(getHeaderValue(headers, 'ratelimit-limit'));
+  const periodValue = Number(getHeaderValue(headers, 'ratelimit-period'));
+  const minimumRateWindowWaitMs =
+    Number.isFinite(limitValue) &&
+    limitValue > 0 &&
+    Number.isFinite(periodValue) &&
+    periodValue > 0
+      ? Math.ceil((periodValue * 1_000) / limitValue)
+      : undefined;
+  if (typeof retryAfterValue !== 'string' && typeof retryAfterValue !== 'number') {
+    const resetValue = getHeaderValue(headers, 'ratelimit-reset');
+    const resetSeconds = Number(resetValue);
+    if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+      return Math.max(
+        1_000,
+        minimumRateWindowWaitMs ?? 0,
+        Math.ceil(resetSeconds * 1_000),
+      );
+    }
+    return minimumRateWindowWaitMs;
+  }
+
+  const seconds = Number(retryAfterValue);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(
+      1_000,
+      minimumRateWindowWaitMs ?? 0,
+      Math.ceil(seconds * 1_000),
+    );
+  }
+
+  const dateMs = Date.parse(String(retryAfterValue));
+  if (Number.isFinite(dateMs)) {
+    return Math.max(1_000, minimumRateWindowWaitMs ?? 0, dateMs - Date.now());
+  }
+
+  return minimumRateWindowWaitMs;
+}
+
+function getHeaderValue(
+  headers: (Record<string, unknown> & { get?: (name: string) => unknown }) | undefined,
+  name: string,
+): unknown {
+  if (!headers) {
+    return undefined;
+  }
+
+  const directValue = headers[name];
+  if (directValue !== undefined) {
+    return Array.isArray(directValue) ? directValue[0] : directValue;
+  }
+
+  if (typeof headers.get === 'function') {
+    const getterValue = headers.get(name);
+    return Array.isArray(getterValue) ? getterValue[0] : getterValue;
+  }
+
+  return undefined;
+}
+
+function parseMatchListStartTime(value: unknown): Date | undefined {
+  if (typeof value !== 'string' || value.length === 0) {
+    return undefined;
+  }
+
+  const parsed = new Date(`${value}Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
 }
