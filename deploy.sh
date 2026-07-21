@@ -12,9 +12,9 @@ rsync -avz --delete \
   --exclude 'storage' \
   --exclude '*.hprof' \
   --exclude 'apps/overwolf-client/dist' \
-  "$SCRIPT_DIR/" my-vps:~/deadlock/
+  "$SCRIPT_DIR/" my-vps:~/apps/deadlock_dynamo_helper/
 
 echo "=== Triggering Docker Compose build & start on my-vps... ==="
-ssh my-vps "cd ~/deadlock && docker compose up --build -d"
+ssh my-vps "cd ~/apps/deadlock_dynamo_helper && docker compose up --build -d"
 
 echo "=== Deploy finished successfully! ==="

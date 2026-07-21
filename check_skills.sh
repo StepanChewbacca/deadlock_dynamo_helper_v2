@@ -1,6 +1,6 @@
 #!/bin/bash
-ssh -i ~/.ssh/vps_oracle.key opc@141.253.104.108 << 'EOF'
-docker exec -i aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds << 'SQL'
+ssh my-vps << 'EOF'
+sudo docker exec -i aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds << 'SQL'
 SELECT mp.hero_id, mpsu.ability_id, mpsu.upgrade_order
 FROM match_player_skill_upgrades mpsu
 JOIN match_players mp ON mpsu.match_player_id = mp.id
