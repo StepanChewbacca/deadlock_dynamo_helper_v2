@@ -1,0 +1,32 @@
+name: Apply Contextual V3 final-test safety fixes
+
+on:
+  push:
+    branches:
+      - agent/contextual-v3-future-final-test
+    paths:
+      - .github/workflows/apply-contextual-v3-final-test-safety-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/contextual-v3-future-final-test
+          fetch-depth: 0
+      - name: Apply fixes
+        run: python3 scripts/apply-contextual-v3-final-test-safety-fixes.py
+      - name: Validate diff
+        run: git diff --check
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/deadlock-live/hero-build-contextual-v3-final-test.service.ts
+          git commit -m "fix: harden Contextual V3 future final test"
+          git push origin HEAD:agent/contextual-v3-future-final-test
