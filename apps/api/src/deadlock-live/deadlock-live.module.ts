@@ -20,6 +20,8 @@ import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.e
 import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
+import { HeroBuildContextualV3TrainingController } from './hero-build-contextual-v3-training.controller';
+import { HeroBuildContextualV3TrainingService } from './hero-build-contextual-v3-training.service';
 import { HeroBuildDecisionDatasetV3CoordinatorService } from './hero-build-decision-dataset-v3-coordinator.service';
 import { HeroBuildDecisionDatasetV3Controller } from './hero-build-decision-dataset-v3.controller';
 import { HeroBuildDecisionDatasetV3Service } from './hero-build-decision-dataset-v3.service';
@@ -106,6 +108,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildOfflineEvaluationController,
     HeroBuildOfflineEvaluationV2Controller,
     HeroBuildDecisionDatasetV3Controller,
+    HeroBuildContextualV3TrainingController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -131,6 +134,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildOfflineEvaluationResilientService,
     HeroBuildDecisionDatasetV3Service,
     HeroBuildDecisionDatasetV3CoordinatorService,
+    HeroBuildContextualV3TrainingService,
     {
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
@@ -189,6 +193,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildOfflineEvaluationV2ResilientService,
     HeroBuildOfflineEvaluationService,
     HeroBuildDecisionDatasetV3CoordinatorService,
+    HeroBuildContextualV3TrainingService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
