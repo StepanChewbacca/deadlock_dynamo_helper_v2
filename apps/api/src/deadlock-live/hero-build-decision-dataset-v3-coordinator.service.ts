@@ -3,6 +3,7 @@ import {
   existsSync,
   readFileSync,
   renameSync,
+  statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -21,6 +22,7 @@ const STORAGE_DIRECTORY_ENV =
 interface FinalizationCheckpointShape {
   nextHeroIndex?: unknown;
   heroIds?: unknown;
+  datasetByteLength?: unknown;
 }
 
 @Injectable()
@@ -48,7 +50,10 @@ export class HeroBuildDecisionDatasetV3CoordinatorService {
   async start(
     request: HeroBuildDecisionDatasetV3StartRequest = {},
   ): Promise<HeroBuildDecisionDatasetV3Status> {
-    if (this.starting || this.datasetService.getStatus().state === 'RUNNING') {
+    if (
+      this.starting ||
+      this.datasetService.getStatus().state === 'RUNNING'
+    ) {
       throw new Error(
         'Contextual V3 decision dataset extraction is already running.',
       );
@@ -63,10 +68,9 @@ export class HeroBuildDecisionDatasetV3CoordinatorService {
   }
 }
 
-export function recoverInterruptedFinalization(): boolean {
-  const storageDirectory =
-    process.env[STORAGE_DIRECTORY_ENV]?.trim() ||
-    DEFAULT_STORAGE_DIRECTORY;
+export function recoverInterruptedFinalization(
+  storageDirectory = resolveStorageDirectory(),
+): boolean {
   const checkpointPath = join(storageDirectory, 'checkpoint.json');
   const datasetPath = join(storageDirectory, 'dataset.ndjson');
   const partialDatasetPath = join(
@@ -95,14 +99,31 @@ export function recoverInterruptedFinalization(): boolean {
     ? checkpoint.heroIds
     : [];
   const nextHeroIndex = Number(checkpoint.nextHeroIndex);
+  const datasetByteLength = Number(checkpoint.datasetByteLength);
   if (
     heroIds.length === 0 ||
     !Number.isSafeInteger(nextHeroIndex) ||
-    nextHeroIndex < heroIds.length
+    nextHeroIndex < heroIds.length ||
+    !Number.isSafeInteger(datasetByteLength) ||
+    datasetByteLength < 0
   ) {
     return false;
   }
 
-  renameSync(datasetPath, partialDatasetPath);
-  return true;
+  try {
+    if (statSync(datasetPath).size !== datasetByteLength) {
+      return false;
+    }
+    renameSync(datasetPath, partialDatasetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveStorageDirectory(): string {
+  return (
+    process.env[STORAGE_DIRECTORY_ENV]?.trim() ||
+    DEFAULT_STORAGE_DIRECTORY
+  );
 }
