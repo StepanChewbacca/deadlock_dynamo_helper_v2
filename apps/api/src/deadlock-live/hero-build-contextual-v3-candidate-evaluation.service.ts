@@ -513,6 +513,7 @@ export class HeroBuildContextualV3CandidateEvaluationService implements OnModule
     ]);
     const itemIds = new Set(
       items
+        .filter((item) => Number(item.cost) > 0)
         .map((item) => Number(item.itemId))
         .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0),
     );
@@ -520,13 +521,7 @@ export class HeroBuildContextualV3CandidateEvaluationService implements OnModule
     for (const component of components) {
       const parentItemId = Number(component.parentItemId);
       const componentItemId = Number(component.componentItemId);
-      if (
-        !Number.isSafeInteger(parentItemId) ||
-        parentItemId <= 0 ||
-        !Number.isSafeInteger(componentItemId) ||
-        componentItemId <= 0 ||
-        parentItemId === componentItemId
-      ) {
+      if (!itemIds.has(parentItemId) || !itemIds.has(componentItemId)) {
         continue;
       }
       const values = componentsByParent.get(parentItemId) ?? new Set<number>();
