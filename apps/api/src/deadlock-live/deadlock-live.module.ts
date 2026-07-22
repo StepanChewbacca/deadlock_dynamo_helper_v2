@@ -20,6 +20,8 @@ import { MatchPlayerSkillUpgrade } from './entities/match-player-skill-upgrade.e
 import { MatchPlayer } from './entities/match-player.entity';
 import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
+import { HeroBuildContextualV3CandidateEvaluationController } from './hero-build-contextual-v3-candidate-evaluation.controller';
+import { HeroBuildContextualV3CandidateEvaluationService } from './hero-build-contextual-v3-candidate-evaluation.service';
 import { HeroBuildContextualV3TrainingController } from './hero-build-contextual-v3-training.controller';
 import { HeroBuildContextualV3TrainingCoordinatorService } from './hero-build-contextual-v3-training-coordinator.service';
 import { HeroBuildContextualV3TrainingService } from './hero-build-contextual-v3-training.service';
@@ -110,6 +112,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildOfflineEvaluationV2Controller,
     HeroBuildDecisionDatasetV3Controller,
     HeroBuildContextualV3TrainingController,
+    HeroBuildContextualV3CandidateEvaluationController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -137,6 +140,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildDecisionDatasetV3CoordinatorService,
     HeroBuildContextualV3TrainingService,
     HeroBuildContextualV3TrainingCoordinatorService,
+    HeroBuildContextualV3CandidateEvaluationService,
     {
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
@@ -197,6 +201,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildDecisionDatasetV3CoordinatorService,
     HeroBuildContextualV3TrainingService,
     HeroBuildContextualV3TrainingCoordinatorService,
+    HeroBuildContextualV3CandidateEvaluationService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
