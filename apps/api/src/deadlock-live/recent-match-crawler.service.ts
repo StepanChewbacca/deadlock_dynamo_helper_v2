@@ -32,6 +32,8 @@ const RATE_LIMIT_MAX_WAIT_MS = 3 * 60_000;
 const RETENTION_DELETE_BATCH_SIZE = 500;
 
 export const RECENT_MATCH_CRAWL_CRON = '0 0 */4 * * *';
+export const STANDARD_MATCH_PLAYER_COUNT = 12;
+export const STANDARD_MATCH_TEAM_SIZE = 6;
 
 export interface RecentMatchCrawlProgress {
   isCrawling: boolean;
@@ -65,10 +67,53 @@ interface ParsedSkillItem {
 interface CrawlBatchResult {
   discoveredMatches: number;
   processedMatches: number;
+  acceptedMatches: number;
+}
+
+interface ProcessedMatchBatchResult {
+  processedMatches: number;
+  acceptedMatches: number;
 }
 
 export function calculateMissingRecentMatchCount(currentMatchCount: number): number {
   return Math.max(0, RECENT_MATCH_TARGET_COUNT - currentMatchCount);
+}
+
+export function isStandardSixVsSixRoster(players: readonly unknown[]): boolean {
+  if (players.length !== STANDARD_MATCH_PLAYER_COUNT) {
+    return false;
+  }
+
+  const heroIds = new Set<number>();
+  let teamZeroCount = 0;
+  let teamOneCount = 0;
+
+  for (const value of players) {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const player = value as Record<string, unknown>;
+    const heroId = toPositiveSafeInteger(player.hero_id);
+    if (heroId === undefined || heroIds.has(heroId)) {
+      return false;
+    }
+    heroIds.add(heroId);
+
+    const team = Number(player.team);
+    if (team === 0) {
+      teamZeroCount += 1;
+    } else if (team === 1) {
+      teamOneCount += 1;
+    } else {
+      return false;
+    }
+  }
+
+  return (
+    teamZeroCount === STANDARD_MATCH_TEAM_SIZE &&
+    teamOneCount === STANDARD_MATCH_TEAM_SIZE
+  );
 }
 
 @Injectable()
@@ -110,6 +155,12 @@ export class RecentMatchCrawlerService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.recoverCrawlerStateAfterRestart();
+    const removedMatchCount = await this.pruneInvalidMatches();
+    if (removedMatchCount > 0) {
+      this.logger.log(
+        `Removed ${removedMatchCount} invalid, non-standard, expired, or overflow matches during startup.`,
+      );
+    }
   }
 
   getProgress(): RecentMatchCrawlProgress {
@@ -206,14 +257,14 @@ export class RecentMatchCrawlerService implements OnModuleInit {
       const missingMatchCount = calculateMissingRecentMatchCount(processedMatchIds.size);
 
       this.logger.log(
-        `Retained ${processedMatchIds.size}/${RECENT_MATCH_TARGET_COUNT} matches from the last ` +
+        `Retained ${processedMatchIds.size}/${RECENT_MATCH_TARGET_COUNT} standard 6v6 matches from the last ` +
           `${RECENT_MATCH_WINDOW_DAYS} days and removed ${removedBeforeCrawl} invalid matches.`,
       );
 
       this.progress.status =
         missingMatchCount > 0
-          ? `Discovering up to ${missingMatchCount} new matches...`
-          : 'The recent match window is already full.';
+          ? `Discovering up to ${missingMatchCount} new standard 6v6 matches...`
+          : 'The recent standard 6v6 match window is already full.';
       await this.syncCrawlerState();
 
       this.progress.total = missingMatchCount;
@@ -231,7 +282,7 @@ export class RecentMatchCrawlerService implements OnModuleInit {
               missingMatchCount,
               cutoff,
             )
-          : { discoveredMatches: 0, processedMatches: 0 };
+          : { discoveredMatches: 0, processedMatches: 0, acceptedMatches: 0 };
 
       this.progress.status = 'Applying final two-week retention...';
       await this.syncCrawlerState();
@@ -242,10 +293,11 @@ export class RecentMatchCrawlerService implements OnModuleInit {
       const windowIsFull = finalMatchCount >= RECENT_MATCH_TARGET_COUNT;
       this.progress.status = windowIsFull
         ? `Crawl finished successfully: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
-          `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`
+          `standard 6v6 matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days.`
         : `Crawl finished with partial window: ${finalMatchCount}/${RECENT_MATCH_TARGET_COUNT} ` +
-          `matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days. ` +
-          `The source returned ${crawlBatchResult.discoveredMatches} new candidates.`;
+          `standard 6v6 matches retained for the last ${RECENT_MATCH_WINDOW_DAYS} days. ` +
+          `The source returned ${crawlBatchResult.discoveredMatches} candidates and ` +
+          `${crawlBatchResult.acceptedMatches} were accepted as standard 6v6.`;
       this.logger.log(
         `${this.progress.status} Removed ${removedAfterCrawl} matches after processing.`,
       );
@@ -275,15 +327,16 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     let rateLimitAttempts = 0;
     let discoveredMatches = 0;
     let processedMatches = 0;
+    let acceptedMatches = 0;
 
-    while (discoveredMatches < targetCount) {
+    while (acceptedMatches < targetCount) {
       try {
         const response = await axios.get(`${API_BASE_URL}/v1/matches/metadata`, {
           ...getDeadlockApiRequestConfig(),
           params: {
             order_by: 'match_id',
             order_direction: 'desc',
-            limit: Math.min(1_000, targetCount - discoveredMatches),
+            limit: Math.min(1_000, targetCount - acceptedMatches),
             ...(maxMatchId !== undefined ? { max_match_id: maxMatchId } : {}),
           },
         });
@@ -320,9 +373,6 @@ export class RecentMatchCrawlerService implements OnModuleInit {
           seenMatchIds.add(matchId);
           pageMatchIds.push(matchId);
           discoveredMatches += 1;
-          if (discoveredMatches >= targetCount) {
-            break;
-          }
         }
 
         if (oldestMatchId === undefined) {
@@ -345,17 +395,20 @@ export class RecentMatchCrawlerService implements OnModuleInit {
           currentMatchId: null,
           statusMessage:
             processedMatches > 0
-              ? `Processing matches ${processedMatches}/${targetCount} ` +
-                `(discovered ${discoveredMatches}/${targetCount})`
-              : `Discovering matches ${discoveredMatches}/${targetCount}...`,
+              ? `Processed ${processedMatches} candidates; accepted ` +
+                `${acceptedMatches}/${targetCount} standard 6v6 matches.`
+              : `Discovering standard 6v6 matches ${acceptedMatches}/${targetCount}...`,
         });
         if (pageMatchIds.length > 0) {
-          processedMatches = await this.processDiscoveredMatchIds(
+          const processed = await this.processDiscoveredMatchIds(
             pageMatchIds,
             processedMatches,
+            acceptedMatches,
             targetCount,
             cutoff,
           );
+          processedMatches = processed.processedMatches;
+          acceptedMatches = processed.acceptedMatches;
         }
         if (!pageHasRecentMatches) {
           break;
@@ -378,22 +431,30 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     return {
       discoveredMatches,
       processedMatches,
+      acceptedMatches,
     };
   }
 
   private async processDiscoveredMatchIds(
     matchIds: readonly number[],
     processedMatches: number,
+    acceptedMatches: number,
     targetCount: number,
     cutoff: Date,
-  ): Promise<number> {
+  ): Promise<ProcessedMatchBatchResult> {
     let nextProcessedMatches = processedMatches;
+    let nextAcceptedMatches = acceptedMatches;
 
     for (const matchId of matchIds) {
+      if (nextAcceptedMatches >= targetCount) {
+        break;
+      }
+
       nextProcessedMatches += 1;
-      this.progress.current = nextProcessedMatches;
+      this.progress.current = nextAcceptedMatches;
       this.progress.status =
-        `Processing match ${nextProcessedMatches}/${targetCount}: ${matchId}`;
+        `Processing candidate ${nextProcessedMatches}: ${matchId}. ` +
+        `Accepted ${nextAcceptedMatches}/${targetCount} standard 6v6 matches.`;
       await this.updateCrawlerRun({
         processedMatches: nextProcessedMatches,
         currentMatchId: matchId,
@@ -402,7 +463,11 @@ export class RecentMatchCrawlerService implements OnModuleInit {
       await this.syncCrawlerState(matchId);
 
       try {
-        await this.processMatchWithRetry(matchId, cutoff);
+        const accepted = await this.processMatchWithRetry(matchId, cutoff);
+        if (accepted) {
+          nextAcceptedMatches += 1;
+          this.progress.current = nextAcceptedMatches;
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.warn(`Failed to process match ${matchId}: ${message}`);
@@ -411,7 +476,10 @@ export class RecentMatchCrawlerService implements OnModuleInit {
       await this.sleep(this.getMatchDetailsDelayMs());
     }
 
-    return nextProcessedMatches;
+    return {
+      processedMatches: nextProcessedMatches,
+      acceptedMatches: nextAcceptedMatches,
+    };
   }
 
   private async processMatchWithRetry(matchId: number, cutoff: Date): Promise<boolean> {
@@ -440,6 +508,11 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     );
     const matchInfo = response.data?.match_info;
     if (!matchInfo || !Array.isArray(matchInfo.players) || matchInfo.players.length === 0) {
+      return false;
+    }
+
+    if (!isStandardSixVsSixRoster(matchInfo.players)) {
+      this.logger.debug(`Skipping non-standard match ${matchId}; only 6v6 is retained.`);
       return false;
     }
 
@@ -594,10 +667,38 @@ export class RecentMatchCrawlerService implements OnModuleInit {
 
   private async pruneInvalidMatches(now = new Date()): Promise<number> {
     const cutoff = getRecentMatchCutoff(now);
-    const expiredMatches = await this.matchRepository.find({
-      where: { startTime: LessThan(cutoff) },
-      select: { matchId: true },
-    });
+    const [expiredMatches, nonStandardMatchRows] = await Promise.all([
+      this.matchRepository.find({
+        where: { startTime: LessThan(cutoff) },
+        select: { matchId: true },
+      }),
+      this.matchRepository
+        .createQueryBuilder('match')
+        .leftJoin(MatchPlayer, 'player', 'player.matchId = match.matchId')
+        .select('match.matchId', 'matchId')
+        .groupBy('match.matchId')
+        .having('COUNT(player.id) <> :playerCount', {
+          playerCount: STANDARD_MATCH_PLAYER_COUNT,
+        })
+        .orHaving(
+          'SUM(CASE WHEN player.team = 0 THEN 1 ELSE 0 END) <> :teamSize',
+          { teamSize: STANDARD_MATCH_TEAM_SIZE },
+        )
+        .orHaving(
+          'SUM(CASE WHEN player.team = 1 THEN 1 ELSE 0 END) <> :teamSize',
+          { teamSize: STANDARD_MATCH_TEAM_SIZE },
+        )
+        .getRawMany<{ matchId: string | number }>(),
+    ]);
+
+    const initialMatchIds = [
+      ...new Set([
+        ...expiredMatches.map((match) => Number(match.matchId)),
+        ...nonStandardMatchRows.map((row) => Number(row.matchId)),
+      ]),
+    ].filter((matchId) => Number.isSafeInteger(matchId) && matchId > 0);
+    await this.deleteMatches(initialMatchIds);
+
     const validMatchCount = await this.matchRepository.count({
       where: { startTime: MoreThanOrEqual(cutoff) },
     });
@@ -611,29 +712,28 @@ export class RecentMatchCrawlerService implements OnModuleInit {
             select: { matchId: true },
           })
         : [];
+    const overflowMatchIds = overflowMatches.map((match) => Number(match.matchId));
+    await this.deleteMatches(overflowMatchIds);
 
-    const matchIds = [
-      ...new Set(
-        [...expiredMatches, ...overflowMatches].map((match) => Number(match.matchId)),
-      ),
-    ];
+    const removedMatchIds = [...new Set([...initialMatchIds, ...overflowMatchIds])];
+    if (removedMatchIds.length > 0) {
+      this.logger.log(
+        `Deleted ${removedMatchIds.length} expired, overflow, or non-standard matches. ` +
+          `The database now keeps only standard 6v6 matches and at most the newest ` +
+          `${RECENT_MATCH_TARGET_COUNT} from the last ${RECENT_MATCH_WINDOW_DAYS} days.`,
+      );
+    }
 
-    for (const batch of chunkValues(matchIds, RETENTION_DELETE_BATCH_SIZE)) {
+    return removedMatchIds.length;
+  }
+
+  private async deleteMatches(matchIds: readonly number[]): Promise<void> {
+    for (const batch of chunkValues([...matchIds], RETENTION_DELETE_BATCH_SIZE)) {
       await this.matchRepository.manager.transaction(async (manager) => {
         await manager.getRepository(RawMatchMetadata).delete({ matchId: In(batch) });
         await manager.getRepository(Match).delete({ matchId: In(batch) });
       });
     }
-
-    if (matchIds.length > 0) {
-      this.logger.log(
-        `Deleted ${matchIds.length} expired or overflow matches. The database now keeps ` +
-          `only the newest ${RECENT_MATCH_TARGET_COUNT} matches from the last ` +
-          `${RECENT_MATCH_WINDOW_DAYS} days.`,
-      );
-    }
-
-    return matchIds.length;
   }
 
   private async syncCrawlerState(currentMatchId?: number): Promise<void> {
