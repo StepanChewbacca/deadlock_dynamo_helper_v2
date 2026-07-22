@@ -595,6 +595,23 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
         deltas.top1Rate,
         deltas.top3Rate,
       );
+      const uncoveredCount = decisionCount - coveredCount;
+      const classifiedUncoveredCount = Object.values(diagnostics).reduce(
+        (total, value) => total + value,
+        0,
+      );
+      const auditPassed =
+        descriptors.length === options.matchCount &&
+        descriptors.every((descriptor) =>
+          isStrictlyNewerThanCutoff(descriptor.startTime, cutoff),
+        ) &&
+        decisionCount > 0 &&
+        matchesWithRows.size === descriptors.length &&
+        duplicateDecisionCount === 0 &&
+        incompleteRosterRowCount === 0 &&
+        uncoveredCount === classifiedUncoveredCount &&
+        diagnostics.unexplainedCount === 0;
+      const shadowEligible = releaseGate.passed && auditPassed;
       const evaluation = {
         schemaVersion: SCHEMA_VERSION,
         evaluationVersion: 'CONTEXTUAL_V3_FUTURE_FINAL_TEST_1',
@@ -618,17 +635,14 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
           ...releaseGate,
         },
         productionDecision: {
-          status: releaseGate.passed ? 'ELIGIBLE_FOR_SHADOW_MODE' : 'BLOCKED',
-          reason: releaseGate.passed
-            ? 'The frozen model and candidate policy passed the strictly future final test.'
-            : 'The strictly future final-test release gate failed.',
+          status: shadowEligible ? 'ELIGIBLE_FOR_SHADOW_MODE' : 'BLOCKED',
+          reason: shadowEligible
+            ? 'The frozen model, candidate policy, release gate, and final-test audit passed.'
+            : !auditPassed
+              ? 'The strictly future final-test audit failed.'
+              : 'The strictly future final-test release gate failed.',
         },
       };
-      const uncoveredCount = decisionCount - coveredCount;
-      const classifiedUncoveredCount = Object.values(diagnostics).reduce(
-        (total, value) => total + value,
-        0,
-      );
       const auditWarnings: string[] = [];
       if (excludedSequenceCount > 0) {
         auditWarnings.push(
@@ -640,6 +654,11 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
           `${uncoveredCount} final-test actions were not covered by the fixed shortlist.`,
         );
       }
+      if (!auditPassed) {
+        auditWarnings.push(
+          'The future final-test audit failed; shadow mode and production deployment remain blocked.',
+        );
+      }
       if (!releaseGate.passed) {
         auditWarnings.push(
           'The future final-test release gate failed; shadow mode and production deployment remain blocked.',
@@ -648,17 +667,7 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
       const audit = {
         schemaVersion: SCHEMA_VERSION,
         generatedAt,
-        passed:
-          descriptors.length === options.matchCount &&
-          descriptors.every((descriptor) =>
-            isStrictlyNewerThanCutoff(descriptor.startTime, cutoff),
-          ) &&
-          decisionCount > 0 &&
-          matchesWithRows.size === descriptors.length &&
-          duplicateDecisionCount === 0 &&
-          incompleteRosterRowCount === 0 &&
-          uncoveredCount === classifiedUncoveredCount &&
-          diagnostics.unexplainedCount === 0,
+        passed: auditPassed,
         source: {
           selectionPolicy: 'OLDEST_STRICTLY_FUTURE_STANDARD_6V6_MATCHES',
           cutoffExclusive: cutoff,
