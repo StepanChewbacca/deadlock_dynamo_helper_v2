@@ -22,6 +22,8 @@ import { Match } from './entities/match.entity';
 import { RawMatchMetadata } from './entities/raw-match-metadata.entity';
 import { HeroBuildContextualV3CandidateEvaluationController } from './hero-build-contextual-v3-candidate-evaluation.controller';
 import { HeroBuildContextualV3CandidateEvaluationService } from './hero-build-contextual-v3-candidate-evaluation.service';
+import { HeroBuildContextualV3FinalTestController } from './hero-build-contextual-v3-final-test.controller';
+import { HeroBuildContextualV3FinalTestService } from './hero-build-contextual-v3-final-test.service';
 import { HeroBuildContextualV3TrainingController } from './hero-build-contextual-v3-training.controller';
 import { HeroBuildContextualV3TrainingCoordinatorService } from './hero-build-contextual-v3-training-coordinator.service';
 import { HeroBuildContextualV3TrainingService } from './hero-build-contextual-v3-training.service';
@@ -113,6 +115,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildDecisionDatasetV3Controller,
     HeroBuildContextualV3TrainingController,
     HeroBuildContextualV3CandidateEvaluationController,
+    HeroBuildContextualV3FinalTestController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -141,6 +144,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3TrainingService,
     HeroBuildContextualV3TrainingCoordinatorService,
     HeroBuildContextualV3CandidateEvaluationService,
+    HeroBuildContextualV3FinalTestService,
     {
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
@@ -202,6 +206,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3TrainingService,
     HeroBuildContextualV3TrainingCoordinatorService,
     HeroBuildContextualV3CandidateEvaluationService,
+    HeroBuildContextualV3FinalTestService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
