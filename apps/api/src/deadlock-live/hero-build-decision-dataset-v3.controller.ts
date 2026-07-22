@@ -8,13 +8,13 @@ import {
   NotFoundException,
   Post,
 } from '@nestjs/common';
+import { HeroBuildDecisionDatasetV3CoordinatorService } from './hero-build-decision-dataset-v3-coordinator.service';
 import {
   HERO_BUILD_DECISION_DATASET_V3_DEFAULT_BATCH_SIZE,
   HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,
   HERO_BUILD_DECISION_DATASET_V3_MAX_BATCH_SIZE,
   HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES,
   HERO_BUILD_DECISION_DATASET_V3_MIN_BATCH_SIZE,
-  HeroBuildDecisionDatasetV3Service,
   HeroBuildDecisionDatasetV3StartRequest,
 } from './hero-build-decision-dataset-v3.service';
 
@@ -27,14 +27,17 @@ export class StartHeroBuildDecisionDatasetV3Dto {
 @Controller('deadlock/analysis/build-decision-dataset-v3')
 export class HeroBuildDecisionDatasetV3Controller {
   constructor(
-    private readonly datasetService: HeroBuildDecisionDatasetV3Service,
+    private readonly datasetCoordinator:
+      HeroBuildDecisionDatasetV3CoordinatorService,
   ) {}
 
   @Post('start')
   @HttpCode(202)
   async start(@Body() dto: StartHeroBuildDecisionDatasetV3Dto) {
     try {
-      return await this.datasetService.start(parseRequest(dto ?? {}));
+      return await this.datasetCoordinator.start(
+        parseRequest(dto ?? {}),
+      );
     } catch (error) {
       throw new BadRequestException(getErrorMessage(error));
     }
@@ -42,13 +45,13 @@ export class HeroBuildDecisionDatasetV3Controller {
 
   @Get('status')
   getStatus() {
-    return this.datasetService.getStatus();
+    return this.datasetCoordinator.getStatus();
   }
 
   @Get('manifest')
   getManifest() {
     this.assertNotRunning();
-    const manifest = this.datasetService.getManifest();
+    const manifest = this.datasetCoordinator.getManifest();
     if (!manifest) {
       throw new NotFoundException(
         'No completed Contextual V3 decision dataset manifest is available.',
@@ -60,7 +63,7 @@ export class HeroBuildDecisionDatasetV3Controller {
   @Get('audit')
   getAudit() {
     this.assertNotRunning();
-    const audit = this.datasetService.getAudit();
+    const audit = this.datasetCoordinator.getAudit();
     if (!audit) {
       throw new NotFoundException(
         'No completed Contextual V3 decision dataset audit is available.',
@@ -70,7 +73,7 @@ export class HeroBuildDecisionDatasetV3Controller {
   }
 
   private assertNotRunning(): void {
-    if (this.datasetService.getStatus().state === 'RUNNING') {
+    if (this.datasetCoordinator.getStatus().state === 'RUNNING') {
       throw new ConflictException(
         'Contextual V3 decision dataset extraction is still running.',
       );
