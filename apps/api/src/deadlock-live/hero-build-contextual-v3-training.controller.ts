@@ -8,10 +8,8 @@ import {
   NotFoundException,
   Post,
 } from '@nestjs/common';
-import {
-  ContextualV3TrainingStartRequest,
-  HeroBuildContextualV3TrainingService,
-} from './hero-build-contextual-v3-training.service';
+import { HeroBuildContextualV3TrainingCoordinatorService } from './hero-build-contextual-v3-training-coordinator.service';
+import { ContextualV3TrainingStartRequest } from './hero-build-contextual-v3-training.service';
 
 export class StartContextualV3TrainingDto {
   trainFraction?: number;
@@ -25,14 +23,15 @@ export class StartContextualV3TrainingDto {
 @Controller('deadlock/analysis/contextual-v3-training')
 export class HeroBuildContextualV3TrainingController {
   constructor(
-    private readonly trainingService: HeroBuildContextualV3TrainingService,
+    private readonly trainingCoordinator:
+      HeroBuildContextualV3TrainingCoordinatorService,
   ) {}
 
   @Post('start')
   @HttpCode(202)
   async start(@Body() dto: StartContextualV3TrainingDto) {
     try {
-      return await this.trainingService.start(parseRequest(dto ?? {}));
+      return await this.trainingCoordinator.start(parseRequest(dto ?? {}));
     } catch (error) {
       throw new BadRequestException(getErrorMessage(error));
     }
@@ -40,13 +39,13 @@ export class HeroBuildContextualV3TrainingController {
 
   @Get('status')
   getStatus() {
-    return this.trainingService.getStatus();
+    return this.trainingCoordinator.getStatus();
   }
 
   @Get('manifest')
   getManifest() {
     this.assertNotRunning();
-    const manifest = this.trainingService.getManifest();
+    const manifest = this.trainingCoordinator.getManifest();
     if (!manifest) {
       throw new NotFoundException(
         'No completed Contextual V3 training manifest is available.',
@@ -58,7 +57,7 @@ export class HeroBuildContextualV3TrainingController {
   @Get('audit')
   getAudit() {
     this.assertNotRunning();
-    const audit = this.trainingService.getAudit();
+    const audit = this.trainingCoordinator.getAudit();
     if (!audit) {
       throw new NotFoundException(
         'No completed Contextual V3 training audit is available.',
@@ -70,7 +69,7 @@ export class HeroBuildContextualV3TrainingController {
   @Get('evaluation')
   getEvaluation() {
     this.assertNotRunning();
-    const evaluation = this.trainingService.getEvaluation();
+    const evaluation = this.trainingCoordinator.getEvaluation();
     if (!evaluation) {
       throw new NotFoundException(
         'No completed Contextual V3 validation evaluation is available.',
@@ -82,7 +81,7 @@ export class HeroBuildContextualV3TrainingController {
   @Get('archetypes')
   getArchetypes() {
     this.assertNotRunning();
-    const archetypes = this.trainingService.getArchetypes();
+    const archetypes = this.trainingCoordinator.getArchetypes();
     if (!archetypes) {
       throw new NotFoundException(
         'No completed Contextual V3 archetype artifact is available.',
@@ -92,7 +91,7 @@ export class HeroBuildContextualV3TrainingController {
   }
 
   private assertNotRunning(): void {
-    if (this.trainingService.getStatus().state === 'RUNNING') {
+    if (this.trainingCoordinator.getStatus().state === 'RUNNING') {
       throw new ConflictException('Contextual V3 training is still running.');
     }
   }
