@@ -308,7 +308,7 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
       evaluationAvailable: this.evaluation !== undefined,
       auditAvailable: this.audit !== undefined,
       manifestAvailable: this.manifest !== undefined,
-      datasetAvailable: await fileExists(this.paths.dataset),
+      datasetAvailable: this.status.datasetAvailable,
     };
     void this.run(options);
     return this.getStatus();
@@ -654,6 +654,7 @@ export class HeroBuildContextualV3FinalTestService implements OnModuleInit {
             isStrictlyNewerThanCutoff(descriptor.startTime, cutoff),
           ) &&
           decisionCount > 0 &&
+          matchesWithRows.size === descriptors.length &&
           duplicateDecisionCount === 0 &&
           incompleteRosterRowCount === 0 &&
           uncoveredCount === classifiedUncoveredCount &&
@@ -1503,18 +1504,6 @@ async function hashFile(path: string): Promise<string> {
     hash.update(chunk);
   }
   return hash.digest('hex');
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (getErrorCode(error) === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
 }
 
 function average(values: readonly number[]): number {
