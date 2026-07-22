@@ -1,8 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import {
-  FileHandle,
   mkdir,
   open,
   readFile,
@@ -12,9 +12,12 @@ import {
   truncate,
   writeFile,
 } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { In, Repository } from 'typeorm';
 import type { CanonicalBuildStep } from './canonical-build-sequence.service';
+import { MatchPlayer } from './entities/match-player.entity';
 import {
   HeroBuildOfflineEvaluationDataLoaderService,
   HeroBuildOfflineLoadedHeroSample,
@@ -53,7 +56,7 @@ export type HeroBuildDecisionDatasetV3ProgressPhase =
   | 'FINALIZING'
   | 'COMPLETE';
 
-export type HeroBuildDecisionActionType = 'BUY' | 'REBUY' | 'UPGRADE';
+export type HeroBuildDecisionActionType = 'BUY' | 'REBUY' | 'UPGRADE' | 'SELL';
 
 export interface HeroBuildDecisionDatasetV3StartRequest {
   maxMatches?: number;
@@ -83,22 +86,12 @@ export interface HeroBuildDecisionDatasetV3Row {
   buildPrefixKey: string;
   alliedHeroIds: number[];
   enemyHeroIds: number[];
-  actualActionType: HeroBuildDecisionActionType | 'SELL';
+  actualActionType: HeroBuildDecisionActionType;
   actualItemId: number;
   actualActionKey: string;
   outcomeLabel: {
     playerWon: boolean;
   };
-}
-
-export interface HeroBuildDecisionDatasetV3AuditBucket {
-  rowCount: number;
-}
-
-export interface HeroBuildDecisionDatasetV3HeroAuditBucket
-  extends HeroBuildDecisionDatasetV3AuditBucket {
-  playerCount: number;
-  excludedSequenceCount: number;
 }
 
 export interface HeroBuildDecisionDatasetV3Audit {
@@ -128,9 +121,12 @@ export interface HeroBuildDecisionDatasetV3Audit {
     rowsWithIncompleteAlliedRoster: number;
     rowsWithIncompleteEnemyRoster: number;
   };
-  byHero: Record<string, HeroBuildDecisionDatasetV3HeroAuditBucket>;
-  byPhase: Record<HeroBuildEvaluationPhase, HeroBuildDecisionDatasetV3AuditBucket>;
-  byActionType: Record<string, HeroBuildDecisionDatasetV3AuditBucket>;
+  byHero: Record<
+    string,
+    { rowCount: number; playerCount: number; excludedSequenceCount: number }
+  >;
+  byPhase: Record<HeroBuildEvaluationPhase, { rowCount: number }>;
+  byActionType: Record<string, { rowCount: number }>;
   leakageAudit: {
     featureFields: string[];
     labelFields: string[];
@@ -152,14 +148,14 @@ export interface HeroBuildDecisionDatasetV3Manifest {
   options: HeroBuildDecisionDatasetV3Options;
   source: {
     selectedMatchCount: number;
-    selectedWindowStartTime?: string;
-    selectedWindowEndTime?: string;
+    selectedWindowStartTime: string;
+    selectedWindowEndTime: string;
     sourceWindowLastRefreshedAt?: string;
     descriptorSha256: string;
   };
   artifact: {
     format: 'NDJSON';
-    fileName: string;
+    fileName: 'dataset.ndjson';
     byteLength: number;
     sha256: string;
     rowCount: number;
@@ -206,7 +202,7 @@ interface PersistedDescriptor {
   startTime: string;
 }
 
-interface MutableAuditState {
+interface AuditState {
   selectedMatchCount: number;
   sourcePlayerCount: number;
   includedPlayerCount: number;
@@ -223,12 +219,15 @@ interface MutableAuditState {
   playerKeysWithRows: string[];
   alliedHeroCountHistogram: Record<string, number>;
   enemyHeroCountHistogram: Record<string, number>;
-  byHero: Record<string, HeroBuildDecisionDatasetV3HeroAuditBucket>;
-  byPhase: Record<HeroBuildEvaluationPhase, HeroBuildDecisionDatasetV3AuditBucket>;
-  byActionType: Record<string, HeroBuildDecisionDatasetV3AuditBucket>;
+  byHero: Record<
+    string,
+    { rowCount: number; playerCount: number; excludedSequenceCount: number }
+  >;
+  byPhase: Record<HeroBuildEvaluationPhase, { rowCount: number }>;
+  byActionType: Record<string, { rowCount: number }>;
 }
 
-interface HeroBuildDecisionDatasetV3Checkpoint {
+interface DatasetCheckpoint {
   schemaVersion: typeof HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION;
   startedAt: string;
   options: HeroBuildDecisionDatasetV3Options;
@@ -237,7 +236,7 @@ interface HeroBuildDecisionDatasetV3Checkpoint {
   heroIds: number[];
   nextHeroIndex: number;
   datasetByteLength: number;
-  audit: MutableAuditState;
+  audit: AuditState;
 }
 
 @Injectable()
@@ -261,20 +260,19 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
 
   constructor(
     private readonly dataLoader: HeroBuildOfflineEvaluationDataLoaderService,
+    @InjectRepository(MatchPlayer)
+    private readonly matchPlayerRepository: Repository<MatchPlayer>,
   ) {}
 
   async onModuleInit(): Promise<void> {
     await mkdir(this.storageDirectory, { recursive: true });
-    this.manifest = await this.readJson<HeroBuildDecisionDatasetV3Manifest>(
+    const checkpoint = await readJsonFile<DatasetCheckpoint>(this.checkpointPath);
+    this.manifest = await readJsonFile<HeroBuildDecisionDatasetV3Manifest>(
       this.manifestPath,
     );
-    this.audit = await this.readJson<HeroBuildDecisionDatasetV3Audit>(
+    this.audit = await readJsonFile<HeroBuildDecisionDatasetV3Audit>(
       this.auditPath,
     );
-    const checkpoint =
-      await this.readJson<HeroBuildDecisionDatasetV3Checkpoint>(
-        this.checkpointPath,
-      );
     if (this.autoResume && isCheckpoint(checkpoint)) {
       this.status = this.createRunningStatus(checkpoint, true);
       void this.run(checkpoint);
@@ -287,8 +285,8 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
         phase: 'COMPLETE',
         totalMatchCount: this.manifest.source.selectedMatchCount,
         rowCount: this.manifest.artifact.rowCount,
-        completedAt: this.manifest.generatedAt,
         options: { ...this.manifest.options },
+        completedAt: this.manifest.generatedAt,
         datasetAvailable: true,
         manifestAvailable: true,
         auditAvailable: true,
@@ -297,15 +295,15 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
   }
 
   getStatus(): HeroBuildDecisionDatasetV3Status {
-    return { ...this.status, options: cloneOptions(this.status.options) };
+    return cloneJson(this.status);
   }
 
   getManifest(): HeroBuildDecisionDatasetV3Manifest | undefined {
-    return this.manifest ? cloneManifest(this.manifest) : undefined;
+    return this.manifest ? cloneJson(this.manifest) : undefined;
   }
 
   getAudit(): HeroBuildDecisionDatasetV3Audit | undefined {
-    return this.audit ? cloneAudit(this.audit) : undefined;
+    return this.audit ? cloneJson(this.audit) : undefined;
   }
 
   async start(
@@ -315,7 +313,6 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       throw new Error('Contextual V3 decision dataset extraction is already running.');
     }
     const options = normalizeOptions(request);
-    await mkdir(this.storageDirectory, { recursive: true });
     const loaded = await this.dataLoader.loadMatchDescriptors(options.maxMatches);
     const descriptors = loaded.descriptors
       .map((descriptor) => ({
@@ -324,26 +321,25 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       }))
       .sort(compareDescriptors);
     if (descriptors.length === 0) {
-      throw new Error('No valid matches are available for V3 decision dataset extraction.');
+      throw new Error('No valid matches are available for V3 dataset extraction.');
     }
     const heroIds = await this.dataLoader.collectHeroIds(
       loaded.descriptors,
       options.batchSize,
     );
     if (heroIds.length === 0) {
-      throw new Error('No valid heroes are available for V3 decision dataset extraction.');
+      throw new Error('No valid heroes are available for V3 dataset extraction.');
     }
+    await mkdir(this.storageDirectory, { recursive: true });
     await Promise.all([
       rm(this.datasetPath, { force: true }),
       rm(this.partialDatasetPath, { force: true }),
+      rm(this.checkpointPath, { force: true }),
       rm(this.manifestPath, { force: true }),
       rm(this.auditPath, { force: true }),
-      rm(this.checkpointPath, { force: true }),
     ]);
     await writeFile(this.partialDatasetPath, '', 'utf8');
-    this.manifest = undefined;
-    this.audit = undefined;
-    const checkpoint: HeroBuildDecisionDatasetV3Checkpoint = {
+    const checkpoint: DatasetCheckpoint = {
       schemaVersion: HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION,
       startedAt: new Date().toISOString(),
       options,
@@ -355,22 +351,21 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       datasetByteLength: 0,
       audit: createEmptyAuditState(descriptors.length),
     };
+    this.manifest = undefined;
+    this.audit = undefined;
     await this.persistCheckpoint(checkpoint);
     this.status = this.createRunningStatus(checkpoint, false);
     void this.run(checkpoint);
     return this.getStatus();
   }
 
-  private async run(
-    initialCheckpoint: HeroBuildDecisionDatasetV3Checkpoint,
-  ): Promise<void> {
-    let checkpoint = cloneCheckpoint(initialCheckpoint);
+  private async run(initialCheckpoint: DatasetCheckpoint): Promise<void> {
+    let checkpoint = cloneJson(initialCheckpoint);
     try {
-      await mkdir(this.storageDirectory, { recursive: true });
       await ensureFile(this.partialDatasetPath);
       await truncate(this.partialDatasetPath, checkpoint.datasetByteLength);
-      const matchIdsWithRows = new Set(checkpoint.audit.matchIdsWithRows);
-      const playerKeysWithRows = new Set(checkpoint.audit.playerKeysWithRows);
+      const matchesWithRows = new Set(checkpoint.audit.matchIdsWithRows);
+      const playersWithRows = new Set(checkpoint.audit.playerKeysWithRows);
 
       for (
         let heroIndex = checkpoint.nextHeroIndex;
@@ -378,17 +373,11 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
         heroIndex += 1
       ) {
         const heroId = checkpoint.heroIds[heroIndex];
-        const heroTemporaryPath = join(
-          this.storageDirectory,
-          `hero-${heroId}.ndjson.tmp`,
-        );
-        await rm(heroTemporaryPath, { force: true });
-        const writer = await BufferedNdjsonWriter.create(heroTemporaryPath);
+        const heroFilePath = join(this.storageDirectory, `hero-${heroId}.ndjson.tmp`);
+        await rm(heroFilePath, { force: true });
+        const writer = await BufferedNdjsonWriter.create(heroFilePath);
         const heroDecisionIds = new Set<string>();
-        const heroAudit = getOrCreateHeroBucket(checkpoint.audit.byHero, heroId);
-        let heroIncludedPlayerCount = 0;
-        let heroExcludedSequenceCount = 0;
-
+        const heroAudit = getHeroAudit(checkpoint.audit, heroId);
         this.status = {
           ...this.status,
           phase: 'EXTRACTING',
@@ -407,44 +396,55 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
             batchIndex < descriptorBatches.length;
             batchIndex += 1
           ) {
-            const descriptorBatch = descriptorBatches[batchIndex].map(
-              (descriptor) => ({
-                matchId: descriptor.matchId,
-                startTime: new Date(descriptor.startTime),
-              }),
-            );
-            const loaded = await this.dataLoader.loadHeroBatch(
-              heroId,
-              descriptorBatch,
-              checkpoint.options.batchSize,
-              `V3 decision dataset hero ${heroId}, batch ${batchIndex + 1}`,
-            );
+            const descriptors = descriptorBatches[batchIndex].map((descriptor) => ({
+              matchId: descriptor.matchId,
+              startTime: new Date(descriptor.startTime),
+            }));
+            const [loaded, roster] = await Promise.all([
+              this.dataLoader.loadHeroBatch(
+                heroId,
+                descriptors,
+                checkpoint.options.batchSize,
+                `V3 dataset hero ${heroId}, batch ${batchIndex + 1}`,
+              ),
+              this.loadRoster(descriptors.map((descriptor) => descriptor.matchId)),
+            ]);
+            const rosterByMatchId = groupBy(roster, (player) => Number(player.matchId));
             checkpoint.audit.sourcePlayerCount += loaded.sourcePlayerCount;
 
             for (const sample of loaded.samples.sort(compareSamples)) {
               if (!isEvaluableBuildSequence(sample.sequence)) {
                 checkpoint.audit.excludedSequenceCount += 1;
-                heroExcludedSequenceCount += 1;
+                heroAudit.excludedSequenceCount += 1;
                 continue;
               }
               checkpoint.audit.includedPlayerCount += 1;
-              heroIncludedPlayerCount += 1;
-              const rows = createHeroBuildDecisionRows(
+              heroAudit.playerCount += 1;
+              const alliedHeroIds = normalizeHeroIds(
+                (rosterByMatchId.get(sample.descriptor.matchId) ?? [])
+                  .filter(
+                    (player) =>
+                      Number(player.team) === sample.player.team &&
+                      Number(player.id) !== sample.player.id,
+                  )
+                  .map((player) => Number(player.heroId)),
+              );
+              const extracted = createHeroBuildDecisionRows(
                 sample,
+                alliedHeroIds,
                 checkpoint.options.includeSellActions,
               );
-              checkpoint.audit.excludedSellActionCount += rows.excludedSellActionCount;
+              checkpoint.audit.excludedSellActionCount +=
+                extracted.excludedSellActionCount;
               checkpoint.audit.nonMonotonicGameTimeCount +=
-                rows.nonMonotonicGameTimeCount;
-
-              if (rows.rows.length > 0) {
-                matchIdsWithRows.add(sample.descriptor.matchId);
-                playerKeysWithRows.add(
+                extracted.nonMonotonicGameTimeCount;
+              if (extracted.rows.length > 0) {
+                matchesWithRows.add(sample.descriptor.matchId);
+                playersWithRows.add(
                   `${sample.descriptor.matchId}:${sample.player.id}`,
                 );
               }
-
-              for (const row of rows.rows) {
+              for (const row of extracted.rows) {
                 if (heroDecisionIds.has(row.decisionId)) {
                   checkpoint.audit.duplicateDecisionCount += 1;
                 } else {
@@ -463,8 +463,7 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
               ),
               rowCount: checkpoint.audit.rowCount,
               excludedSequenceCount: checkpoint.audit.excludedSequenceCount,
-              excludedSellActionCount:
-                checkpoint.audit.excludedSellActionCount,
+              excludedSellActionCount: checkpoint.audit.excludedSellActionCount,
             };
             await yieldToEventLoop();
           }
@@ -472,56 +471,41 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
           await writer.close();
         }
 
-        heroAudit.playerCount += heroIncludedPlayerCount;
-        heroAudit.excludedSequenceCount += heroExcludedSequenceCount;
         await pipeline(
-          createReadStream(heroTemporaryPath),
+          createReadStream(heroFilePath),
           createWriteStream(this.partialDatasetPath, { flags: 'a' }),
         );
-        await rm(heroTemporaryPath, { force: true });
+        await rm(heroFilePath, { force: true });
         const partialStat = await stat(this.partialDatasetPath);
-        checkpoint = {
-          ...checkpoint,
-          nextHeroIndex: heroIndex + 1,
-          datasetByteLength: partialStat.size,
-          audit: {
-            ...checkpoint.audit,
-            matchIdsWithRows: [...matchIdsWithRows].sort((a, b) => a - b),
-            playerKeysWithRows: [...playerKeysWithRows].sort(),
-          },
-        };
+        checkpoint.nextHeroIndex = heroIndex + 1;
+        checkpoint.datasetByteLength = partialStat.size;
+        checkpoint.audit.matchIdsWithRows = [...matchesWithRows].sort((a, b) => a - b);
+        checkpoint.audit.playerKeysWithRows = [...playersWithRows].sort();
         await this.persistCheckpoint(checkpoint);
         this.status = {
           ...this.status,
           processedHeroCount: heroIndex + 1,
           currentHeroId: undefined,
-          rowCount: checkpoint.audit.rowCount,
           checkpointAvailable: true,
         };
-        await yieldToEventLoop();
       }
 
       this.status = { ...this.status, phase: 'FINALIZING' };
       await rm(this.datasetPath, { force: true });
       await rename(this.partialDatasetPath, this.datasetPath);
       const artifactStat = await stat(this.datasetPath);
-      const artifactSha256 = await hashFile(this.datasetPath);
       const generatedAt = new Date().toISOString();
-      const audit = createAudit(
+      const audit = buildAudit(checkpoint, generatedAt);
+      const manifest = await buildManifest(
         checkpoint,
         generatedAt,
-        checkpoint.sourceWindowLastRefreshedAt,
-      );
-      const manifest = createManifest(
-        checkpoint,
-        generatedAt,
+        this.datasetPath,
         artifactStat.size,
-        artifactSha256,
         audit,
       );
       await Promise.all([
-        this.writeJsonAtomically(this.auditPath, audit),
-        this.writeJsonAtomically(this.manifestPath, manifest),
+        writeJsonAtomically(this.auditPath, audit),
+        writeJsonAtomically(this.manifestPath, manifest),
       ]);
       await rm(this.checkpointPath, { force: true });
       this.audit = audit;
@@ -557,6 +541,19 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
     }
   }
 
+  private async loadRoster(matchIds: number[]): Promise<MatchPlayer[]> {
+    if (matchIds.length === 0) {
+      return [];
+    }
+    return this.dataLoader.withDatabaseRetry('loading V3 dataset rosters', () =>
+      this.matchPlayerRepository.find({ where: { matchId: In(matchIds) } }),
+    );
+  }
+
+  private async persistCheckpoint(checkpoint: DatasetCheckpoint): Promise<void> {
+    await writeJsonAtomically(this.checkpointPath, checkpoint);
+  }
+
   private createIdleStatus(): HeroBuildDecisionDatasetV3Status {
     return {
       state: 'IDLE',
@@ -580,7 +577,7 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
   }
 
   private createRunningStatus(
-    checkpoint: HeroBuildDecisionDatasetV3Checkpoint,
+    checkpoint: DatasetCheckpoint,
     resumedFromCheckpoint: boolean,
   ): HeroBuildDecisionDatasetV3Status {
     return {
@@ -599,34 +596,11 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       resumedFromCheckpoint,
     };
   }
-
-  private async persistCheckpoint(
-    checkpoint: HeroBuildDecisionDatasetV3Checkpoint,
-  ): Promise<void> {
-    await this.writeJsonAtomically(this.checkpointPath, checkpoint);
-  }
-
-  private async writeJsonAtomically(path: string, value: unknown): Promise<void> {
-    const temporaryPath = `${path}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(value, undefined, 2), 'utf8');
-    await rename(temporaryPath, path);
-  }
-
-  private async readJson<T>(path: string): Promise<T | undefined> {
-    try {
-      return JSON.parse(await readFile(path, 'utf8')) as T;
-    } catch (error) {
-      if (isFileNotFoundError(error)) {
-        return undefined;
-      }
-      this.logger.warn(`Failed to read ${path}: ${getErrorMessage(error)}`);
-      return undefined;
-    }
-  }
 }
 
 export function createHeroBuildDecisionRows(
   sample: HeroBuildOfflineLoadedHeroSample,
+  alliedHeroIds: readonly number[],
   includeSellActions: boolean,
 ): {
   rows: HeroBuildDecisionDatasetV3Row[];
@@ -638,7 +612,6 @@ export function createHeroBuildDecisionRows(
   let excludedSellActionCount = 0;
   let nonMonotonicGameTimeCount = 0;
   let previousGameTimeS = Number.NEGATIVE_INFINITY;
-
   for (const step of sample.sequence.steps) {
     if (step.gameTimeS < previousGameTimeS) {
       nonMonotonicGameTimeCount += 1;
@@ -649,15 +622,15 @@ export function createHeroBuildDecisionRows(
       previousActionKeys.push(step.actionKey);
       continue;
     }
-    rows.push(createDecisionRow(sample, step, previousActionKeys));
+    rows.push(createDecisionRow(sample, alliedHeroIds, step, previousActionKeys));
     previousActionKeys.push(step.actionKey);
   }
-
   return { rows, excludedSellActionCount, nonMonotonicGameTimeCount };
 }
 
 function createDecisionRow(
   sample: HeroBuildOfflineLoadedHeroSample,
+  alliedHeroIds: readonly number[],
   step: CanonicalBuildStep,
   previousActionKeys: readonly string[],
 ): HeroBuildDecisionDatasetV3Row {
@@ -676,22 +649,24 @@ function createDecisionRow(
     previousActionKeys: [...previousActionKeys],
     buildPrefixKey:
       previousActionKeys.length > 0 ? previousActionKeys.join('>') : 'EMPTY',
-    alliedHeroIds: [...sample.alliedHeroIds],
+    alliedHeroIds: [...alliedHeroIds],
     enemyHeroIds: [...sample.enemyHeroIds],
     actualActionType: step.actionType,
     actualItemId: step.itemId,
     actualActionKey: step.actionKey,
-    outcomeLabel: {
-      playerWon: sample.player.won,
-    },
+    outcomeLabel: { playerWon: sample.player.won },
   };
 }
 
-function applyRowAudit(
-  audit: MutableAuditState,
-  row: HeroBuildDecisionDatasetV3Row,
-): void {
+function applyRowAudit(audit: AuditState, row: HeroBuildDecisionDatasetV3Row): void {
   audit.rowCount += 1;
+  getHeroAudit(audit, row.heroId).rowCount += 1;
+  audit.byPhase[row.phase].rowCount += 1;
+  const actionBucket = audit.byActionType[row.actualActionType] ?? { rowCount: 0 };
+  actionBucket.rowCount += 1;
+  audit.byActionType[row.actualActionType] = actionBucket;
+  increment(audit.alliedHeroCountHistogram, String(row.alliedHeroIds.length));
+  increment(audit.enemyHeroCountHistogram, String(row.enemyHeroIds.length));
   if (!Number.isSafeInteger(row.actualItemId) || row.actualItemId <= 0) {
     audit.invalidItemIdCount += 1;
   }
@@ -704,29 +679,13 @@ function applyRowAudit(
   if (row.enemyHeroIds.length < 6) {
     audit.rowsWithIncompleteEnemyRoster += 1;
   }
-  incrementRecord(audit.alliedHeroCountHistogram, String(row.alliedHeroIds.length));
-  incrementRecord(audit.enemyHeroCountHistogram, String(row.enemyHeroIds.length));
-  getOrCreateBucket(audit.byPhase, row.phase).rowCount += 1;
-  getOrCreateBucket(audit.byActionType, row.actualActionType).rowCount += 1;
-  getOrCreateHeroBucket(audit.byHero, row.heroId).rowCount += 1;
 }
 
-function createAudit(
-  checkpoint: HeroBuildDecisionDatasetV3Checkpoint,
+function buildAudit(
+  checkpoint: DatasetCheckpoint,
   generatedAt: string,
-  sourceWindowLastRefreshedAt?: string,
 ): HeroBuildDecisionDatasetV3Audit {
-  const mutable = checkpoint.audit;
-  const forbiddenFutureFields = [
-    'kills',
-    'deaths',
-    'assists',
-    'netWorth',
-    'finalKills',
-    'finalDeaths',
-    'finalAssists',
-    'finalNetWorth',
-  ];
+  const state = checkpoint.audit;
   const featureFields = [
     'heroId',
     'team',
@@ -738,64 +697,69 @@ function createAudit(
     'alliedHeroIds',
     'enemyHeroIds',
   ];
-  const warnings: string[] = [];
-  if (mutable.excludedSequenceCount > 0) {
-    warnings.push(
-      `${mutable.excludedSequenceCount} player sequences were excluded because replay diagnostics were present or no canonical steps were available.`,
-    );
-  }
-  if (mutable.rowsWithIncompleteAlliedRoster > 0) {
-    warnings.push(
-      `${mutable.rowsWithIncompleteAlliedRoster} rows have fewer than five allied heroes in the stored roster.`,
-    );
-  }
-  if (mutable.rowsWithIncompleteEnemyRoster > 0) {
-    warnings.push(
-      `${mutable.rowsWithIncompleteEnemyRoster} rows have fewer than six enemy heroes in the stored roster.`,
-    );
-  }
-  warnings.push(
+  const forbiddenFutureFields = [
+    'kills',
+    'deaths',
+    'assists',
+    'netWorth',
+    'finalKills',
+    'finalDeaths',
+    'finalAssists',
+    'finalNetWorth',
+  ];
+  const warnings = [
     'Candidate sets are intentionally not materialized in this extraction stage.',
-  );
-  warnings.push(
-    'Build archetypes are intentionally not assigned; buildPrefixKey is an observed history key, not an archetype label.',
-  );
-  const passed =
-    mutable.rowCount > 0 &&
-    mutable.duplicateDecisionCount === 0 &&
-    mutable.invalidItemIdCount === 0 &&
-    mutable.nonMonotonicGameTimeCount === 0;
-
+    'Build archetypes are intentionally not assigned; buildPrefixKey is observed history, not an archetype label.',
+  ];
+  if (state.excludedSequenceCount > 0) {
+    warnings.push(
+      `${state.excludedSequenceCount} player sequences were excluded because they were not safe to evaluate.`,
+    );
+  }
+  if (state.rowsWithIncompleteAlliedRoster > 0) {
+    warnings.push(
+      `${state.rowsWithIncompleteAlliedRoster} rows have fewer than five stored allied heroes.`,
+    );
+  }
+  if (state.rowsWithIncompleteEnemyRoster > 0) {
+    warnings.push(
+      `${state.rowsWithIncompleteEnemyRoster} rows have fewer than six stored enemy heroes.`,
+    );
+  }
   return {
     schemaVersion: HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION,
     generatedAt,
-    passed,
+    passed:
+      state.rowCount > 0 &&
+      state.duplicateDecisionCount === 0 &&
+      state.invalidItemIdCount === 0 &&
+      state.nonMonotonicGameTimeCount === 0,
     source: {
-      selectedMatchCount: mutable.selectedMatchCount,
-      matchCountWithRows: mutable.matchIdsWithRows.length,
-      playerCountWithRows: mutable.playerKeysWithRows.length,
-      sourcePlayerCount: mutable.sourcePlayerCount,
-      includedPlayerCount: mutable.includedPlayerCount,
-      excludedSequenceCount: mutable.excludedSequenceCount,
-      excludedSellActionCount: mutable.excludedSellActionCount,
-      sourceWindowLastRefreshedAt,
+      selectedMatchCount: state.selectedMatchCount,
+      matchCountWithRows: state.matchIdsWithRows.length,
+      playerCountWithRows: state.playerKeysWithRows.length,
+      sourcePlayerCount: state.sourcePlayerCount,
+      includedPlayerCount: state.includedPlayerCount,
+      excludedSequenceCount: state.excludedSequenceCount,
+      excludedSellActionCount: state.excludedSellActionCount,
+      sourceWindowLastRefreshedAt: checkpoint.sourceWindowLastRefreshedAt,
     },
     decisions: {
-      rowCount: mutable.rowCount,
-      duplicateDecisionCount: mutable.duplicateDecisionCount,
-      invalidItemIdCount: mutable.invalidItemIdCount,
-      nonMonotonicGameTimeCount: mutable.nonMonotonicGameTimeCount,
-      emptyInventoryBeforeCount: mutable.emptyInventoryBeforeCount,
+      rowCount: state.rowCount,
+      duplicateDecisionCount: state.duplicateDecisionCount,
+      invalidItemIdCount: state.invalidItemIdCount,
+      nonMonotonicGameTimeCount: state.nonMonotonicGameTimeCount,
+      emptyInventoryBeforeCount: state.emptyInventoryBeforeCount,
     },
     roster: {
-      alliedHeroCountHistogram: { ...mutable.alliedHeroCountHistogram },
-      enemyHeroCountHistogram: { ...mutable.enemyHeroCountHistogram },
-      rowsWithIncompleteAlliedRoster: mutable.rowsWithIncompleteAlliedRoster,
-      rowsWithIncompleteEnemyRoster: mutable.rowsWithIncompleteEnemyRoster,
+      alliedHeroCountHistogram: { ...state.alliedHeroCountHistogram },
+      enemyHeroCountHistogram: { ...state.enemyHeroCountHistogram },
+      rowsWithIncompleteAlliedRoster: state.rowsWithIncompleteAlliedRoster,
+      rowsWithIncompleteEnemyRoster: state.rowsWithIncompleteEnemyRoster,
     },
-    byHero: cloneRecord(mutable.byHero),
-    byPhase: cloneRecord(mutable.byPhase),
-    byActionType: cloneRecord(mutable.byActionType),
+    byHero: cloneJson(state.byHero),
+    byPhase: cloneJson(state.byPhase),
+    byActionType: cloneJson(state.byActionType),
     leakageAudit: {
       featureFields,
       labelFields: ['outcomeLabel.playerWon'],
@@ -810,16 +774,13 @@ function createAudit(
   };
 }
 
-function createManifest(
-  checkpoint: HeroBuildDecisionDatasetV3Checkpoint,
+async function buildManifest(
+  checkpoint: DatasetCheckpoint,
   generatedAt: string,
+  datasetPath: string,
   byteLength: number,
-  sha256: string,
   audit: HeroBuildDecisionDatasetV3Audit,
-): HeroBuildDecisionDatasetV3Manifest {
-  const descriptorTimes = checkpoint.descriptors
-    .map((descriptor) => new Date(descriptor.startTime).getTime())
-    .filter(Number.isFinite);
+): Promise<HeroBuildDecisionDatasetV3Manifest> {
   return {
     schemaVersion: HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION,
     datasetVersion: 'CONTEXTUAL_V3_DECISION_DATASET_1',
@@ -830,14 +791,9 @@ function createManifest(
     options: { ...checkpoint.options },
     source: {
       selectedMatchCount: checkpoint.descriptors.length,
-      selectedWindowStartTime:
-        descriptorTimes.length > 0
-          ? new Date(Math.min(...descriptorTimes)).toISOString()
-          : undefined,
+      selectedWindowStartTime: checkpoint.descriptors[0].startTime,
       selectedWindowEndTime:
-        descriptorTimes.length > 0
-          ? new Date(Math.max(...descriptorTimes)).toISOString()
-          : undefined,
+        checkpoint.descriptors[checkpoint.descriptors.length - 1].startTime,
       sourceWindowLastRefreshedAt: checkpoint.sourceWindowLastRefreshedAt,
       descriptorSha256: hashText(
         checkpoint.descriptors
@@ -849,7 +805,7 @@ function createManifest(
       format: 'NDJSON',
       fileName: 'dataset.ndjson',
       byteLength,
-      sha256,
+      sha256: await hashFile(datasetPath),
       rowCount: audit.decisions.rowCount,
     },
     featureContract: {
@@ -865,7 +821,7 @@ function createManifest(
   };
 }
 
-function createEmptyAuditState(selectedMatchCount: number): MutableAuditState {
+function createEmptyAuditState(selectedMatchCount: number): AuditState {
   return {
     selectedMatchCount,
     sourcePlayerCount: 0,
@@ -893,18 +849,32 @@ function createEmptyAuditState(selectedMatchCount: number): MutableAuditState {
   };
 }
 
+function getHeroAudit(
+  audit: AuditState,
+  heroId: number,
+): { rowCount: number; playerCount: number; excludedSequenceCount: number } {
+  const key = String(heroId);
+  const existing = audit.byHero[key];
+  if (existing) {
+    return existing;
+  }
+  const created = { rowCount: 0, playerCount: 0, excludedSequenceCount: 0 };
+  audit.byHero[key] = created;
+  return created;
+}
+
 function normalizeOptions(
   request: HeroBuildDecisionDatasetV3StartRequest,
 ): HeroBuildDecisionDatasetV3Options {
   return {
-    maxMatches: readBoundedInteger(
+    maxMatches: boundedInteger(
       request.maxMatches,
       HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,
       1,
       HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES,
       'maxMatches',
     ),
-    batchSize: readBoundedInteger(
+    batchSize: boundedInteger(
       request.batchSize,
       HERO_BUILD_DECISION_DATASET_V3_DEFAULT_BATCH_SIZE,
       HERO_BUILD_DECISION_DATASET_V3_MIN_BATCH_SIZE,
@@ -915,7 +885,7 @@ function normalizeOptions(
   };
 }
 
-function readBoundedInteger(
+function boundedInteger(
   value: number | undefined,
   defaultValue: number,
   minimum: number,
@@ -953,48 +923,13 @@ class BufferedNdjsonWriter {
   }
 
   private async flush(): Promise<void> {
-    if (this.buffer.length === 0) {
+    if (!this.buffer) {
       return;
     }
     const value = this.buffer;
     this.buffer = '';
     await this.handle.write(value);
   }
-}
-
-function getOrCreateBucket<T extends HeroBuildDecisionDatasetV3AuditBucket>(
-  record: Record<string, T>,
-  key: string,
-): T {
-  const existing = record[key];
-  if (existing) {
-    return existing;
-  }
-  const created = { rowCount: 0 } as T;
-  record[key] = created;
-  return created;
-}
-
-function getOrCreateHeroBucket(
-  record: Record<string, HeroBuildDecisionDatasetV3HeroAuditBucket>,
-  heroId: number,
-): HeroBuildDecisionDatasetV3HeroAuditBucket {
-  const key = String(heroId);
-  const existing = record[key];
-  if (existing) {
-    return existing;
-  }
-  const created = {
-    rowCount: 0,
-    playerCount: 0,
-    excludedSequenceCount: 0,
-  };
-  record[key] = created;
-  return created;
-}
-
-function incrementRecord(record: Record<string, number>, key: string): void {
-  record[key] = (record[key] ?? 0) + 1;
 }
 
 function compareDescriptors(left: PersistedDescriptor, right: PersistedDescriptor): number {
@@ -1015,51 +950,59 @@ function compareSamples(
   );
 }
 
-function cloneOptions(
-  options: HeroBuildDecisionDatasetV3Options | undefined,
-): HeroBuildDecisionDatasetV3Options | undefined {
-  return options ? { ...options } : undefined;
+function normalizeHeroIds(heroIds: readonly number[]): number[] {
+  return [
+    ...new Set(
+      heroIds.filter((heroId) => Number.isSafeInteger(heroId) && heroId > 0),
+    ),
+  ].sort((left, right) => left - right);
 }
 
-function cloneManifest(
-  manifest: HeroBuildDecisionDatasetV3Manifest,
-): HeroBuildDecisionDatasetV3Manifest {
-  return JSON.parse(JSON.stringify(manifest)) as HeroBuildDecisionDatasetV3Manifest;
+function groupBy<T, K>(values: readonly T[], keyOf: (value: T) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>();
+  for (const value of values) {
+    const key = keyOf(value);
+    const group = groups.get(key) ?? [];
+    group.push(value);
+    groups.set(key, group);
+  }
+  return groups;
 }
 
-function cloneAudit(
-  audit: HeroBuildDecisionDatasetV3Audit,
-): HeroBuildDecisionDatasetV3Audit {
-  return JSON.parse(JSON.stringify(audit)) as HeroBuildDecisionDatasetV3Audit;
+function increment(record: Record<string, number>, key: string): void {
+  record[key] = (record[key] ?? 0) + 1;
 }
 
-function cloneCheckpoint(
-  checkpoint: HeroBuildDecisionDatasetV3Checkpoint,
-): HeroBuildDecisionDatasetV3Checkpoint {
-  return JSON.parse(JSON.stringify(checkpoint)) as HeroBuildDecisionDatasetV3Checkpoint;
-}
-
-function cloneRecord<T>(record: Record<string, T>): Record<string, T> {
-  return JSON.parse(JSON.stringify(record)) as Record<string, T>;
-}
-
-function isCheckpoint(
-  value: HeroBuildDecisionDatasetV3Checkpoint | undefined,
-): value is HeroBuildDecisionDatasetV3Checkpoint {
+function isCheckpoint(value: DatasetCheckpoint | undefined): value is DatasetCheckpoint {
   return (
     value?.schemaVersion === HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION &&
     Array.isArray(value.descriptors) &&
     Array.isArray(value.heroIds) &&
     Number.isSafeInteger(value.nextHeroIndex) &&
-    Number.isSafeInteger(value.datasetByteLength) &&
-    typeof value.startedAt === 'string' &&
-    typeof value.audit === 'object'
+    Number.isSafeInteger(value.datasetByteLength)
   );
 }
 
 async function ensureFile(path: string): Promise<void> {
   const handle = await open(path, 'a');
   await handle.close();
+}
+
+async function readJsonFile<T>(path: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as T;
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function writeJsonAtomically(path: string, value: unknown): Promise<void> {
+  const temporaryPath = `${path}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(value, undefined, 2), 'utf8');
+  await rename(temporaryPath, path);
 }
 
 async function hashFile(path: string): Promise<string> {
@@ -1072,6 +1015,10 @@ async function hashFile(path: string): Promise<string> {
 
 function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function readBooleanEnvironmentValue(name: string, defaultValue: boolean): boolean {
