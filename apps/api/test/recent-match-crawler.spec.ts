@@ -7,7 +7,10 @@ import {
 } from '../src/deadlock-live/hero-abilities';
 import {
   calculateMissingRecentMatchCount,
+  isStandardSixVsSixRoster,
   RECENT_MATCH_CRAWL_CRON,
+  STANDARD_MATCH_PLAYER_COUNT,
+  STANDARD_MATCH_TEAM_SIZE,
 } from '../src/deadlock-live/recent-match-crawler.service';
 import { RECENT_MATCH_TARGET_COUNT } from '../src/deadlock-live/recent-matches-window.service';
 
@@ -26,6 +29,28 @@ describe('recent match crawler', () => {
     expect(calculateMissingRecentMatchCount(49_999)).toBe(1);
     expect(calculateMissingRecentMatchCount(50_000)).toBe(0);
     expect(calculateMissingRecentMatchCount(50_001)).toBe(0);
+  });
+
+  it('accepts only a complete standard six-versus-six roster', () => {
+    const roster = createRoster(STANDARD_MATCH_TEAM_SIZE, STANDARD_MATCH_TEAM_SIZE);
+
+    expect(roster).toHaveLength(STANDARD_MATCH_PLAYER_COUNT);
+    expect(isStandardSixVsSixRoster(roster)).toBe(true);
+  });
+
+  it('rejects a complete four-versus-four roster', () => {
+    expect(isStandardSixVsSixRoster(createRoster(4, 4))).toBe(false);
+  });
+
+  it('rejects duplicate heroes and unsupported teams', () => {
+    const duplicateHeroRoster = createRoster(6, 6);
+    duplicateHeroRoster[11].hero_id = duplicateHeroRoster[0].hero_id;
+
+    const unsupportedTeamRoster = createRoster(6, 6);
+    unsupportedTeamRoster[11].team = 2;
+
+    expect(isStandardSixVsSixRoster(duplicateHeroRoster)).toBe(false);
+    expect(isStandardSixVsSixRoster(unsupportedTeamRoster)).toBe(false);
   });
 
   it('does not restrict discovery to only the maximum average badge', () => {
@@ -53,3 +78,18 @@ describe('recent match crawler', () => {
     expect(mapAbilityToSkillNumber(DYNAMO_HERO_ID, 999)).toBe(UNKNOWN_SKILL_SLOT);
   });
 });
+
+function createRoster(
+  teamZeroCount: number,
+  teamOneCount: number,
+): Array<{ hero_id: number; team: number }> {
+  const teamZero = Array.from({ length: teamZeroCount }, (_, index) => ({
+    hero_id: index + 1,
+    team: 0,
+  }));
+  const teamOne = Array.from({ length: teamOneCount }, (_, index) => ({
+    hero_id: teamZeroCount + index + 1,
+    team: 1,
+  }));
+  return [...teamZero, ...teamOne];
+}
