@@ -130,9 +130,9 @@ interface Model {
   enemy: CountTable;
 }
 
-interface Catalog {
-  itemIds: Set<number>;
-  componentsByParent: Map<number, Set<number>>;
+export interface ContextualV3CandidateCatalog {
+  itemIds: ReadonlySet<number>;
+  componentsByParent: ReadonlyMap<number, ReadonlySet<number>>;
 }
 
 interface Metrics {
@@ -235,17 +235,15 @@ export class HeroBuildContextualV3TrainingService implements OnModuleInit {
       throw new Error('Contextual V3 training pipeline is already running.');
     }
     const options = normalizeOptions(request, this.defaultExpectedSha);
-    await mkdir(this.outputDir, { recursive: true });
-    await this.clearOutputs();
-    this.manifest = undefined;
-    this.audit = undefined;
-    this.evaluation = undefined;
-    this.archetypes = undefined;
     this.status = {
       ...this.idleStatus(),
       state: 'RUNNING',
       startedAt: new Date().toISOString(),
       options,
+      manifestAvailable: this.manifest !== undefined,
+      auditAvailable: this.audit !== undefined,
+      evaluationAvailable: this.evaluation !== undefined,
+      modelAvailable: this.manifest !== undefined,
     };
     void this.run(options);
     return this.getStatus();
@@ -271,6 +269,20 @@ export class HeroBuildContextualV3TrainingService implements OnModuleInit {
       if (sourceManifest.artifact.sha256 !== actualSha) {
         throw new Error('Source manifest SHA-256 does not match dataset.ndjson.');
       }
+
+      await mkdir(this.outputDir, { recursive: true });
+      await this.clearOutputs();
+      this.manifest = undefined;
+      this.audit = undefined;
+      this.evaluation = undefined;
+      this.archetypes = undefined;
+      this.status = {
+        ...this.status,
+        manifestAvailable: false,
+        auditAvailable: false,
+        evaluationAvailable: false,
+        modelAvailable: false,
+      };
 
       this.status = {
         ...this.status,
@@ -565,7 +577,7 @@ export class HeroBuildContextualV3TrainingService implements OnModuleInit {
     }
   }
 
-  private async loadCatalog(): Promise<Catalog> {
+  private async loadCatalog(): Promise<ContextualV3CandidateCatalog> {
     const [items, components] = await Promise.all([
       this.itemRepository.find(),
       this.itemComponentRepository.find(),
@@ -816,7 +828,7 @@ function updateModel(model: Model, row: PreparedRow): void {
 function candidateShortlist(
   row: PreparedRow,
   model: Model,
-  catalog: Catalog,
+  catalog: ContextualV3CandidateCatalog,
   limit: number,
 ): string[] {
   const phaseKey = `${row.features.heroId}|${row.features.phase}`;
@@ -826,20 +838,28 @@ function candidateShortlist(
   );
   const inventory = parseInventoryItemIds(row.features.inventoryBeforeStateKey);
   return [...counts]
-    .filter(([action]) => legalAction(action, inventory, catalog))
+    .filter(([action]) => isLegalCandidateAction(action, inventory, catalog))
     .sort(([aKey, aCount], [bKey, bCount]) => bCount - aCount || aKey.localeCompare(bKey))
     .slice(0, limit)
     .map(([action]) => action);
 }
 
-function legalAction(actionKey: string, inventory: ReadonlySet<number>, catalog: Catalog): boolean {
+export function isLegalCandidateAction(
+  actionKey: string,
+  inventory: ReadonlySet<number>,
+  catalog: ContextualV3CandidateCatalog,
+): boolean {
   const parsed = parseAction(actionKey);
   if (!parsed || !catalog.itemIds.has(parsed.itemId)) {
     return false;
   }
   if (parsed.actionType === 'UPGRADE') {
     const components = catalog.componentsByParent.get(parsed.itemId);
-    return Boolean(components && [...components].some((id) => inventory.has(id)));
+    return Boolean(
+      components &&
+        components.size > 0 &&
+        [...components].every((id) => inventory.has(id)),
+    );
   }
   return (
     (parsed.actionType === 'BUY' || parsed.actionType === 'REBUY') &&

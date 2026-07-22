@@ -1,6 +1,7 @@
 import {
   assignArchetype,
   deriveArchetypeSignature,
+  isLegalCandidateAction,
   parseInventoryItemIds,
   selectChronologicalSplit,
 } from '../src/deadlock-live/hero-build-contextual-v3-training.service';
@@ -70,6 +71,21 @@ describe('Contextual V3 training helpers', () => {
     expect(assignArchetype(11, ['BUY:1'], definitions)).toBe('H11-A1');
     expect(assignArchetype(11, ['BUY:9', 'BUY:8'], definitions)).toBe('H11-A2');
     expect(assignArchetype(11, ['BUY:100'], definitions)).toBe('OTHER');
+  });
+
+
+  it('requires every direct component before admitting an upgrade candidate', () => {
+    const catalog = {
+      itemIds: new Set([100, 200, 300]),
+      componentsByParent: new Map([[300, new Set([100, 200])]]),
+    };
+
+    expect(isLegalCandidateAction('UPGRADE:300', new Set([100]), catalog)).toBe(
+      false,
+    );
+    expect(
+      isLegalCandidateAction('UPGRADE:300', new Set([100, 200]), catalog),
+    ).toBe(true);
   });
 
   it('parses canonical inventory state keys', () => {
