@@ -42,7 +42,22 @@ jobs:
         run: yarn install --frozen-lockfile --ignore-engines
 
       - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api build > "$RUNNER_TEMP/api-build.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/api-build.log"
+          exit "$status"
+
+      - name: Upload failed API build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-telemetry-api-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/api-build.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Test API
         run: yarn workspace @deadlock-live-probe/api test
