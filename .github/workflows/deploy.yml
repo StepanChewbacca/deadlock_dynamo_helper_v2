@@ -238,6 +238,9 @@ jobs:
           public_host="${public_host%%/*}"
           public_host="${public_host%%:*}"
           status="$(curl --fail --show-error --silent \
+            --retry 10 \
+            --retry-delay 1 \
+            --retry-all-errors \
             --resolve "$public_host:443:127.0.0.1" \
             "$PUBLIC_API_BASE_URL/deadlock/analysis/contextual-v3-live/status")"
           echo "$status"
