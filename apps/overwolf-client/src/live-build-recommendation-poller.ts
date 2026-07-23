@@ -26,7 +26,7 @@ export interface LiveBuildRecommendationMatchupSignal {
   heroName: string;
   direction: 'POSITIVE' | 'NEGATIVE';
   scoreContribution: number;
-  modelLiftPercent: number;
+  contextualPurchaseLiftPercent: number;
   observationCount: number;
 }
 
@@ -85,6 +85,7 @@ export interface LiveBuildRecommendationSnapshot {
   gameTimeS?: number;
   timeBucket?: number;
   traversalKey?: string;
+  decisionId?: string;
   isStale: boolean;
   recommendation?: LiveBuildRecommendationPayload;
   refreshCount: number;

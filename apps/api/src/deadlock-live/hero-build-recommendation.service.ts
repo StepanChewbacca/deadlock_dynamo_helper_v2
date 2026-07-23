@@ -41,7 +41,7 @@ export interface HeroBuildRecommendationMatchupSignal {
   heroId: number;
   direction: HeroBuildRecommendationMatchupDirection;
   scoreContribution: number;
-  modelLiftPercent: number;
+  contextualPurchaseLiftPercent: number;
   observationCount: number;
 }
 

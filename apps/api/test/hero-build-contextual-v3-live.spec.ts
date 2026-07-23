@@ -52,7 +52,7 @@ describe('Contextual V3 live helpers', () => {
         observationCount: 120,
       }),
     );
-    expect(signals[0].modelLiftPercent).toBeGreaterThan(0.5);
+    expect(signals[0].contextualPurchaseLiftPercent).toBeGreaterThan(0.5);
   });
 
   it('keeps isolated matchup lift visible with a full enemy roster', () => {
@@ -71,7 +71,7 @@ describe('Contextual V3 live helpers', () => {
     expect(signals).toHaveLength(1);
     expect(signals[0].heroId).toBe(13);
     expect(signals[0].scoreContribution).toBeCloseTo(0.0012, 6);
-    expect(signals[0].modelLiftPercent).toBeGreaterThan(0.5);
+    expect(signals[0].contextualPurchaseLiftPercent).toBeGreaterThan(0.5);
   });
 
   it('reconstructs buy, upgrade, and sell actions from live inventory snapshots', () => {

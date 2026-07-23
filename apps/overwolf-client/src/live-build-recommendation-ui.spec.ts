@@ -8,9 +8,9 @@ describe('live build recommendation matchup signals', () => {
         heroName: 'Haze',
         direction: 'POSITIVE',
         scoreContribution: 0.031,
-        modelLiftPercent: 3.15,
+        contextualPurchaseLiftPercent: 3.15,
         observationCount: 124,
       }),
-    ).toBe('VS Haze +3.1% model lift · 124 samples');
+    ).toBe('VS Haze +3.1% purchase-pattern lift · 124 samples');
   });
 });

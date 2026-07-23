@@ -80,7 +80,7 @@ describe('hero build recommendation presentation', () => {
           heroId: 13,
           direction: 'POSITIVE',
           scoreContribution: 0.04,
-          modelLiftPercent: 4.08,
+          contextualPurchaseLiftPercent: 4.08,
           observationCount: 84,
         },
       ],
@@ -92,7 +92,7 @@ describe('hero build recommendation presentation', () => {
       expect.objectContaining({
         heroId: 13,
         heroName: 'Haze',
-        modelLiftPercent: 4.08,
+        contextualPurchaseLiftPercent: 4.08,
         observationCount: 84,
       }),
     ]);

@@ -581,7 +581,7 @@ export function createContextualV3MatchupSignals(input: {
         input.enemyWeight *
         (value.logProbability - input.baseLogProbability);
       const scoreContribution = isolatedScoreContribution / divisor;
-      const modelLiftPercent =
+      const contextualPurchaseLiftPercent =
         (Math.exp(isolatedScoreContribution) - 1) * 100;
       return {
         heroId: value.heroId,
@@ -590,7 +590,7 @@ export function createContextualV3MatchupSignals(input: {
             ? 'POSITIVE' as const
             : 'NEGATIVE' as const,
         scoreContribution,
-        modelLiftPercent,
+        contextualPurchaseLiftPercent,
         observationCount: value.observationCount,
       };
     })
@@ -598,7 +598,7 @@ export function createContextualV3MatchupSignals(input: {
       (value) =>
         value.direction === 'POSITIVE' &&
         value.observationCount >= MIN_MATCHUP_SIGNAL_OBSERVATIONS &&
-        value.modelLiftPercent >= MIN_MATCHUP_SIGNAL_LIFT_PERCENT,
+        value.contextualPurchaseLiftPercent >= MIN_MATCHUP_SIGNAL_LIFT_PERCENT,
     )
     .sort(
       (left, right) =>
