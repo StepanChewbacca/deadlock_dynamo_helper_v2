@@ -271,10 +271,10 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
     const phase = getContextualV3Phase(request.gameTimeS);
     const inventoryStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
     const inventory = parseInventoryItemIds(inventoryStateKey);
-    const alliedHeroIds = normalizeContextualV3RosterHeroIdsForTest(
+    const alliedHeroIds = normalizeContextualV3RosterHeroIds(
       request.alliedHeroIds ?? [],
     );
-    const enemyHeroIds = normalizeContextualV3RosterHeroIdsForTest(
+    const enemyHeroIds = normalizeContextualV3RosterHeroIds(
       request.enemyHeroIds ?? [],
     );
     const previousActionKeys = normalizeActionKeys(request.previousActionKeys ?? []);
@@ -827,7 +827,7 @@ function assertEqual(
   }
 }
 
-export function normalizeContextualV3RosterHeroIdsForTest(
+export function normalizeContextualV3RosterHeroIds(
   values: readonly number[],
 ): number[] {
   return [

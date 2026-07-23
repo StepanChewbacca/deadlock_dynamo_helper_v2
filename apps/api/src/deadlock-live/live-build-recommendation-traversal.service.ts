@@ -16,7 +16,7 @@ import {
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
-import { deriveContextualV3PreviousActionKeys } from './hero-build-recommendation.controller';
+import { deriveContextualV3PreviousActionKeys } from './contextual-v3-live-context';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 

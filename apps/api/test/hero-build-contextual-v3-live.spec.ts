@@ -1,9 +1,9 @@
 import {
   assignLiveArchetype,
   getContextualV3Phase,
-  normalizeContextualV3RosterHeroIdsForTest,
+  normalizeContextualV3RosterHeroIds,
 } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
-import { deriveContextualV3PreviousActionKeys } from '../src/deadlock-live/hero-build-recommendation.controller';
+import { deriveContextualV3PreviousActionKeys } from '../src/deadlock-live/contextual-v3-live-context';
 
 describe('Contextual V3 live helpers', () => {
   it('uses the same phase boundaries as offline evaluation', () => {
@@ -36,6 +36,7 @@ describe('Contextual V3 live helpers', () => {
     const recipes = new Map<number, number[]>([[300, [100, 200]]]);
     const actions = deriveContextualV3PreviousActionKeys(
       [
+        [],
         [100, 200],
         [300],
         [300, 400],
@@ -53,9 +54,21 @@ describe('Contextual V3 live helpers', () => {
     ]);
   });
 
+  it('treats the first non-empty snapshot as a safe mid-match baseline', () => {
+    expect(
+      deriveContextualV3PreviousActionKeys(
+        [
+          [100, 200],
+          [100, 200, 300],
+        ],
+        () => [],
+      ),
+    ).toEqual(['BUY:300']);
+  });
+
   it('canonicalizes roster hero aliases before model lookup', () => {
     expect(
-      normalizeContextualV3RosterHeroIdsForTest([64, 2, 76, 12]),
+      normalizeContextualV3RosterHeroIds([64, 2, 76, 12]),
     ).toEqual([2, 12]);
   });
 
@@ -63,6 +76,7 @@ describe('Contextual V3 live helpers', () => {
     expect(
       deriveContextualV3PreviousActionKeys(
         [
+          [],
           [100],
           [100],
           [100, 200],
