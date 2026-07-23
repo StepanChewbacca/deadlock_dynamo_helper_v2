@@ -1,0 +1,43 @@
+name: Diagnose model-only production
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-model-only-production.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed model-only backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          echo '--- timestamp ---'
+          date -u +'%Y-%m-%dT%H:%M:%SZ'
+          echo '--- deployed git head ---'
+          git rev-parse HEAD
+          echo '--- containers ---'
+          sudo docker compose ps
+          echo '--- local model status ---'
+          status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
+          echo "$status"
+          echo "$status" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const x=JSON.parse(s);if(x.mode!=='PRODUCTION'||x.model?.state!=='READY'||x.modelOnly!==true||x.fallbackEnabled!==false)process.exit(1)})"
+          echo '--- public model status ---'
+          public_status="$(curl --fail --show-error --silent --max-time 20 https://aboba-telegramovich.duckdns.org/deadlock/analysis/contextual-v3-live/status)"
+          echo "$public_status"
+          echo "$public_status" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const x=JSON.parse(s);if(x.mode!=='PRODUCTION'||x.model?.state!=='READY'||x.modelOnly!==true||x.fallbackEnabled!==false)process.exit(1)})"
+          echo '--- model-only recommendation smoke ---'
+          recommendation="$(curl --fail --show-error --silent --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -d '{"heroId":11,"itemIds":[],"gameTimeS":0,"alliedHeroIds":[],"enemyHeroIds":[],"previousActionKeys":[],"limit":5}' \
+            http://127.0.0.1:3000/deadlock/analysis/build-recommendation)"
+          echo "$recommendation"
+          echo "$recommendation" | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const x=JSON.parse(s);if(x.recommendationModel!=='CONTEXTUAL_V3'||!x.action?.actionKey)process.exit(1)})"
