@@ -1,4 +1,5 @@
 import {
+  advanceModelRolloutTime,
   classifyBuildPhase,
   normalizeHeroName,
   parseInventoryStateKey,
@@ -16,6 +17,12 @@ describe('live build desktop phase table helpers', () => {
     expect(classifyBuildPhase(600)).toBe('MID');
     expect(classifyBuildPhase(1199)).toBe('MID');
     expect(classifyBuildPhase(1200)).toBe('LATE');
+  });
+
+  it('advances model rollout time across phase boundaries', () => {
+    expect(advanceModelRolloutTime(0)).toBe(90);
+    expect(advanceModelRolloutTime(540)).toBe(630);
+    expect(classifyBuildPhase(advanceModelRolloutTime(1110))).toBe('LATE');
   });
 
   it('preserves duplicate item counts from projected state keys', () => {

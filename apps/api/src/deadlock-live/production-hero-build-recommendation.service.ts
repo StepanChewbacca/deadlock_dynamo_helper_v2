@@ -28,11 +28,16 @@ export interface ContextualV3ProductionStatus {
   contextualResponseCount: number;
   baselineResponseCount: number;
   fallbackCount: number;
+  modelOnly: boolean;
+  fallbackEnabled: boolean;
+  modelErrorCount: number;
   shadowScheduledCount: number;
   shadowCompletedCount: number;
   shadowInFlight: number;
   lastFallbackAt?: string;
   lastFallbackError?: string;
+  lastModelErrorAt?: string;
+  lastModelError?: string;
 }
 
 interface ContextualV3ShadowLog {
@@ -78,11 +83,14 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   private contextualResponseCount = 0;
   private baselineResponseCount = 0;
   private fallbackCount = 0;
+  private modelErrorCount = 0;
   private shadowScheduledCount = 0;
   private shadowCompletedCount = 0;
   private shadowInFlight = 0;
   private lastFallbackAt?: string;
   private lastFallbackError?: string;
+  private lastModelErrorAt?: string;
+  private lastModelError?: string;
 
   constructor(
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
@@ -103,11 +111,16 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       contextualResponseCount: this.contextualResponseCount,
       baselineResponseCount: this.baselineResponseCount,
       fallbackCount: this.fallbackCount,
+      modelOnly: this.mode === 'PRODUCTION',
+      fallbackEnabled: this.mode !== 'PRODUCTION',
+      modelErrorCount: this.modelErrorCount,
       shadowScheduledCount: this.shadowScheduledCount,
       shadowCompletedCount: this.shadowCompletedCount,
       shadowInFlight: this.shadowInFlight,
       lastFallbackAt: this.lastFallbackAt,
       lastFallbackError: this.lastFallbackError,
+      lastModelErrorAt: this.lastModelErrorAt,
+      lastModelError: this.lastModelError,
     };
   }
 
@@ -117,6 +130,21 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
+
+    if (this.mode === 'PRODUCTION') {
+      try {
+        const contextual = this.contextualV3LiveService.recommend(canonicalRequest);
+        this.contextualResponseCount += 1;
+        return {
+          ...contextual,
+          heroId: requestedHeroId,
+        };
+      } catch (error) {
+        this.recordModelError(error);
+        throw error;
+      }
+    }
+
     const canonicalBaseline = await super.recommend(canonicalRequest);
     const baseline: HeroBuildRecommendationResponse = {
       ...canonicalBaseline,
@@ -128,31 +156,13 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       return baseline;
     }
 
-    if (this.mode === 'SHADOW') {
-      this.baselineResponseCount += 1;
-      this.scheduleContextualShadow(
-        canonicalRequest,
-        requestedHeroId,
-        baseline,
-      );
-      return baseline;
-    }
-
-    try {
-      const contextual = this.contextualV3LiveService.recommend(
-        canonicalRequest,
-        baseline,
-      );
-      this.contextualResponseCount += 1;
-      return {
-        ...contextual,
-        heroId: requestedHeroId,
-      };
-    } catch (error) {
-      this.recordFallback(error);
-      this.baselineResponseCount += 1;
-      return baseline;
-    }
+    this.baselineResponseCount += 1;
+    this.scheduleContextualShadow(
+      canonicalRequest,
+      requestedHeroId,
+      baseline,
+    );
+    return baseline;
   }
 
   private scheduleContextualShadow(
@@ -202,7 +212,15 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.fallbackCount += 1;
     this.lastFallbackAt = new Date().toISOString();
     this.lastFallbackError = message;
-    this.logger.warn(`Contextual V3 fallback to baseline: ${message}`);
+    this.logger.warn(`Contextual V3 shadow evaluation failed: ${message}`);
+  }
+
+  private recordModelError(error: unknown): void {
+    const message = getErrorMessage(error);
+    this.modelErrorCount += 1;
+    this.lastModelErrorAt = new Date().toISOString();
+    this.lastModelError = message;
+    this.logger.error(`Contextual V3 model-only request failed: ${message}`);
   }
 }
 

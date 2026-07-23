@@ -25,7 +25,7 @@ export function showLiveBuildDesktop(snapshot: LiveBuildRecommendationSnapshot):
   injectOverrides();
   initializeDesktopSituationalItems();
   initializeDesktopBuildDeduplication();
-  showBaseDesktop(createFullRouteSnapshot(snapshot));
+  showBaseDesktop(snapshot);
   decorateDesktopSituationalItems(snapshot);
   renderMatchupDiagnostics(snapshot);
   rerenderDesktopSkillBuild();
@@ -82,22 +82,6 @@ export function describeMatchupDiagnostics(
   }
 
   return `Matchup funnel: ${evaluated} evaluated, ${situational} supported, ${promoted} promoted, but the primary action is not situational.`;
-}
-
-function createFullRouteSnapshot(
-  snapshot: LiveBuildRecommendationSnapshot,
-): LiveBuildRecommendationSnapshot {
-  const heroId = Number(snapshot.heroId);
-  return {
-    ...snapshot,
-    itemIds: [],
-    inventoryStateKey: 'EMPTY',
-    gameTimeS: 0,
-    timeBucket: 0,
-    traversalKey: Number.isSafeInteger(heroId) && heroId > 0
-      ? `full-build:${heroId}`
-      : snapshot.traversalKey,
-  };
 }
 
 function renderMatchupDiagnostics(

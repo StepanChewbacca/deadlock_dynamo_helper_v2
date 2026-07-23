@@ -49,6 +49,17 @@ export interface LiveBuildRecommendationPayload {
   mode: 'EXACT' | 'BACKOFF' | 'NO_MATCH';
   action: LiveBuildRecommendationAction;
   alternatives: LiveBuildRecommendationAction[];
+  recommendationModel?: 'CONTEXTUAL_V3';
+  modelVersion?: string;
+  modelSha256?: string;
+  buildArchetypeId?: string;
+  contextualFeatures?: {
+    phase: 'EARLY' | 'MID' | 'LATE';
+    alliedHeroIds: number[];
+    enemyHeroIds: number[];
+    previousActionCount: number;
+    archetypeApplied: boolean;
+  };
 }
 
 export interface LiveBuildRecommendationSnapshot {
@@ -245,6 +256,9 @@ export function createLiveBuildRecommendationPresentationKey(
     snapshot.refreshCount,
     snapshot.lastError ?? '',
     snapshot.recommendation?.mode ?? '',
+    snapshot.recommendation?.recommendationModel ?? 'BASELINE',
+    snapshot.recommendation?.modelVersion ?? '',
+    snapshot.recommendation?.contextualFeatures?.phase ?? '',
     snapshot.recommendation?.action.actionKey ?? '',
     snapshot.recommendation?.action.wasPromotedByMatchup ? 'promoted' : 'base',
     snapshot.recommendation?.action.wasInsertedByMatchup ? 'inserted' : 'existing',

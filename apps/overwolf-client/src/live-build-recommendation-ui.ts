@@ -80,7 +80,15 @@ function createHeader(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
 
   const eyebrow = document.createElement('span');
   eyebrow.className = 'live-build-eyebrow';
-  eyebrow.textContent = 'NEXT BUILD ACTION';
+  const source = snapshot.recommendation?.recommendationModel === 'CONTEXTUAL_V3'
+    ? 'MODEL V3'
+    : snapshot.recommendation
+      ? 'BASELINE'
+      : undefined;
+  const phase = snapshot.recommendation?.contextualFeatures?.phase;
+  eyebrow.textContent = ['NEXT BUILD ACTION', source, phase]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
 
   const status = document.createElement('span');
   status.className = `live-build-status live-build-status-${snapshot.state.toLowerCase()}`;

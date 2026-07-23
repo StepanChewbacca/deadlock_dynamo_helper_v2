@@ -5,8 +5,8 @@ import {
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
-const APP_VERSION = '0.1.9';
-const APP_BUILD = '019';
+const APP_VERSION = '0.1.10';
+const APP_BUILD = '020';
 const ow = (window as any).overwolf;
 
 function updateBuildStatus(): void {
@@ -18,7 +18,11 @@ function updateBuildStatus(): void {
     localWindow.__deadlockLiveRecommendationSnapshot
       ?? mainWindow?.latestLiveBuildRecommendation
   ) as
-    | { state?: string; matchId?: string; recommendation?: unknown }
+    | {
+        state?: string;
+        matchId?: string;
+        recommendation?: { recommendationModel?: string };
+      }
     | undefined;
   const matchId = String(
     localWindow.__deadlockLiveMatchId
@@ -30,10 +34,16 @@ function updateBuildStatus(): void {
     ? normalizeRuntimeState(snapshot?.recommendation ? 'READY' : snapshot?.state)
     : 'NO MATCH ID';
   const matchLabel = matchId ? `MATCH ${matchId}` : '';
+  const recommendationSource = snapshot?.recommendation
+    ? snapshot.recommendation.recommendationModel === 'CONTEXTUAL_V3'
+      ? 'MODEL V3'
+      : 'BASELINE'
+    : '';
   const label = [
     `BUILD ${APP_BUILD}`,
     `v${APP_VERSION}`,
     matchLabel,
+    recommendationSource,
     runtimeState,
   ].filter(Boolean).join(' · ');
 
