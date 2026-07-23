@@ -297,7 +297,6 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
       heroId,
       phase,
       archetypeId,
-      archetypeApplied: previousActionKeys.length > 0,
       alliedHeroIds,
       enemyHeroIds,
     });
@@ -543,7 +542,6 @@ function scoreCandidates(input: {
   heroId: number;
   phase: ContextualV3Phase;
   archetypeId: string;
-  archetypeApplied: boolean;
   alliedHeroIds: readonly number[];
   enemyHeroIds: readonly number[];
 }): ScoredAction[] {
@@ -575,16 +573,15 @@ function scoreCandidates(input: {
         input.candidates.length,
         smoothing,
       );
-      const archetypeDelta = input.archetypeApplied
-        ? logProbability(
-            input.model.counts.heroPhaseArchetype[
-              `${baseKey}|${input.archetypeId}`
-            ],
-            sourceActionKey,
-            input.candidates.length,
-            smoothing,
-          ) - base
-        : 0;
+      const archetypeDelta =
+        logProbability(
+          input.model.counts.heroPhaseArchetype[
+            `${baseKey}|${input.archetypeId}`
+          ],
+          sourceActionKey,
+          input.candidates.length,
+          smoothing,
+        ) - base;
       const allyDelta = input.alliedHeroIds.length > 0
         ? average(
             input.alliedHeroIds.map((heroId) =>

@@ -24,10 +24,12 @@ describe('live build recommendation traversal', () => {
     const input = createTraversalInput(state, localPlayer);
 
     expect(input.itemIds).toEqual([100, 200, 200]);
+    expect(input.alliedHeroIds).toEqual([]);
     expect(input.enemyHeroIds).toEqual([13]);
+    expect(input.previousActionKeys).toEqual([]);
     expect(input.inventoryStateKey).toBe('100x1|200x2');
     expect(input.timeBucket).toBe(0);
-    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2:13:0');
+    expect(input.traversalKey).toBe('match-1:local:72:100x1|200x2::13::0');
   });
 
   it('serves repeated observations from the traversal cache within the same time bucket', async () => {
@@ -248,6 +250,7 @@ function createHarness(recommend = createRecommendMock()) {
     { recommend } as unknown as HeroBuildRecommendationService,
     { present } as unknown as HeroBuildRecommendationPresentationService,
     { isActionLegalForState } as unknown as HeroBuildRecommendationOwnershipFilterService,
+    { getComponentItemIds: jest.fn(() => []) } as never,
   );
 
   return { service, recommend, present, isActionLegalForState };
