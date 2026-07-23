@@ -50,6 +50,15 @@ jobs:
           tail -n 200 "$RUNNER_TEMP/api-build.log"
           exit "$status"
 
+      - name: Upload failed API build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconstruction-api-build-log-${{ github.sha }}
+          path: ${{ runner.temp }}/api-build.log
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Test API
         run: yarn workspace @deadlock-live-probe/api test
 
