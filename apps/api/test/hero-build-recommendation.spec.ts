@@ -223,6 +223,39 @@ describe('hero build recommendation', () => {
     expect(incomplete.noMatchReason).toBe('NO_LEGAL_ACTION');
   });
 
+  it('requires repeated recipe component multiplicity for upgrades', () => {
+    const state = createState(
+      '10x2',
+      10,
+      [createAction('UPGRADE', 30, 8, 0.8, 300)],
+    );
+    const policy = createPolicy(72, [state]);
+    const recipeResolver = (parentItemId: number) =>
+      parentItemId === 30 ? [10, 10] : [];
+
+    const complete = recommendFromPolicy(
+      { heroId: 72, itemIds: [10, 10], gameTimeS: 300 },
+      '10x2',
+      policy,
+      parseStates([state]),
+      recipeResolver,
+      OPTIONS,
+    );
+    const incomplete = recommendFromPolicy(
+      { heroId: 72, itemIds: [10], gameTimeS: 300 },
+      '10x1',
+      policy,
+      parseStates([state]),
+      recipeResolver,
+      OPTIONS,
+    );
+
+    expect(complete.action.type).toBe('UPGRADE');
+    expect(complete.action.predictedStateKey).toBe('30x1');
+    expect(incomplete.action.type).toBe('HOLD');
+    expect(incomplete.noMatchReason).toBe('NO_LEGAL_ACTION');
+  });
+
   it('normalizes a historical rebuy into a buy recommendation', () => {
     const state = createState('EMPTY', 10, [createAction('REBUY', 100, 10, 1, 60)]);
     const policy = createPolicy(72, [state]);

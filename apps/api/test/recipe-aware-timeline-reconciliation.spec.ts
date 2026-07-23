@@ -53,6 +53,32 @@ describe('RecipeAwareTimelineReconciliationService', () => {
     });
   });
 
+  it('preserves repeated recipe components and consumes distinct duplicate instances', async () => {
+    const service = await createService([
+      { parentItemId: 300, componentItemId: 100, componentOrder: 0 },
+      { parentItemId: 300, componentItemId: 100, componentOrder: 1 },
+    ]);
+    const observed = new MatchTimelineNormalizationService().normalizePlayer(
+      createPlayer([
+        { id: 1, itemId: 100, purchaseTimeS: 30, soldTimeS: 120 },
+        { id: 2, itemId: 100, purchaseTimeS: 60, soldTimeS: 120 },
+        { id: 3, itemId: 300, purchaseTimeS: 120 },
+      ]),
+    );
+
+    const timeline = service.reconcilePlayer(observed);
+
+    expect(timeline.actions.map((action) => action.type)).toEqual([
+      'BUY',
+      'BUY',
+      'UPGRADE',
+    ]);
+    expect(timeline.actions[2]).toMatchObject({
+      consumedComponentItemIds: [100, 100],
+      consumedComponentInstanceIds: ['7:1', '7:2'],
+    });
+  });
+
   it('does not infer an upgrade when a required component sale is missing', async () => {
     const service = await createService([
       { parentItemId: 300, componentItemId: 100, componentOrder: 0 },
