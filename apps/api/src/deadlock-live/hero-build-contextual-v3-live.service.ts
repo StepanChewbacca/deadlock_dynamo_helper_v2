@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { ItemComponent } from './entities/item-component.entity';
 import { Item } from './entities/item.entity';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
+import { canonicalHeroId } from './hero-id-aliases';
 import {
   ContextualV3CandidateCatalog,
   orderContextualV3CandidateActions,
@@ -270,8 +271,12 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
     const phase = getContextualV3Phase(request.gameTimeS);
     const inventoryStateKey = createInventoryStateKeyFromItemIds(request.itemIds);
     const inventory = parseInventoryItemIds(inventoryStateKey);
-    const alliedHeroIds = normalizeHeroIds(request.alliedHeroIds ?? []);
-    const enemyHeroIds = normalizeHeroIds(request.enemyHeroIds ?? []);
+    const alliedHeroIds = normalizeContextualV3RosterHeroIdsForTest(
+      request.alliedHeroIds ?? [],
+    );
+    const enemyHeroIds = normalizeContextualV3RosterHeroIdsForTest(
+      request.enemyHeroIds ?? [],
+    );
     const previousActionKeys = normalizeActionKeys(request.previousActionKeys ?? []);
     const archetypeId = assignLiveArchetype(
       heroId,
@@ -822,9 +827,16 @@ function assertEqual(
   }
 }
 
-function normalizeHeroIds(values: readonly number[]): number[] {
-  return [...new Set(values.filter((value) => Number.isSafeInteger(value) && value > 0))]
-    .sort((left, right) => left - right);
+export function normalizeContextualV3RosterHeroIdsForTest(
+  values: readonly number[],
+): number[] {
+  return [
+    ...new Set(
+      values
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+        .map((value) => canonicalHeroId(value)),
+    ),
+  ].sort((left, right) => left - right);
 }
 
 function normalizeActionKeys(values: readonly string[]): string[] {

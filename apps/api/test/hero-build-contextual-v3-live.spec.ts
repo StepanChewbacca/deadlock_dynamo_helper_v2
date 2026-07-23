@@ -1,6 +1,7 @@
 import {
   assignLiveArchetype,
   getContextualV3Phase,
+  normalizeContextualV3RosterHeroIdsForTest,
 } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
 import { deriveContextualV3PreviousActionKeys } from '../src/deadlock-live/hero-build-recommendation.controller';
 
@@ -50,6 +51,12 @@ describe('Contextual V3 live helpers', () => {
       'BUY:400',
       'SELL:300',
     ]);
+  });
+
+  it('canonicalizes roster hero aliases before model lookup', () => {
+    expect(
+      normalizeContextualV3RosterHeroIdsForTest([64, 2, 76, 12]),
+    ).toEqual([2, 12]);
   });
 
   it('ignores duplicate inventory snapshots', () => {
