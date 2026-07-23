@@ -15,32 +15,24 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 5
     steps:
-      - name: Inspect production reverse proxy
+      - name: Inspect active nginx route
         shell: bash
         run: |
           set +e
-          echo 'diagnostic_version=2'
-          echo "runner_user=$(id -un)"
-          echo "hostname=$(hostname)"
-          echo '--- listeners ---'
-          sudo ss -ltnp | grep -E ':(80|443|3000)\b' || true
-          echo '--- services ---'
-          for service in nginx caddy apache2; do
-            echo "$service=$(sudo systemctl is-active "$service" 2>/dev/null || true)"
-          done
-          echo '--- nginx config ---'
-          if command -v nginx >/dev/null 2>&1; then
-            sudo nginx -T 2>&1 | grep -n -E -C 4 'server_name|location /deadlock|proxy_pass' | tail -n 160 || true
-          fi
-          echo '--- caddy config ---'
-          if command -v caddy >/dev/null 2>&1; then
-            sudo caddy adapt --config /etc/caddy/Caddyfile --pretty 2>&1 | tail -n 160 || true
-          fi
-          echo '--- local HTTPS probe ---'
-          curl -vk --connect-timeout 5 --max-time 15 \
+          echo '--- nginx files ---'
+          sudo grep -R -n -E 'server_name[[:space:]]+aboba-telegramovich\.duckdns\.org|location[[:space:]]+/deadlock|proxy_pass' \
+            /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -n 120 || true
+          echo '--- nginx syntax ---'
+          sudo nginx -t 2>&1 || true
+          echo '--- direct API ---'
+          curl --show-error --silent --output /tmp/direct-body --write-out 'status=%{http_code}\n' \
+            'http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status' || true
+          head -c 600 /tmp/direct-body 2>/dev/null || true
+          echo
+          echo '--- nginx API ---'
+          curl --insecure --show-error --silent --output /tmp/nginx-body --write-out 'status=%{http_code}\n' \
             --resolve 'aboba-telegramovich.duckdns.org:443:127.0.0.1' \
             'https://aboba-telegramovich.duckdns.org/deadlock/analysis/contextual-v3-live/status' || true
-          echo '--- direct API probe ---'
-          curl -v --connect-timeout 5 --max-time 15 \
-            'http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status' || true
+          head -c 600 /tmp/nginx-body 2>/dev/null || true
+          echo
           exit 1
