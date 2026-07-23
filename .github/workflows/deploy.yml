@@ -140,6 +140,90 @@ jobs:
           echo "DuckDNS update succeeded but $public_host still does not resolve." >&2
           exit 1
 
+      - name: Configure nginx Deadlock route
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_host="${PUBLIC_API_BASE_URL#https://}"
+          public_host="${public_host%%/*}"
+          public_host="${public_host%%:*}"
+          sudo env PUBLIC_API_HOST="$public_host" python3 - <<'PY'
+          import os
+          import re
+          import shutil
+          from pathlib import Path
+
+          host = os.environ['PUBLIC_API_HOST']
+          config_path = Path('/etc/nginx/sites-enabled') / host
+          if not config_path.exists():
+              raise SystemExit(f'Nginx site config does not exist: {config_path}')
+
+          source = config_path.read_text()
+          marker_start = '    # BEGIN DEADLOCK_DYNAMO_HELPER\n'
+          marker_end = '    # END DEADLOCK_DYNAMO_HELPER\n'
+          location_block = (
+              marker_start
+              + '    location ^~ /deadlock/ {\n'
+              + '        proxy_pass http://127.0.0.1:3000;\n'
+              + '        proxy_http_version 1.1;\n'
+              + '        proxy_set_header Host $host;\n'
+              + '        proxy_set_header X-Real-IP $remote_addr;\n'
+              + '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
+              + '        proxy_set_header X-Forwarded-Proto $scheme;\n'
+              + '        proxy_read_timeout 60s;\n'
+              + '    }\n'
+              + marker_end
+          )
+
+          if marker_start in source and marker_end in source:
+              pattern = re.compile(
+                  re.escape(marker_start) + r'.*?' + re.escape(marker_end),
+                  re.DOTALL,
+              )
+              updated = pattern.sub(location_block, source, count=1)
+          else:
+              server_pattern = re.compile(r'\bserver\s*\{')
+              updated = None
+              for match in server_pattern.finditer(source):
+                  open_brace = source.find('{', match.start())
+                  depth = 0
+                  close_brace = None
+                  for index in range(open_brace, len(source)):
+                      character = source[index]
+                      if character == '{':
+                          depth += 1
+                      elif character == '}':
+                          depth -= 1
+                          if depth == 0:
+                              close_brace = index
+                              break
+                  if close_brace is None:
+                      continue
+                  server_block = source[match.start():close_brace + 1]
+                  if (
+                      re.search(rf'\bserver_name\s+{re.escape(host)}\s*;', server_block)
+                      and (
+                          re.search(r'\blisten\s+443\b', server_block)
+                          or 'ssl_certificate' in server_block
+                      )
+                  ):
+                      updated = source[:close_brace] + '\n' + location_block + source[close_brace:]
+                      break
+              if updated is None:
+                  raise SystemExit(f'HTTPS nginx server block was not found for {host}.')
+
+          if updated != source:
+              backup_path = config_path.with_name(config_path.name + '.before-deadlock-route')
+              if not backup_path.exists():
+                  shutil.copy2(config_path, backup_path)
+              config_path.write_text(updated)
+              print(f'Updated nginx route in {config_path}.')
+          else:
+              print('Nginx Deadlock route is already up to date.')
+          PY
+          sudo nginx -t
+          sudo systemctl reload nginx
+
       - name: Verify HTTPS reverse proxy locally
         shell: bash
         run: |
