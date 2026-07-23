@@ -22,9 +22,7 @@ jobs:
           cd /home/ubuntu/apps/deadlock_dynamo_helper
           echo '--- timestamp ---'
           date -u +'%Y-%m-%dT%H:%M:%SZ'
-          echo '--- containers ---'
-          sudo docker compose ps
-          echo '--- contextual model status ---'
+          echo '--- model counters ---'
           curl --show-error --silent --max-time 15 \
             http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status
           echo
@@ -32,13 +30,13 @@ jobs:
           curl --show-error --silent --max-time 15 \
             http://127.0.0.1:3000/deadlock/live/build-recommendations/status
           echo
-          echo '--- traversal snapshots ---'
+          echo '--- compact snapshots ---'
           curl --show-error --silent --max-time 15 \
-            http://127.0.0.1:3000/deadlock/live/build-recommendations
-          echo
-          echo '--- recent recommendation HTTP traffic ---'
-          sudo sh -c "tail -n 500 /var/log/nginx/access.log 2>/dev/null | grep -E '/deadlock/live/matches/.*/build-recommendation|/deadlock/live/events' | tail -n 200" || true
-          echo '--- recent nginx errors ---'
-          sudo tail -n 100 /var/log/nginx/error.log 2>/dev/null || true
-          echo '--- recent API logs ---'
-          sudo docker compose logs --since=15m --tail=1000 api
+            http://127.0.0.1:3000/deadlock/live/build-recommendations \
+            | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{for(const x of JSON.parse(s)){console.log(JSON.stringify({state:x.state,matchId:x.matchId,heroId:x.heroId,gameTimeS:x.gameTimeS,refreshCount:x.refreshCount,cacheHitCount:x.cacheHitCount,lastObservedAt:x.lastObservedAt,lastStartedAt:x.lastStartedAt,lastUpdatedAt:x.lastUpdatedAt,lastError:x.lastError,action:x.recommendation?.action?.label}))}})"
+          echo '--- recent Overwolf HTTP traffic ---'
+          sudo sh -c "tail -n 1000 /var/log/nginx/access.log 2>/dev/null | grep -E '/deadlock/live/(matches/.*/build-recommendation|events)' | tail -n 80" || true
+          echo '--- relevant API warnings ---'
+          sudo docker compose logs --since=20m --tail=1500 api 2>&1 \
+            | grep -E 'Live build recommendation|Contextual V3|WARN|ERROR' \
+            | tail -n 100 || true
