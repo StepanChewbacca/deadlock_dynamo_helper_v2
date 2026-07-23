@@ -29,18 +29,8 @@ jobs:
       - name: Execute patch
         shell: bash
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import textwrap
-
-          source = Path('.github/workflows/apply-matchup-signal-visibility.yml').read_text()
-          start_marker = "          python3 <<'PY'\n"
-          end_marker = "          PY\n          git config user.name"
-          start = source.index(start_marker) + len(start_marker)
-          end = source.index(end_marker, start)
-          script = textwrap.dedent(source[start:end])
-          exec(compile(script, 'matchup-visibility-patch.py', 'exec'))
-          PY
+          set -euo pipefail
+          python3 .github/scripts/apply-matchup-signal-visibility.py
           git checkout origin/main -- .github/workflows/ci.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
