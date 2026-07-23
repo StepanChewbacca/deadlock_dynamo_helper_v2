@@ -25,6 +25,27 @@ describe('HeroBuildRecommendationController matchup context', () => {
     );
   });
 
+  it('keeps explicit model rollout context instead of replacing it with live context', async () => {
+    const harness = createHarness();
+
+    await harness.controller.recommend({
+      heroId: 72,
+      itemIds: [100],
+      gameTimeS: 630,
+      enemyHeroIds: [99],
+      alliedHeroIds: [88],
+      previousActionKeys: ['BUY:100', 'UPGRADE:200'],
+    });
+
+    expect(harness.recommend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enemyHeroIds: [99],
+        alliedHeroIds: [88],
+        previousActionKeys: ['BUY:100', 'UPGRADE:200'],
+      }),
+    );
+  });
+
   it('keeps an explicit empty enemy roster instead of inferring live context', async () => {
     const harness = createHarness();
 

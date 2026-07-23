@@ -31,6 +31,8 @@ export class RecommendHeroBuildDto {
   itemIds!: number[];
   gameTimeS!: number;
   enemyHeroIds?: number[];
+  alliedHeroIds?: number[];
+  previousActionKeys?: string[];
   limit?: number;
   minAlternativeHistoricalCount?: number;
   minAlternativeConfidence?: number;
@@ -70,8 +72,12 @@ export class HeroBuildRecommendationController {
       enemyHeroIds:
         validated.recommendationRequest.enemyHeroIds ??
         liveContext.enemyHeroIds,
-      alliedHeroIds: liveContext.alliedHeroIds,
-      previousActionKeys: liveContext.previousActionKeys,
+      alliedHeroIds:
+        validated.recommendationRequest.alliedHeroIds ??
+        liveContext.alliedHeroIds,
+      previousActionKeys:
+        validated.recommendationRequest.previousActionKeys ??
+        liveContext.previousActionKeys,
       limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
     };
     const response = await this.heroBuildRecommendationService.recommend(
@@ -204,7 +210,9 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
     );
   }
 
-  const enemyHeroIds = validateEnemyHeroIds(dto.enemyHeroIds);
+  const enemyHeroIds = validateHeroIds(dto.enemyHeroIds, 'enemyHeroIds');
+  const alliedHeroIds = validateHeroIds(dto.alliedHeroIds, 'alliedHeroIds');
+  const previousActionKeys = validatePreviousActionKeys(dto.previousActionKeys);
 
   return {
     recommendationRequest: {
@@ -212,6 +220,8 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
       itemIds: [...dto.itemIds],
       gameTimeS: dto.gameTimeS,
       enemyHeroIds,
+      alliedHeroIds,
+      previousActionKeys,
     },
     alternativeFilter: {
       limit: dto.limit ?? HERO_BUILD_DEFAULT_RECOMMENDATION_LIMIT,
@@ -225,21 +235,51 @@ function validateRequest(dto: RecommendHeroBuildDto): ValidatedRecommendHeroBuil
   };
 }
 
-function validateEnemyHeroIds(value: number[] | undefined): number[] | undefined {
+function validateHeroIds(
+  value: number[] | undefined,
+  fieldName: 'enemyHeroIds' | 'alliedHeroIds',
+): number[] | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (!Array.isArray(value)) {
-    throw new BadRequestException('enemyHeroIds must be an array.');
+    throw new BadRequestException(`${fieldName} must be an array.`);
   }
 
   for (const heroId of value) {
     if (!Number.isSafeInteger(heroId) || heroId <= 0) {
       throw new BadRequestException(
-        'Every enemyHeroIds value must be a positive safe integer.',
+        `Every ${fieldName} value must be a positive safe integer.`,
       );
     }
   }
 
   return [...new Set(value)].sort((left, right) => left - right);
+}
+
+function validatePreviousActionKeys(
+  value: string[] | undefined,
+): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new BadRequestException('previousActionKeys must be an array.');
+  }
+  if (value.length > 64) {
+    throw new BadRequestException('previousActionKeys must contain at most 64 values.');
+  }
+
+  for (const actionKey of value) {
+    if (
+      typeof actionKey !== 'string' ||
+      !/^(BUY|REBUY|UPGRADE|SELL):[1-9][0-9]*$/.test(actionKey)
+    ) {
+      throw new BadRequestException(
+        'Every previousActionKeys value must be a valid item action key.',
+      );
+    }
+  }
+
+  return [...value];
 }

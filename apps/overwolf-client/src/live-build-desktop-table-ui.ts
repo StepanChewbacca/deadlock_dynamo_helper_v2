@@ -6,6 +6,8 @@ import {
 const API_BASE_URL = 'https://aboba-telegramovich.duckdns.org';
 const ROOT_ID = 'live-build-desktop-root';
 const STYLE_ID = 'live-build-desktop-table-styles';
+const MODEL_ROLLOUT_STEP_S = 90;
+const MODEL_ROLLOUT_MAX_STEPS = 24;
 
 export type LiveBuildPhase = 'EARLY' | 'MID' | 'LATE';
 
@@ -28,11 +30,13 @@ interface ProjectedRecommendationResponse {
   gameTimeS: number;
   action: ExtendedLiveBuildRecommendationAction;
   alternatives: ExtendedLiveBuildRecommendationAction[];
+  recommendationModel?: 'CONTEXTUAL_V3';
 }
 
 interface ProjectedBuildStep {
   index: number;
   mode: ProjectedRecommendationResponse['mode'];
+  gameTimeS: number;
   requestedStateKey: string;
   predictedStateKey: string;
   action: ExtendedLiveBuildRecommendationAction;
@@ -109,13 +113,19 @@ async function projectFullBuild(
   const heroId = Number(snapshot.heroId);
   let itemIds = [...snapshot.itemIds];
   let gameTimeS = normalizeGameTime(snapshot.gameTimeS);
+  const alliedHeroIds = [...(snapshot.alliedHeroIds ?? [])];
+  const enemyHeroIds = [...(snapshot.enemyHeroIds ?? [])];
+  const previousActionKeys = [...(snapshot.previousActionKeys ?? [])];
   const steps: ProjectedBuildStep[] = [];
   const visitedTransitions = new Set<string>();
   const visitedStates = new Set<string>([
     snapshot.inventoryStateKey ?? createInventoryStateKey(itemIds),
   ]);
 
-  while (generation === projectionGeneration) {
+  while (
+    generation === projectionGeneration &&
+    steps.length < MODEL_ROLLOUT_MAX_STEPS
+  ) {
     const response = await window.fetch(
       `${API_BASE_URL}/deadlock/analysis/build-recommendation`,
       {
@@ -125,6 +135,9 @@ async function projectFullBuild(
           heroId,
           itemIds,
           gameTimeS,
+          alliedHeroIds,
+          enemyHeroIds,
+          previousActionKeys,
           limit: 5,
         }),
       },
@@ -137,6 +150,9 @@ async function projectFullBuild(
     const parsed = await response.json() as unknown;
     if (!isProjectedRecommendationResponse(parsed)) {
       throw new Error('Full build response has an invalid shape.');
+    }
+    if (parsed.recommendationModel !== 'CONTEXTUAL_V3') {
+      throw new Error('Full build response did not come from Contextual V3.');
     }
 
     const action = parsed.action;
@@ -158,6 +174,7 @@ async function projectFullBuild(
     steps.push({
       index: steps.length + 1,
       mode: parsed.mode,
+      gameTimeS,
       requestedStateKey: parsed.requestedStateKey,
       predictedStateKey,
       action,
@@ -174,10 +191,8 @@ async function projectFullBuild(
     }
 
     itemIds = nextItemIds;
-    gameTimeS = Math.max(
-      gameTimeS + 1,
-      normalizeGameTime(action.averageGameTimeS),
-    );
+    previousActionKeys.push(action.actionKey);
+    gameTimeS = advanceModelRolloutTime(gameTimeS);
   }
 
   return steps;
@@ -313,7 +328,14 @@ function createSummary(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
 
   const entries: Array<[string, string]> = [
     ['Game time', formatGameTime(snapshot.gameTimeS)],
-    ['Recommendation mode', snapshot.recommendation?.mode ?? 'WAITING'],
+    [
+      'Recommendation source',
+      snapshot.recommendation?.recommendationModel === 'CONTEXTUAL_V3'
+        ? `MODEL V3 ${snapshot.recommendation.contextualFeatures?.phase ?? ''}`.trim()
+        : snapshot.recommendation
+          ? 'BASELINE'
+          : 'WAITING',
+    ],
     ['Build actions', projectionStatus === 'READY' ? String(projectionSteps.length) : '...'],
     ['Refresh generation', String(snapshot.refreshCount)],
   ];
@@ -627,7 +649,11 @@ export function classifyBuildPhase(gameTimeS: number): LiveBuildPhase {
 }
 
 function getStepTime(step: ProjectedBuildStep): number {
-  return normalizeGameTime(step.action.averageGameTimeS);
+  return normalizeGameTime(step.gameTimeS);
+}
+
+export function advanceModelRolloutTime(gameTimeS: number): number {
+  return normalizeGameTime(gameTimeS) + MODEL_ROLLOUT_STEP_S;
 }
 
 function formatEvidence(action: ExtendedLiveBuildRecommendationAction): string {

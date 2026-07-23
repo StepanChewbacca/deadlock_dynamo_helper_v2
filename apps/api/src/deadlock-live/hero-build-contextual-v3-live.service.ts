@@ -260,7 +260,7 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
 
   recommend(
     request: HeroBuildContextualRecommendationRequest,
-    baseline: HeroBuildRecommendationResponse,
+    baseline?: HeroBuildRecommendationResponse,
   ): ContextualV3LiveRecommendationResponse {
     const loaded = this.loaded;
     if (!loaded || this.status.state !== 'READY') {
@@ -318,10 +318,14 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
     }
 
     const action = actions[0];
-    const mode = baseline.mode === 'NO_MATCH' ? 'BACKOFF' : baseline.mode;
+    const mode = baseline
+      ? baseline.mode === 'NO_MATCH'
+        ? 'BACKOFF'
+        : baseline.mode
+      : 'BACKOFF';
 
     return {
-      ...baseline,
+      ...(baseline ?? {}),
       mode,
       heroId: request.heroId,
       requestedStateKey: inventoryStateKey,
@@ -336,7 +340,9 @@ export class HeroBuildContextualV3LiveService implements OnModuleInit {
       action,
       alternatives: actions.slice(1),
       backoffReason:
-        baseline.mode === 'NO_MATCH' ? 'DIRECTIONAL_FALLBACK' : baseline.backoffReason,
+        baseline?.mode === 'NO_MATCH'
+          ? 'DIRECTIONAL_FALLBACK'
+          : baseline?.backoffReason,
       noMatchReason: undefined,
       recommendationModel: 'CONTEXTUAL_V3',
       modelVersion: loaded.model.modelVersion,
