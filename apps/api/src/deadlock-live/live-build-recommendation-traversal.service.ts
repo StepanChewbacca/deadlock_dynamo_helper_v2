@@ -136,7 +136,7 @@ export class LiveBuildRecommendationTraversalService {
       .map((item) => Number(item.id))
       .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
       .sort((left, right) => left - right);
-    const previousSnapshot = runtime.inventorySnapshots.at(-1);
+    const previousSnapshot = runtime.inventorySnapshots[runtime.inventorySnapshots.length - 1];
     if (!previousSnapshot || !sameNumberArrays(previousSnapshot, currentItemIds)) {
       runtime.inventorySnapshots.push(currentItemIds);
       if (runtime.inventorySnapshots.length > 128) {
