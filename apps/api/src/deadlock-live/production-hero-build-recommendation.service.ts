@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  ContextualHeroBuildRecommendationV2Service,
-  HeroBuildContextualV2RecommendationResponse,
-} from './contextual-hero-build-recommendation-v2.service';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
+import {
+  ContextualV3LiveRecommendationResponse,
+  ContextualV3LiveStatus,
+  HeroBuildContextualV3LiveService,
+} from './hero-build-contextual-v3-live.service';
 import { canonicalHeroId } from './hero-id-aliases';
 import {
   HeroBuildRecommendationResponse,
@@ -12,35 +13,45 @@ import {
 import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
-const SHADOW_ENABLED_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_ENABLED';
-const SHADOW_SAMPLE_RATE_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE';
-const SHADOW_MAX_IN_FLIGHT_ENV = 'DEADLOCK_CONTEXTUAL_SHADOW_MAX_IN_FLIGHT';
-const DEFAULT_SHADOW_SAMPLE_RATE = 0.1;
+const MODE_ENV = 'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE';
+const SHADOW_SAMPLE_RATE_ENV = 'DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE';
+const SHADOW_MAX_IN_FLIGHT_ENV = 'DEADLOCK_CONTEXTUAL_V3_SHADOW_MAX_IN_FLIGHT';
+const DEFAULT_SHADOW_SAMPLE_RATE = 1;
 const DEFAULT_SHADOW_MAX_IN_FLIGHT = 2;
 
-interface ContextualV2ShadowLog {
-  event: 'hero_build_contextual_v2_shadow';
-  modelVersion: HeroBuildContextualV2RecommendationResponse['modelVersion'];
-  configId: string;
+export type ContextualV3LiveMode = 'BASELINE' | 'SHADOW' | 'PRODUCTION';
+
+export interface ContextualV3ProductionStatus {
+  mode: ContextualV3LiveMode;
+  model: ContextualV3LiveStatus;
+  requestCount: number;
+  contextualResponseCount: number;
+  baselineResponseCount: number;
+  fallbackCount: number;
+  shadowScheduledCount: number;
+  shadowCompletedCount: number;
+  shadowInFlight: number;
+  lastFallbackAt?: string;
+  lastFallbackError?: string;
+}
+
+interface ContextualV3ShadowLog {
+  event: 'hero_build_contextual_v3_shadow';
   heroId: number;
   canonicalHeroId: number;
   gameTimeS: number;
+  alliedHeroIds: number[];
   enemyHeroIds: number[];
-  baselineMode: HeroBuildRecommendationResponse['mode'];
-  contextualMode: HeroBuildContextualV2RecommendationResponse['mode'];
+  previousActionCount: number;
+  modelVersion: string;
+  modelSha256: string;
+  buildArchetypeId: string;
   baselineTopActionKey: string;
   contextualTopActionKey: string;
   baselineTop3ActionKeys: string[];
   contextualTop3ActionKeys: string[];
   changedTop1: boolean;
   changedTop3: boolean;
-  baselineTopScore: number;
-  contextualTopScore: number;
-  contextualLogitBonus: number;
-  rosterInteractionLogOdds: number;
-  observedEnemyCount: number;
-  eligibleEnemyCount: number;
-  promotedCandidateCount: number;
   elapsedMs: number;
 }
 
@@ -49,10 +60,7 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   private readonly logger = new Logger(
     ProductionHeroBuildRecommendationService.name,
   );
-  private readonly shadowEnabled = readBooleanEnvironmentValue(
-    SHADOW_ENABLED_ENV,
-    true,
-  );
+  private readonly mode = readMode();
   private readonly shadowSampleRate = readBoundedNumberEnvironmentValue(
     SHADOW_SAMPLE_RATE_ENV,
     DEFAULT_SHADOW_SAMPLE_RATE,
@@ -65,13 +73,21 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     1,
     32,
   );
+
+  private requestCount = 0;
+  private contextualResponseCount = 0;
+  private baselineResponseCount = 0;
+  private fallbackCount = 0;
+  private shadowScheduledCount = 0;
+  private shadowCompletedCount = 0;
   private shadowInFlight = 0;
+  private lastFallbackAt?: string;
+  private lastFallbackError?: string;
 
   constructor(
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
-    private readonly contextualHeroBuildRecommendationV2Service:
-      ContextualHeroBuildRecommendationV2Service,
+    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
   ) {
     super(
       heroBuildTransitionAggregationService,
@@ -79,22 +95,64 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     );
   }
 
+  getStatus(): ContextualV3ProductionStatus {
+    return {
+      mode: this.mode,
+      model: this.contextualV3LiveService.getStatus(),
+      requestCount: this.requestCount,
+      contextualResponseCount: this.contextualResponseCount,
+      baselineResponseCount: this.baselineResponseCount,
+      fallbackCount: this.fallbackCount,
+      shadowScheduledCount: this.shadowScheduledCount,
+      shadowCompletedCount: this.shadowCompletedCount,
+      shadowInFlight: this.shadowInFlight,
+      lastFallbackAt: this.lastFallbackAt,
+      lastFallbackError: this.lastFallbackError,
+    };
+  }
+
   override async recommend(
     request: HeroBuildContextualRecommendationRequest,
   ): Promise<HeroBuildRecommendationResponse> {
+    this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
     const canonicalBaseline = await super.recommend(canonicalRequest);
-    const baseline = {
+    const baseline: HeroBuildRecommendationResponse = {
       ...canonicalBaseline,
       heroId: requestedHeroId,
     };
-    this.scheduleContextualShadow(
-      canonicalRequest,
-      requestedHeroId,
-      baseline,
-    );
-    return baseline;
+
+    if (this.mode === 'BASELINE') {
+      this.baselineResponseCount += 1;
+      return baseline;
+    }
+
+    if (this.mode === 'SHADOW') {
+      this.baselineResponseCount += 1;
+      this.scheduleContextualShadow(
+        canonicalRequest,
+        requestedHeroId,
+        baseline,
+      );
+      return baseline;
+    }
+
+    try {
+      const contextual = this.contextualV3LiveService.recommend(
+        canonicalRequest,
+        baseline,
+      );
+      this.contextualResponseCount += 1;
+      return {
+        ...contextual,
+        heroId: requestedHeroId,
+      };
+    } catch (error) {
+      this.recordFallback(error);
+      this.baselineResponseCount += 1;
+      return baseline;
+    }
   }
 
   private scheduleContextualShadow(
@@ -103,51 +161,48 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     baseline: HeroBuildRecommendationResponse,
   ): void {
     if (
-      !this.shadowEnabled ||
       this.shadowSampleRate <= 0 ||
       this.shadowInFlight >= this.shadowMaxInFlight ||
-      Math.random() >= this.shadowSampleRate ||
-      !request.enemyHeroIds ||
-      request.enemyHeroIds.length === 0
+      Math.random() >= this.shadowSampleRate
     ) {
       return;
     }
 
     this.shadowInFlight += 1;
+    this.shadowScheduledCount += 1;
     const startedAt = Date.now();
-    void this.contextualHeroBuildRecommendationV2Service
-      .rerank(
-        {
-          ...request,
-          itemIds: [...request.itemIds],
-          enemyHeroIds: [...request.enemyHeroIds],
-        },
-        baseline,
-      )
+    void Promise.resolve()
+      .then(() => this.contextualV3LiveService.recommend(request, baseline))
       .then((contextual) => {
-        const log = createContextualShadowLog(
+        this.shadowCompletedCount += 1;
+        const log = createContextualV3ShadowLog(
           request,
           requestedHeroId,
           baseline,
           contextual,
           Date.now() - startedAt,
         );
-        if (
-          log.changedTop1 ||
-          log.changedTop3 ||
-          log.promotedCandidateCount > 0
-        ) {
+        if (log.changedTop1 || log.changedTop3) {
           this.logger.log(JSON.stringify(log));
         }
       })
       .catch((error: unknown) => {
+        this.recordFallback(error);
         this.logger.warn(
-          `Contextual V2 shadow evaluation failed: ${getErrorMessage(error)}`,
+          `Contextual V3 shadow evaluation failed: ${getErrorMessage(error)}`,
         );
       })
       .finally(() => {
         this.shadowInFlight -= 1;
       });
+  }
+
+  private recordFallback(error: unknown): void {
+    const message = getErrorMessage(error);
+    this.fallbackCount += 1;
+    this.lastFallbackAt = new Date().toISOString();
+    this.lastFallbackError = message;
+    this.logger.warn(`Contextual V3 fallback to baseline: ${message}`);
   }
 }
 
@@ -158,17 +213,25 @@ function createCanonicalRequest(
     ...request,
     heroId: canonicalHeroId(request.heroId),
     itemIds: [...request.itemIds],
-    enemyHeroIds: request.enemyHeroIds ? [...request.enemyHeroIds] : undefined,
+    enemyHeroIds: request.enemyHeroIds
+      ? [...request.enemyHeroIds]
+      : undefined,
+    alliedHeroIds: request.alliedHeroIds
+      ? [...request.alliedHeroIds]
+      : undefined,
+    previousActionKeys: request.previousActionKeys
+      ? [...request.previousActionKeys]
+      : undefined,
   };
 }
 
-function createContextualShadowLog(
+function createContextualV3ShadowLog(
   request: HeroBuildContextualRecommendationRequest,
   requestedHeroId: number,
   baseline: HeroBuildRecommendationResponse,
-  contextual: HeroBuildContextualV2RecommendationResponse,
+  contextual: ContextualV3LiveRecommendationResponse,
   elapsedMs: number,
-): ContextualV2ShadowLog {
+): ContextualV3ShadowLog {
   const baselineActionKeys = [
     baseline.action.actionKey,
     ...baseline.alternatives.map((action) => action.actionKey),
@@ -181,30 +244,32 @@ function createContextualShadowLog(
   const contextualTop3ActionKeys = contextualActionKeys.slice(0, 3);
 
   return {
-    event: 'hero_build_contextual_v2_shadow',
-    modelVersion: contextual.modelVersion,
-    configId: contextual.config.id,
+    event: 'hero_build_contextual_v3_shadow',
     heroId: requestedHeroId,
     canonicalHeroId: request.heroId,
     gameTimeS: request.gameTimeS,
+    alliedHeroIds: [...(request.alliedHeroIds ?? [])],
     enemyHeroIds: [...(request.enemyHeroIds ?? [])],
-    baselineMode: baseline.mode,
-    contextualMode: contextual.mode,
+    previousActionCount: request.previousActionKeys?.length ?? 0,
+    modelVersion: contextual.modelVersion,
+    modelSha256: contextual.modelSha256,
+    buildArchetypeId: contextual.buildArchetypeId,
     baselineTopActionKey: baseline.action.actionKey,
     contextualTopActionKey: contextual.action.actionKey,
     baselineTop3ActionKeys,
     contextualTop3ActionKeys,
     changedTop1: baseline.action.actionKey !== contextual.action.actionKey,
     changedTop3: !sameValues(baselineTop3ActionKeys, contextualTop3ActionKeys),
-    baselineTopScore: baseline.action.score,
-    contextualTopScore: contextual.action.contextualScore,
-    contextualLogitBonus: contextual.action.contextualLogitBonus,
-    rosterInteractionLogOdds: contextual.action.rosterInteractionLogOdds,
-    observedEnemyCount: contextual.action.observedEnemyCount,
-    eligibleEnemyCount: contextual.action.eligibleEnemyCount,
-    promotedCandidateCount: contextual.promotedCandidateCount,
     elapsedMs,
   };
+}
+
+function readMode(): ContextualV3LiveMode {
+  const value = process.env[MODE_ENV]?.trim().toUpperCase();
+  if (value === 'BASELINE' || value === 'SHADOW' || value === 'PRODUCTION') {
+    return value;
+  }
+  return 'BASELINE';
 }
 
 function sameValues(left: readonly string[], right: readonly string[]): boolean {
@@ -212,20 +277,6 @@ function sameValues(left: readonly string[], right: readonly string[]): boolean 
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
-}
-
-function readBooleanEnvironmentValue(name: string, defaultValue: boolean): boolean {
-  const rawValue = process.env[name]?.trim().toLowerCase();
-  if (rawValue === undefined || rawValue.length === 0) {
-    return defaultValue;
-  }
-  if (rawValue === 'true' || rawValue === '1' || rawValue === 'yes') {
-    return true;
-  }
-  if (rawValue === 'false' || rawValue === '0' || rawValue === 'no') {
-    return false;
-  }
-  return defaultValue;
 }
 
 function readBoundedNumberEnvironmentValue(
