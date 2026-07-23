@@ -19,6 +19,7 @@ jobs:
         shell: bash
         run: |
           set +e
+          echo 'diagnostic_version=2'
           echo "runner_user=$(id -un)"
           echo "hostname=$(hostname)"
           echo '--- listeners ---'
