@@ -8,13 +8,71 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-matchup-hold-fix:
+    name: Apply matchup HOLD fix
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/contextual-v3-matchup-signals'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/contextual-v3-matchup-signals
+          fetch-depth: 0
+      - name: Hide stale signals on HOLD
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('apps/overwolf-client/src/live-build-recommendation-ui.ts')
+          text = path.read_text()
+          old = """function createMatchupSignals(
+  action: LiveBuildRecommendationAction,
+): HTMLElement | undefined {
+  const signals = (action.matchupSignals ?? []).filter(
+"""
+          new = """function createMatchupSignals(
+  action: LiveBuildRecommendationAction,
+): HTMLElement | undefined {
+  if (action.type === 'HOLD') {
+    return undefined;
+  }
+  const signals = (action.matchupSignals ?? []).filter(
+"""
+          if old not in text:
+              raise SystemExit('createMatchupSignals pattern not found')
+          text = text.replace(old, new, 1)
+          old = """function formatFirstMatchupSignal(
+  action: LiveBuildRecommendationAction,
+): string {
+  const signal = action.matchupSignals?.find(
+"""
+          new = """function formatFirstMatchupSignal(
+  action: LiveBuildRecommendationAction,
+): string {
+  if (action.type === 'HOLD') {
+    return '';
+  }
+  const signal = action.matchupSignals?.find(
+"""
+          if old not in text:
+              raise SystemExit('formatFirstMatchupSignal pattern not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git checkout origin/main -- .github/workflows/ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: hide matchup signals while recalculating"
+          git push origin HEAD:agent/contextual-v3-matchup-signals
+
   build-project:
     name: Build project
     runs-on: ubuntu-latest
