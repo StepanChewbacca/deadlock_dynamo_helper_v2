@@ -5,13 +5,87 @@ import {
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
-const DESKTOP_VERSION = 'v0.1.2';
+const APP_VERSION = '0.1.8';
+const APP_BUILD = '018';
 const ow = (window as any).overwolf;
 
-function updateDesktopVersion(): void {
-  const versionTag = document.querySelector('.version-tag');
-  if (versionTag) {
-    versionTag.textContent = DESKTOP_VERSION;
+function updateBuildStatus(): void {
+  const mainWindow = typeof ow?.windows?.getMainWindow === 'function'
+    ? ow.windows.getMainWindow() as any
+    : window as any;
+  const snapshot = mainWindow?.latestLiveBuildRecommendation as
+    | { state?: string; matchId?: string }
+    | undefined;
+  const matchId = String(
+    mainWindow?.__deadlockLiveMatchId ?? snapshot?.matchId ?? '',
+  ).trim();
+  const runtimeState = matchId
+    ? normalizeRuntimeState(snapshot?.state)
+    : 'NO MATCH ID';
+  const matchLabel = matchId ? `MATCH ${matchId}` : '';
+  const label = [
+    `BUILD ${APP_BUILD}`,
+    `v${APP_VERSION}`,
+    matchLabel,
+    runtimeState,
+  ].filter(Boolean).join(' · ');
+
+  const tags = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-app-version], .version-tag'),
+  );
+  if (tags.length === 0 && document.body) {
+    tags.push(createRuntimeBuildTag());
+  }
+
+  tags.forEach((tag) => {
+    tag.textContent = label;
+    tag.title = `Deadlock Live Probe ${label}`;
+  });
+}
+
+function createRuntimeBuildTag(): HTMLElement {
+  const tag = document.createElement('div');
+  tag.dataset.appVersion = 'true';
+  Object.assign(tag.style, {
+    position: 'fixed',
+    right: '8px',
+    bottom: '6px',
+    zIndex: '2147483647',
+    maxWidth: 'calc(100vw - 16px)',
+    padding: '3px 6px',
+    border: '1px solid rgba(255, 107, 74, 0.55)',
+    borderRadius: '4px',
+    background: 'rgba(12, 12, 16, 0.9)',
+    color: '#ff9a82',
+    fontFamily: '\'JetBrains Mono\', monospace',
+    fontSize: '9px',
+    fontWeight: '700',
+    lineHeight: '1.2',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    pointerEvents: 'none',
+  });
+  document.body.appendChild(tag);
+  return tag;
+}
+
+function normalizeRuntimeState(value: string | undefined): string {
+  switch (value) {
+    case 'READY':
+      return 'READY';
+    case 'REFRESHING':
+      return 'REFRESHING';
+    case 'WAITING_FOR_LOCAL_PLAYER':
+      return 'WAITING PLAYER';
+    case 'WAITING_FOR_HERO':
+      return 'WAITING HERO';
+    case 'WAITING_FOR_BACKEND':
+      return 'WAITING API';
+    case 'ERROR':
+      return 'API ERROR';
+    default:
+      return 'WAITING API';
   }
 }
 
@@ -93,9 +167,10 @@ function restoreDesktopWindow(windowId: string): void {
 (window as any).showDesktopBuildWindow = showDesktopBuildWindow;
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', updateDesktopVersion, { once: true });
+  document.addEventListener('DOMContentLoaded', updateBuildStatus, { once: true });
 } else {
-  updateDesktopVersion();
+  updateBuildStatus();
 }
 
+setInterval(updateBuildStatus, 1000);
 setTimeout(() => showDesktopBuildWindow(true), 250);
