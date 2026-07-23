@@ -1,0 +1,62 @@
+name: Apply multiset action engine
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-multiset-action-engine.yml
+      - scripts/apply-multiset-action-engine.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/add-multiset-action-engine'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Apply implementation
+        run: python3 scripts/apply-multiset-action-engine.py
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Test API
+        run: yarn workspace @deadlock-live-probe/api test
+
+      - name: Remove temporary implementation files
+        run: rm .github/workflows/apply-multiset-action-engine.yml scripts/apply-multiset-action-engine.py
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit verified implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: add multiset action engine"
+          git push
