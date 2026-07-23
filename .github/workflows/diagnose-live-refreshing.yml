@@ -36,9 +36,9 @@ jobs:
           curl --show-error --silent --max-time 15 \
             http://127.0.0.1:3000/deadlock/live/build-recommendations
           echo
-          echo '--- current live states ---'
-          curl --show-error --silent --max-time 15 \
-            http://127.0.0.1:3000/deadlock/live/states
-          echo
+          echo '--- recent recommendation HTTP traffic ---'
+          sudo sh -c "tail -n 500 /var/log/nginx/access.log 2>/dev/null | grep -E '/deadlock/live/matches/.*/build-recommendation|/deadlock/live/events' | tail -n 200" || true
+          echo '--- recent nginx errors ---'
+          sudo tail -n 100 /var/log/nginx/error.log 2>/dev/null || true
           echo '--- recent API logs ---'
           sudo docker compose logs --since=15m --tail=1000 api
