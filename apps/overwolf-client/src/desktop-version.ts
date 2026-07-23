@@ -5,22 +5,29 @@ import {
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
-const APP_VERSION = '0.1.8';
-const APP_BUILD = '018';
+const APP_VERSION = '0.1.9';
+const APP_BUILD = '019';
 const ow = (window as any).overwolf;
 
 function updateBuildStatus(): void {
+  const localWindow = window as any;
   const mainWindow = typeof ow?.windows?.getMainWindow === 'function'
     ? ow.windows.getMainWindow() as any
-    : window as any;
-  const snapshot = mainWindow?.latestLiveBuildRecommendation as
-    | { state?: string; matchId?: string }
+    : localWindow;
+  const snapshot = (
+    localWindow.__deadlockLiveRecommendationSnapshot
+      ?? mainWindow?.latestLiveBuildRecommendation
+  ) as
+    | { state?: string; matchId?: string; recommendation?: unknown }
     | undefined;
   const matchId = String(
-    mainWindow?.__deadlockLiveMatchId ?? snapshot?.matchId ?? '',
+    localWindow.__deadlockLiveMatchId
+      ?? mainWindow?.__deadlockLiveMatchId
+      ?? snapshot?.matchId
+      ?? '',
   ).trim();
   const runtimeState = matchId
-    ? normalizeRuntimeState(snapshot?.state)
+    ? normalizeRuntimeState(snapshot?.recommendation ? 'READY' : snapshot?.state)
     : 'NO MATCH ID';
   const matchLabel = matchId ? `MATCH ${matchId}` : '';
   const label = [
