@@ -3,19 +3,57 @@
   "type": "WebApp",
   "meta": {
     "name": "Deadlock Live Probe",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "minimum-overwolf-version": "0.197.0",
+    "minimum-gep-version": "305.0",
     "author": "Antigravity",
-    "description": "Telemetry probe and full live build overlay for Deadlock",
-    "icon": "icon.png"
+    "description": "Real-time Deadlock build recommendations and telemetry overlay",
+    "icon": "dynamo.png",
+    "icon_gray": "dynamo.png",
+    "launcher_icon": "dynamo.png",
+    "window_icon": "dynamo.png",
+    "dock_button_title": "Deadlock Live Probe"
   },
+  "permissions": [
+    "GameInfo",
+    "Hotkeys"
+  ],
   "data": {
+    "game_targeting": {
+      "type": "dedicated",
+      "game_ids": [
+        24482
+      ]
+    },
+    "externally_connectable": {
+      "matches": [
+        "https://aboba-telegramovich.duckdns.org",
+        "https://fonts.googleapis.com",
+        "https://fonts.gstatic.com"
+      ]
+    },
+    "launch_events": [
+      {
+        "event": "GameLaunch",
+        "event_data": {
+          "game_ids": [
+            24482
+          ],
+          "wait_for_stable_framerate": 30
+        },
+        "start_minimized": true
+      }
+    ],
+    "auto_relaunch_on_crash": true,
     "start_window": "desktop",
     "windows": {
       "desktop": {
         "file": "desktop.html",
         "transparent": false,
         "resizable": true,
+        "desktop_only": true,
+        "use_os_windowing": true,
+        "show_in_taskbar": true,
         "size": {
           "width": 600,
           "height": 600
@@ -79,6 +117,8 @@
         "default": "Ctrl+Shift+Home"
       }
     },
-    "game_events": [24482]
+    "game_events": [
+      24482
+    ]
   }
 }
