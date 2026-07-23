@@ -113,8 +113,9 @@ async function projectFullBuild(
   const heroId = Number(snapshot.heroId);
   let itemIds = [...snapshot.itemIds];
   let gameTimeS = normalizeGameTime(snapshot.gameTimeS);
+  const alliedHeroIds = [...(snapshot.alliedHeroIds ?? [])];
   const enemyHeroIds = [...(snapshot.enemyHeroIds ?? [])];
-  const previousActionKeys: string[] = [];
+  const previousActionKeys = [...(snapshot.previousActionKeys ?? [])];
   const steps: ProjectedBuildStep[] = [];
   const visitedTransitions = new Set<string>();
   const visitedStates = new Set<string>([
@@ -134,6 +135,7 @@ async function projectFullBuild(
           heroId,
           itemIds,
           gameTimeS,
+          alliedHeroIds,
           enemyHeroIds,
           previousActionKeys,
           limit: 5,

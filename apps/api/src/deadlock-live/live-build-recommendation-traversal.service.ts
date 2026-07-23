@@ -55,7 +55,9 @@ export interface LiveBuildRecommendationTraversalSnapshot {
   steamId?: string;
   heroId?: number;
   itemIds: number[];
+  alliedHeroIds: number[];
   enemyHeroIds: number[];
+  previousActionKeys: string[];
   inventoryStateKey?: string;
   gameTimeS?: number;
   timeBucket?: number;
@@ -179,7 +181,9 @@ export class LiveBuildRecommendationTraversalService {
       steamId: input.steamId,
       heroId: input.heroId,
       itemIds: [...input.itemIds],
+      alliedHeroIds: [...input.alliedHeroIds],
       enemyHeroIds: [...input.enemyHeroIds],
+      previousActionKeys: [...input.previousActionKeys],
       inventoryStateKey: input.inventoryStateKey,
       gameTimeS: input.gameTimeS,
       timeBucket: input.timeBucket,
@@ -248,7 +252,9 @@ export class LiveBuildRecommendationTraversalService {
         state: 'WAITING_FOR_LOCAL_PLAYER',
         matchId,
         itemIds: [],
+        alliedHeroIds: [],
         enemyHeroIds: [],
+        previousActionKeys: [],
         isStale: false,
         refreshCount: 0,
         cacheHitCount: 0,
@@ -288,7 +294,9 @@ export class LiveBuildRecommendationTraversalService {
       matchId: runtime.matchId,
       steamId,
       itemIds: [],
+      alliedHeroIds: [],
       enemyHeroIds: [],
+      previousActionKeys: [],
       isStale: false,
       refreshCount: runtime.snapshot.refreshCount,
       cacheHitCount: runtime.snapshot.cacheHitCount,
@@ -365,7 +373,9 @@ export class LiveBuildRecommendationTraversalService {
           steamId: input.steamId,
           heroId: input.heroId,
           itemIds: [...input.itemIds],
+          alliedHeroIds: [...input.alliedHeroIds],
           enemyHeroIds: [...input.enemyHeroIds],
+          previousActionKeys: [...input.previousActionKeys],
           inventoryStateKey: input.inventoryStateKey,
           gameTimeS: input.gameTimeS,
           timeBucket: input.timeBucket,
@@ -575,7 +585,9 @@ function cloneSnapshot(
   return {
     ...snapshot,
     itemIds: [...snapshot.itemIds],
+    alliedHeroIds: [...snapshot.alliedHeroIds],
     enemyHeroIds: [...snapshot.enemyHeroIds],
+    previousActionKeys: [...snapshot.previousActionKeys],
     recommendation: snapshot.recommendation
       ? {
           ...snapshot.recommendation,

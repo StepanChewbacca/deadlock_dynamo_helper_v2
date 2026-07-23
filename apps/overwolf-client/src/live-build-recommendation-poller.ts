@@ -68,7 +68,9 @@ export interface LiveBuildRecommendationSnapshot {
   steamId?: string;
   heroId?: number;
   itemIds: number[];
+  alliedHeroIds?: number[];
   enemyHeroIds?: number[];
+  previousActionKeys?: string[];
   inventoryStateKey?: string;
   gameTimeS?: number;
   timeBucket?: number;
@@ -284,10 +286,18 @@ export function preserveLastReadyRecommendation(
     steamId: next.steamId ?? previous.steamId,
     heroId: next.heroId ?? previous.heroId,
     itemIds: next.itemIds.length > 0 ? [...next.itemIds] : [...previous.itemIds],
+    alliedHeroIds:
+      next.alliedHeroIds && next.alliedHeroIds.length > 0
+        ? [...next.alliedHeroIds]
+        : [...(previous.alliedHeroIds ?? [])],
     enemyHeroIds:
       next.enemyHeroIds && next.enemyHeroIds.length > 0
         ? [...next.enemyHeroIds]
         : [...(previous.enemyHeroIds ?? [])],
+    previousActionKeys:
+      next.previousActionKeys && next.previousActionKeys.length > 0
+        ? [...next.previousActionKeys]
+        : [...(previous.previousActionKeys ?? [])],
     inventoryStateKey: next.inventoryStateKey ?? previous.inventoryStateKey,
     gameTimeS: next.gameTimeS ?? previous.gameTimeS,
     timeBucket: next.timeBucket ?? previous.timeBucket,
@@ -312,7 +322,9 @@ function createWaitingSnapshot(matchId: string): LiveBuildRecommendationSnapshot
     state: 'WAITING_FOR_BACKEND',
     matchId,
     itemIds: [],
+    alliedHeroIds: [],
     enemyHeroIds: [],
+    previousActionKeys: [],
     isStale: false,
     refreshCount: 0,
     cacheHitCount: 0,

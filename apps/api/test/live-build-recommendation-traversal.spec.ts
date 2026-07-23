@@ -47,7 +47,9 @@ describe('live build recommendation traversal', () => {
     expect(harness.present).toHaveBeenCalledTimes(1);
     expect(harness.service.getMatchSnapshot('match-1')).toMatchObject({
       state: 'READY',
+      alliedHeroIds: [],
       enemyHeroIds: [13],
+      previousActionKeys: [],
       inventoryStateKey: '100x1',
       timeBucket: 0,
       refreshCount: 1,
