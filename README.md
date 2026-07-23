@@ -17,4 +17,6 @@ Yarn workspace monorepo capturing real-time *Deadlock* game events through Overw
 
 Database reset, backup, migration, and raw metadata reprocessing instructions are in [`docs/database-migrations.md`](docs/database-migrations.md).
 
-For detailed setup, sideloading, and validation instructions, refer to the [Overwolf Deadlock Live Probe Runbook](file:///wsl$/Ubuntu/home/chewie/deadlock/docs/overwolf-deadlock-live-probe-runbook.md).
+For setup, sideloading, and live validation, see the [Overwolf Deadlock Live Probe Runbook](docs/overwolf-deadlock-live-probe-runbook.md).
+
+For API deployment, OPK packaging, Testing-channel verification, Production promotion, and rollback, see the [Overwolf Production Release Runbook](docs/overwolf-production-release.md).
