@@ -1,0 +1,32 @@
+name: Apply Contextual V3 Array.at fix
+
+on:
+  push:
+    branches:
+      - agent/contextual-v3-production
+    paths:
+      - .github/workflows/apply-contextual-v3-array-at-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/contextual-v3-production
+          fetch-depth: 0
+      - name: Apply fix
+        run: python3 scripts/apply-contextual-v3-array-at-fix.py
+      - name: Validate diff
+        run: git diff --check
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/deadlock-live/live-build-recommendation-traversal.service.ts
+          git commit -m "fix: avoid unsupported Array.at usage"
+          git push origin HEAD:agent/contextual-v3-production
