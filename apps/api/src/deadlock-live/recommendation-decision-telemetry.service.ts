@@ -24,6 +24,7 @@ export type RecommendationDecisionTelemetryEventType =
 export type RecommendationActionReconstructionConfidence =
   | 'EXACT_SINGLE_ACTION'
   | 'MULTI_ACTION_INTERVAL'
+  | 'AMBIGUOUS_MULTI_ACTION'
   | 'UNRESOLVED';
 
 export type RecommendationDecisionSupersedeReason =
