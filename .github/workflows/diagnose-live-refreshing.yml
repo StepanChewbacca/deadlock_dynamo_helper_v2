@@ -1,0 +1,44 @@
+name: Diagnose stuck live recommendation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-live-refreshing.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Inspect production live traversal
+        shell: bash
+        run: |
+          set +e
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          echo '--- timestamp ---'
+          date -u +'%Y-%m-%dT%H:%M:%SZ'
+          echo '--- containers ---'
+          sudo docker compose ps
+          echo '--- contextual model status ---'
+          curl --show-error --silent --max-time 15 \
+            http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status
+          echo
+          echo '--- traversal status ---'
+          curl --show-error --silent --max-time 15 \
+            http://127.0.0.1:3000/deadlock/live/build-recommendations/status
+          echo
+          echo '--- traversal snapshots ---'
+          curl --show-error --silent --max-time 15 \
+            http://127.0.0.1:3000/deadlock/live/build-recommendations
+          echo
+          echo '--- current live states ---'
+          curl --show-error --silent --max-time 15 \
+            http://127.0.0.1:3000/deadlock/live/states
+          echo
+          echo '--- recent API logs ---'
+          sudo docker compose logs --since=15m --tail=1000 api
