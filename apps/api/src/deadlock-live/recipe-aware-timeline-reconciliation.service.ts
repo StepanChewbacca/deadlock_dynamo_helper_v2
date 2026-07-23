@@ -66,9 +66,7 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
       }
 
       const componentItemIds = nextRecipes.get(parentItemId) ?? [];
-      if (!componentItemIds.includes(componentItemId)) {
-        componentItemIds.push(componentItemId);
-      }
+      componentItemIds.push(componentItemId);
       nextRecipes.set(parentItemId, componentItemIds);
     }
 
@@ -213,13 +211,15 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
 
       const componentSellActions: CanonicalItemAction[] = [];
       let complete = true;
-      for (const componentItemId of requiredComponentItemIds) {
+      for (const [componentItemId, requiredCount] of countItemIds(
+        requiredComponentItemIds,
+      )) {
         const candidates = sellsByItemId.get(componentItemId) ?? [];
-        if (candidates.length !== 1) {
+        if (candidates.length !== requiredCount) {
           complete = false;
           break;
         }
-        componentSellActions.push(candidates[0]);
+        componentSellActions.push(...candidates);
       }
 
       if (complete) {
@@ -229,6 +229,14 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
 
     return proposals;
   }
+}
+
+function countItemIds(itemIds: readonly number[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const itemId of itemIds) {
+    counts.set(itemId, (counts.get(itemId) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function groupActionsByTime(actions: CanonicalItemAction[]): CanonicalItemAction[][] {

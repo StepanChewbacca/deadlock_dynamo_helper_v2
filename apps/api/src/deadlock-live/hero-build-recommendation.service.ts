@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import {
+  applyInventoryMultisetAction,
+  createInventoryMultiset,
+  createInventoryStateKeyFromMultiset,
+  parseInventoryStateKey,
+  type InventoryMultiset,
+} from './inventory-multiset-action-engine';
+import {
   createInventoryStateKeyFromItemIds,
   HeroBuildPolicy,
   HeroBuildPolicyNextAction,
@@ -102,7 +109,7 @@ export interface DirectionalInventoryDistance {
 
 export type HeroBuildRecipeResolver = (parentItemId: number) => readonly number[];
 
-type InventoryItemCounts = ReadonlyMap<number, number>;
+type InventoryItemCounts = InventoryMultiset;
 
 interface ParsedPolicyState {
   state: HeroBuildPolicyState;
@@ -299,31 +306,7 @@ export function recommendFromPolicy(
   );
 }
 
-export function parseInventoryStateKey(stateKey: string): InventoryItemCounts | undefined {
-  if (stateKey === 'EMPTY') {
-    return new Map<number, number>();
-  }
-  if (stateKey.length === 0) {
-    return undefined;
-  }
-
-  const itemCounts = new Map<number, number>();
-  for (const token of stateKey.split('|')) {
-    const match = /^([1-9][0-9]*)x([1-9][0-9]*)$/.exec(token);
-    if (!match) {
-      return undefined;
-    }
-
-    const itemId = Number(match[1]);
-    const count = Number(match[2]);
-    if (!Number.isSafeInteger(itemId) || !Number.isSafeInteger(count)) {
-      return undefined;
-    }
-    itemCounts.set(itemId, count);
-  }
-
-  return itemCounts;
-}
+export { parseInventoryStateKey };
 
 export function calculateDirectionalInventoryDistance(
   current: InventoryItemCounts,
@@ -477,46 +460,46 @@ function resolveLegalAction(
   requestedItemCounts: InventoryItemCounts,
   recipeResolver: HeroBuildRecipeResolver,
 ): ResolvedLegalAction | undefined {
-  const predictedItemCounts = new Map(requestedItemCounts);
-
   if (historicalAction.actionType === 'BUY' || historicalAction.actionType === 'REBUY') {
     const currentOwnedCount = requestedItemCounts.get(historicalAction.itemId) ?? 0;
     const observedOwnedCountLimit = resolveObservedOwnedCountLimit(
       historicalAction,
       matchedItemCounts,
     );
-    if (currentOwnedCount >= observedOwnedCountLimit) {
+    const applied = applyInventoryMultisetAction(requestedItemCounts, {
+      type: historicalAction.actionType,
+      itemId: historicalAction.itemId,
+      maxOwnedCount: observedOwnedCountLimit,
+    });
+    if (!applied.legal) {
       return undefined;
     }
-
-    incrementItemCount(predictedItemCounts, historicalAction.itemId);
     return {
       type: 'BUY',
-      predictedItemCounts,
+      predictedItemCounts: applied.nextItemCounts,
       currentOwnedCount,
       observedOwnedCountLimit,
     };
   }
 
   if (historicalAction.actionType === 'SELL') {
-    if (!decrementItemCount(predictedItemCounts, historicalAction.itemId)) {
-      return undefined;
-    }
-    return { type: 'SELL', predictedItemCounts };
+    const applied = applyInventoryMultisetAction(requestedItemCounts, {
+      type: 'SELL',
+      itemId: historicalAction.itemId,
+    });
+    return applied.legal
+      ? { type: 'SELL', predictedItemCounts: applied.nextItemCounts }
+      : undefined;
   }
 
-  const componentItemIds = recipeResolver(historicalAction.itemId);
-  if (componentItemIds.length === 0) {
-    return undefined;
-  }
-
-  for (const componentItemId of componentItemIds) {
-    if (!decrementItemCount(predictedItemCounts, componentItemId)) {
-      return undefined;
-    }
-  }
-  incrementItemCount(predictedItemCounts, historicalAction.itemId);
-  return { type: 'UPGRADE', predictedItemCounts };
+  const applied = applyInventoryMultisetAction(requestedItemCounts, {
+    type: 'UPGRADE',
+    itemId: historicalAction.itemId,
+    componentItemIds: recipeResolver(historicalAction.itemId),
+  });
+  return applied.legal
+    ? { type: 'UPGRADE', predictedItemCounts: applied.nextItemCounts }
+    : undefined;
 }
 
 export function resolveObservedOwnedCountLimit(
@@ -607,40 +590,11 @@ function createNoMatchResponse(
 }
 
 function createItemCounts(itemIds: readonly number[]): Map<number, number> {
-  const itemCounts = new Map<number, number>();
-  for (const itemId of itemIds) {
-    incrementItemCount(itemCounts, itemId);
-  }
-  return itemCounts;
+  return createInventoryMultiset(itemIds);
 }
 
 function createStateKeyFromCounts(itemCounts: InventoryItemCounts): string {
-  if (itemCounts.size === 0) {
-    return 'EMPTY';
-  }
-
-  return [...itemCounts.entries()]
-    .filter(([, count]) => count > 0)
-    .sort(([leftItemId], [rightItemId]) => leftItemId - rightItemId)
-    .map(([itemId, count]) => `${itemId}x${count}`)
-    .join('|') || 'EMPTY';
-}
-
-function incrementItemCount(itemCounts: Map<number, number>, itemId: number): void {
-  itemCounts.set(itemId, (itemCounts.get(itemId) ?? 0) + 1);
-}
-
-function decrementItemCount(itemCounts: Map<number, number>, itemId: number): boolean {
-  const count = itemCounts.get(itemId) ?? 0;
-  if (count <= 0) {
-    return false;
-  }
-  if (count === 1) {
-    itemCounts.delete(itemId);
-  } else {
-    itemCounts.set(itemId, count - 1);
-  }
-  return true;
+  return createInventoryStateKeyFromMultiset(itemCounts);
 }
 
 function calculateStateQuality(

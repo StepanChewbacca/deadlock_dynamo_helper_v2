@@ -10,12 +10,15 @@ import {
 import { ItemCatalogVersion } from './item-catalog-version.entity';
 
 @Entity('item_catalog_recipes')
-@Unique('uq_item_catalog_recipes_version_parent_component', [
+@Unique('uq_item_catalog_recipes_version_parent_order', [
   'catalogVersionId',
   'parentItemId',
-  'componentItemId',
+  'componentOrder',
 ])
-@Index('idx_item_catalog_recipes_parent_item_id', ['catalogVersionId', 'parentItemId'])
+@Index('idx_item_catalog_recipes_parent_item_id', [
+  'catalogVersionId',
+  'parentItemId',
+])
 export class ItemCatalogRecipe {
   @PrimaryGeneratedColumn()
   id!: number;

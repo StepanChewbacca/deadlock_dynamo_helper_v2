@@ -1,7 +1,17 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, Unique } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  Unique,
+} from 'typeorm';
 
 @Entity('item_components')
-@Unique(['parentItemId', 'componentItemId'])
+@Unique('uq_item_components_parent_order', [
+  'parentItemId',
+  'componentOrder',
+])
 export class ItemComponent {
   @PrimaryGeneratedColumn()
   id!: number;
