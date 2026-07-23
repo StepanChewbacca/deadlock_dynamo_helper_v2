@@ -42,7 +42,13 @@ jobs:
         run: yarn workspace @deadlock-live-probe/build-domain build
 
       - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api build > "$RUNNER_TEMP/api-build.log" 2>&1
+          status=$?
+          tail -n 200 "$RUNNER_TEMP/api-build.log"
+          exit "$status"
 
       - name: Test API
         run: yarn workspace @deadlock-live-probe/api test
