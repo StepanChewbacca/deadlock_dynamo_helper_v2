@@ -35,6 +35,16 @@ export interface HeroBuildRecommendationRequest {
   limit?: number;
 }
 
+export type HeroBuildRecommendationMatchupDirection = 'POSITIVE' | 'NEGATIVE';
+
+export interface HeroBuildRecommendationMatchupSignal {
+  heroId: number;
+  direction: HeroBuildRecommendationMatchupDirection;
+  scoreContribution: number;
+  modelLiftPercent: number;
+  observationCount: number;
+}
+
 export interface HeroBuildRecommendationAction {
   type: HeroBuildRecommendationActionType;
   sourceActionType?: HeroBuildPolicyNextAction['actionType'];
@@ -51,6 +61,7 @@ export interface HeroBuildRecommendationAction {
   matchedBySubset: boolean;
   currentOwnedCount?: number;
   observedOwnedCountLimit?: number;
+  matchupSignals?: HeroBuildRecommendationMatchupSignal[];
   predictedStateKey: string;
   score: number;
   confidence: number;

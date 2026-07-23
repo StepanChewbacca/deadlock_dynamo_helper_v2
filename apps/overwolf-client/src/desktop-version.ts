@@ -5,8 +5,8 @@ import {
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
-const APP_VERSION = '0.1.10';
-const APP_BUILD = '020';
+const APP_VERSION = '0.1.11';
+const APP_BUILD = '021';
 const ow = (window as any).overwolf;
 
 function updateBuildStatus(): void {

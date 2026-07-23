@@ -21,6 +21,15 @@ export interface LiveBuildRecommendationExplanation {
   text: string;
 }
 
+export interface LiveBuildRecommendationMatchupSignal {
+  heroId: number;
+  heroName: string;
+  direction: 'POSITIVE' | 'NEGATIVE';
+  scoreContribution: number;
+  modelLiftPercent: number;
+  observationCount: number;
+}
+
 export interface LiveBuildRecommendationAction {
   type: 'BUY' | 'UPGRADE' | 'SELL' | 'HOLD';
   itemId?: number;
@@ -43,6 +52,7 @@ export interface LiveBuildRecommendationAction {
   situationalInteractionOddsRatio?: number;
   situationalLower95OddsRatio?: number;
   matchupObservationCount?: number;
+  matchupSignals?: LiveBuildRecommendationMatchupSignal[];
 }
 
 export interface LiveBuildRecommendationPayload {

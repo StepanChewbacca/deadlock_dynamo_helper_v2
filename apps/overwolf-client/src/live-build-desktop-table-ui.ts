@@ -657,6 +657,12 @@ export function advanceModelRolloutTime(gameTimeS: number): number {
 }
 
 function formatEvidence(action: ExtendedLiveBuildRecommendationAction): string {
+  const matchup = action.matchupSignals?.find(
+    (signal) => signal.direction === 'POSITIVE',
+  );
+  if (matchup) {
+    return `VS ${matchup.heroName} +${formatPercent(matchup.modelLiftPercent)}% (${matchup.observationCount})`;
+  }
   const count = Number(action.historicalCount);
   const probability = Number(action.historicalProbabilityPercent);
   if (Number.isFinite(count) && count > 0 && Number.isFinite(probability)) {
