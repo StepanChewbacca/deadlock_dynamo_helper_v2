@@ -101,4 +101,15 @@ if old_test_marker not in test_source:
 test_source = test_source.replace(old_test_marker, new_test_marker, 1)
 test_path.write_text(test_source, encoding='utf-8')
 
+ui_test_path = ROOT / 'apps/overwolf-client/src/live-build-recommendation-ui.spec.ts'
+ui_test = ui_test_path.read_text(encoding='utf-8')
+old_ui_expectation = 'VS Haze +3.1% model lift · 124 samples'
+new_ui_expectation = 'VS Haze +3.1% purchase-pattern lift · 124 samples'
+if old_ui_expectation not in ui_test:
+    raise SystemExit('Old matchup lift wording was not found in the Overwolf test.')
+ui_test_path.write_text(
+    ui_test.replace(old_ui_expectation, new_ui_expectation, 1),
+    encoding='utf-8',
+)
+
 (ROOT / 'scripts/fix-recommendation-telemetry-build.py').unlink(missing_ok=True)
