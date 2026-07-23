@@ -16,24 +16,29 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
       - name: Verify deployed model-only status
         shell: bash
         run: |
           set -euo pipefail
           cd /home/ubuntu/apps/deadlock_dynamo_helper
-          expected='cb78aede4d66e2ce5b62bc6c60581d4391b4e755'
-          git merge-base --is-ancestor "$expected" "$(git rev-parse HEAD)"
-          sudo docker compose ps
+          git merge-base --is-ancestor cb78aede4d66e2ce5b62bc6c60581d4391b4e755 "$(git rev-parse HEAD)"
           status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
           echo "$status"
           echo "$status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['mode']=='PRODUCTION'; assert x['model']['state']=='READY'; assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0; assert x['modelErrorCount']==0"
       - name: Print actual matchup signal
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cd /home/ubuntu/apps/deadlock_dynamo_helper
-          sudo docker compose exec -T api node < "$GITHUB_WORKSPACE/.github/scripts/diagnose-matchup-signal.js"
+          curl --fail --show-error --silent \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/StepanChewbacca/deadlock_dynamo_helper/contents/.github/scripts/diagnose-matchup-signal.js?ref=diagnostics%2Fmatchup-signals-production-20260723" \
+            | python3 -c "import base64,json,sys; print(base64.b64decode(json.load(sys.stdin)['content']).decode())" \
+            | sudo docker compose exec -T api node
       - name: Recheck model-only counters
         shell: bash
         run: |
