@@ -30,7 +30,19 @@ jobs:
           cache: yarn
 
       - name: Apply implementation
-        run: python3 scripts/apply-inventory-transaction-reconstruction.py
+        shell: bash
+        run: |
+          python3 scripts/apply-inventory-transaction-reconstruction.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/api/src/deadlock-live/live-build-recommendation-traversal.service.ts')
+          content = path.read_text()
+          old = "import { deriveContextualV3PreviousActions } from './contextual-v3-live-context';"
+          new = "import {\n  deriveContextualV3PreviousActionKeys,\n  deriveContextualV3PreviousActions,\n} from './contextual-v3-live-context';"
+          if content.count(old) != 1:
+              raise RuntimeError(f'Expected one traversal import, found {content.count(old)}')
+          path.write_text(content.replace(old, new, 1))
+          PY
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
