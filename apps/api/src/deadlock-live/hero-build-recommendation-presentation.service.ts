@@ -14,6 +14,7 @@ export type HeroBuildPresentationExplanationCode =
   | 'EXACT_STATE_EVIDENCE'
   | 'SUBSET_STATE_EVIDENCE'
   | 'DIRECTIONAL_STATE_INFERENCE'
+  | 'CONTEXTUAL_V3_MODEL'
   | 'NO_HERO_POLICY'
   | 'NO_NEARBY_STATE'
   | 'NO_LEGAL_ACTION';
@@ -215,6 +216,30 @@ function createExplanation(
 
   const probability = toPercent(action.historicalProbability);
   const typicalTime = formatGameTime(action.averageGameTimeS);
+  const contextualV3 = response as HeroBuildRecommendationResponse & {
+    recommendationModel?: string;
+    buildArchetypeId?: string;
+    contextualFeatures?: {
+      phase?: string;
+      alliedHeroIds?: number[];
+      enemyHeroIds?: number[];
+      previousActionCount?: number;
+      archetypeApplied?: boolean;
+    };
+  };
+  if (contextualV3.recommendationModel === 'CONTEXTUAL_V3') {
+    const features = contextualV3.contextualFeatures;
+    return {
+      code: 'CONTEXTUAL_V3_MODEL',
+      evidenceLevel: 'INFERRED',
+      text:
+        `Contextual V3 ranked this action for ${features?.phase ?? 'UNKNOWN'} phase ` +
+        `using ${features?.alliedHeroIds?.length ?? 0} allies, ` +
+        `${features?.enemyHeroIds?.length ?? 0} enemies, and ` +
+        `${features?.previousActionCount ?? 0} observed build actions ` +
+        `(archetype ${contextualV3.buildArchetypeId ?? 'UNKNOWN'}).`,
+    };
+  }
 
   if (response.mode === 'EXACT') {
     return {

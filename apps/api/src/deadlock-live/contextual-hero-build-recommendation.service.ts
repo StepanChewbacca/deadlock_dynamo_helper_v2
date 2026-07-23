@@ -32,6 +32,8 @@ export const HERO_BUILD_CONTEXTUAL_CANDIDATE_LIMIT = 100;
 export interface HeroBuildContextualRecommendationRequest
   extends HeroBuildRecommendationRequest {
   enemyHeroIds?: number[];
+  alliedHeroIds?: number[];
+  previousActionKeys?: string[];
 }
 
 export interface ContextualRecommendationCandidateSource {
