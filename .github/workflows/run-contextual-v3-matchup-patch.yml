@@ -1,0 +1,42 @@
+name: Run Contextual V3 matchup patch
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/run-contextual-v3-matchup-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/contextual-v3-matchup-signals
+          fetch-depth: 0
+      - name: Execute embedded patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/apply-contextual-v3-matchup-signals.yml').read_text()
+          start_marker = "          python3 <<'PY'\n"
+          end_marker = "          PY\n          git config user.name"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          script = textwrap.dedent(source[start:end])
+          exec(compile(script, 'embedded-matchup-patch.py', 'exec'))
+          Path('.github/workflows/run-contextual-v3-matchup-patch.yml').unlink()
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: expose Contextual V3 matchup signals"
+          git push origin HEAD:agent/contextual-v3-matchup-signals
