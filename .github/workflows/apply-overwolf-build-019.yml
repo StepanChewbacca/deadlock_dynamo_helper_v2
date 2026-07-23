@@ -1,0 +1,262 @@
+name: Apply Overwolf build 019 refresh sync fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-overwolf-build-019.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/overwolf-build-019-refresh-sync
+          fetch-depth: 0
+      - name: Apply fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file_path = Path(path)
+              value = file_path.read_text()
+              count = value.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one replacement, got {count}')
+              file_path.write_text(value.replace(old, new))
+
+          replace_once(
+              'apps/overwolf-client/package.json',
+              '"version": "0.1.8"',
+              '"version": "0.1.9"',
+          )
+          replace_once(
+              'apps/overwolf-client/public/manifest.json',
+              '"version": "0.1.8"',
+              '"version": "0.1.9"',
+          )
+          replace_once(
+              'apps/overwolf-client/src/desktop-version.ts',
+              "const APP_VERSION = '0.1.8';\nconst APP_BUILD = '018';",
+              "const APP_VERSION = '0.1.9';\nconst APP_BUILD = '019';",
+          )
+          replace_once(
+              'apps/overwolf-client/src/desktop-version.ts',
+              """  const snapshot = mainWindow?.latestLiveBuildRecommendation as
+    | { state?: string; matchId?: string }
+    | undefined;
+  const matchId = String(
+    mainWindow?.__deadlockLiveMatchId ?? snapshot?.matchId ?? '',
+  ).trim();
+  const runtimeState = matchId
+    ? normalizeRuntimeState(snapshot?.state)
+    : 'NO MATCH ID';""",
+              """  const localWindow = window as any;
+  const snapshot = (
+    localWindow.__deadlockLiveRecommendationSnapshot
+      ?? mainWindow?.latestLiveBuildRecommendation
+  ) as
+    | { state?: string; matchId?: string; recommendation?: unknown }
+    | undefined;
+  const matchId = String(
+    localWindow.__deadlockLiveMatchId
+      ?? mainWindow?.__deadlockLiveMatchId
+      ?? snapshot?.matchId
+      ?? '',
+  ).trim();
+  const runtimeState = matchId
+    ? normalizeRuntimeState(snapshot?.recommendation ? 'READY' : snapshot?.state)
+    : 'NO MATCH ID';""",
+          )
+
+          old_in_game = """function initializeInGameHud(): void {
+  const mainWindow = ow.windows.getMainWindow() as any;
+  disableLegacyBuildGuide();
+
+  mainWindow.inGameLiveBuildRecommendationUpdate = (
+    snapshot: LiveBuildRecommendationSnapshot,
+  ) => {
+    disableLegacyBuildGuide();
+    showLiveBuildRecommendation(snapshot);
+    decorateLiveBuildRecommendation(snapshot);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameLiveBuildRecommendationClear = () => {
+    disableLegacyBuildGuide();
+    const waiting = createWaitingSnapshot('');
+    showLiveBuildRecommendation(waiting);
+    decorateLiveBuildRecommendation(waiting);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameSkillBuildUpdate = (
+    presentation: SkillBuildPresentation,
+  ) => {
+    showOverlaySkillBuild(presentation);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameSkillBuildClear = () => {
+    clearOverlaySkillBuild();
+    resizeOverlayToContent();
+  };
+
+  (window as any).refreshLiveBuildRecommendation = () => {
+    if (typeof mainWindow.forceLiveBuildRecommendationRefresh === 'function') {
+      mainWindow.forceLiveBuildRecommendationRefresh();
+    }
+  };
+
+  const initialSnapshot = mainWindow.latestLiveBuildRecommendation
+    ?? createWaitingSnapshot('');
+  showLiveBuildRecommendation(initialSnapshot);
+  decorateLiveBuildRecommendation(initialSnapshot);
+
+  const initialSkillBuild = mainWindow.latestSkillBuildPresentation as
+    | SkillBuildPresentation
+    | undefined;
+  if (initialSkillBuild && initialSkillBuild.state !== 'EMPTY') {
+    showOverlaySkillBuild(initialSkillBuild);
+  } else {
+    clearOverlaySkillBuild();
+  }
+  resizeOverlayToContent();
+}"""
+          new_in_game = """function initializeInGameHud(): void {
+  const mainWindow = ow.windows.getMainWindow() as any;
+  const localWindow = window as any;
+  let lastAppliedSnapshotKey = '';
+  disableLegacyBuildGuide();
+
+  const applyInGameSnapshot = (
+    snapshot: LiveBuildRecommendationSnapshot,
+  ): void => {
+    localWindow.__deadlockLiveRecommendationSnapshot = snapshot;
+    localWindow.__deadlockLiveMatchId = snapshot.matchId;
+
+    const snapshotKey = createInGameSnapshotKey(snapshot);
+    if (snapshotKey === lastAppliedSnapshotKey) {
+      return;
+    }
+    lastAppliedSnapshotKey = snapshotKey;
+
+    disableLegacyBuildGuide();
+    showLiveBuildRecommendation(snapshot);
+    decorateLiveBuildRecommendation(snapshot);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameLiveBuildRecommendationUpdate = applyInGameSnapshot;
+
+  mainWindow.inGameLiveBuildRecommendationClear = () => {
+    applyInGameSnapshot(createWaitingSnapshot(''));
+  };
+
+  mainWindow.inGameSkillBuildUpdate = (
+    presentation: SkillBuildPresentation,
+  ) => {
+    showOverlaySkillBuild(presentation);
+    resizeOverlayToContent();
+  };
+
+  mainWindow.inGameSkillBuildClear = () => {
+    clearOverlaySkillBuild();
+    resizeOverlayToContent();
+  };
+
+  localWindow.refreshLiveBuildRecommendation = () => {
+    if (typeof mainWindow.forceLiveBuildRecommendationRefresh === 'function') {
+      mainWindow.forceLiveBuildRecommendationRefresh();
+    }
+  };
+
+  const initialSnapshot = mainWindow.latestLiveBuildRecommendation
+    ?? createWaitingSnapshot('');
+  applyInGameSnapshot(initialSnapshot);
+
+  const initialSkillBuild = mainWindow.latestSkillBuildPresentation as
+    | SkillBuildPresentation
+    | undefined;
+  if (initialSkillBuild && initialSkillBuild.state !== 'EMPTY') {
+    showOverlaySkillBuild(initialSkillBuild);
+  } else {
+    clearOverlaySkillBuild();
+  }
+  resizeOverlayToContent();
+
+  setInterval(() => {
+    const snapshot = mainWindow.latestLiveBuildRecommendation as
+      | LiveBuildRecommendationSnapshot
+      | undefined;
+    if (snapshot) {
+      applyInGameSnapshot(snapshot);
+    }
+  }, 500);
+}"""
+          replace_once(
+              'apps/overwolf-client/src/live-build-hud-entry.ts',
+              old_in_game,
+              new_in_game,
+          )
+          replace_once(
+              'apps/overwolf-client/src/live-build-hud-entry.ts',
+              """    onSnapshot: (snapshot) => {
+      mainWindow.latestLiveBuildRecommendation = snapshot;
+      showLiveBuildDesktop(snapshot);""",
+              """    onSnapshot: (snapshot) => {
+      mainWindow.latestLiveBuildRecommendation = snapshot;
+      (window as any).__deadlockLiveRecommendationSnapshot = snapshot;
+      showLiveBuildDesktop(snapshot);""",
+          )
+          replace_once(
+              'apps/overwolf-client/src/live-build-hud-entry.ts',
+              """    onClear: () => {
+      mainWindow.latestLiveBuildRecommendation = null;
+      clearLiveBuildDesktop();""",
+              """    onClear: () => {
+      mainWindow.latestLiveBuildRecommendation = null;
+      (window as any).__deadlockLiveRecommendationSnapshot = null;
+      clearLiveBuildDesktop();""",
+          )
+          replace_once(
+              'apps/overwolf-client/src/live-build-hud-entry.ts',
+              """function resizeOverlayToContent(): void {
+  const resize = (window as any).ensureOverlayHeight;""",
+              """function createInGameSnapshotKey(
+  snapshot: LiveBuildRecommendationSnapshot,
+): string {
+  return [
+    snapshot.matchId,
+    snapshot.state,
+    snapshot.traversalKey ?? '',
+    snapshot.refreshCount,
+    snapshot.lastUpdatedAt ?? '',
+    snapshot.lastError ?? '',
+    snapshot.recommendation?.action.actionKey ?? '',
+  ].join('|');
+}
+
+function resizeOverlayToContent(): void {
+  const resize = (window as any).ensureOverlayHeight;""",
+          )
+
+          Path('.github/workflows/apply-overwolf-build-019.yml').unlink()
+          PY
+      - name: Validate diff
+        run: git diff --check
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: recover Overwolf overlay from stale refreshing state"
+          git push origin HEAD:fix/overwolf-build-019-refresh-sync
