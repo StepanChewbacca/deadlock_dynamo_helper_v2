@@ -39,6 +39,14 @@ jobs:
           start = source.index(start_marker) + len(start_marker)
           end = source.index(end_marker, start)
           script = textwrap.dedent(source[start:end])
+          script = script.replace(
+              "def replace(path: str, old: str, new: str) -> None:",
+              "def replace(path: str, old: str, new: str, count: int = 1) -> None:",
+          )
+          script = script.replace(
+              "file.write_text(text.replace(old, new, 1))",
+              "file.write_text(text.replace(old, new, count))",
+          )
           exec(compile(script, 'embedded-matchup-patch.py', 'exec'))
           runner = Path('.github/workflows/run-contextual-v3-matchup-patch.yml')
           if runner.exists():
