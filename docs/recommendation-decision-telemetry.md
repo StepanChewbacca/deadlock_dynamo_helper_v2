@@ -6,7 +6,7 @@ The live model writes append-only NDJSON telemetry to:
 /app/apps/api/storage/recommendation-decision-telemetry/events.ndjson
 ```
 
-Override the directory with `DEADLOCK_RECOMMENDATION_TELEMETRY_DIR`.
+The default directory is inside the `deadlock-storage` Docker volume, so telemetry survives API container recreation and deployment. Override the directory with `DEADLOCK_RECOMMENDATION_TELEMETRY_DIR`.
 
 ## Event lifecycle
 
