@@ -33,7 +33,11 @@ jobs:
           echo '--- compact snapshots ---'
           curl --show-error --silent --max-time 15 \
             http://127.0.0.1:3000/deadlock/live/build-recommendations \
-            | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{for(const x of JSON.parse(s)){console.log(JSON.stringify({state:x.state,matchId:x.matchId,heroId:x.heroId,gameTimeS:x.gameTimeS,refreshCount:x.refreshCount,cacheHitCount:x.cacheHitCount,lastObservedAt:x.lastObservedAt,lastStartedAt:x.lastStartedAt,lastUpdatedAt:x.lastUpdatedAt,lastError:x.lastError,action:x.recommendation?.action?.label}))}})"
+            | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{for(const x of JSON.parse(s)){console.log(JSON.stringify({state:x.state,matchId:x.matchId,heroId:x.heroId,itemIds:x.itemIds,gameTimeS:x.gameTimeS,refreshCount:x.refreshCount,cacheHitCount:x.cacheHitCount,lastObservedAt:x.lastObservedAt,lastStartedAt:x.lastStartedAt,lastUpdatedAt:x.lastUpdatedAt,lastError:x.lastError,source:x.recommendation?.recommendationModel??'BASELINE',action:x.recommendation?.action?.label}))}})"
+          echo '--- recent item and roster events ---'
+          curl --show-error --silent --max-time 15 \
+            http://127.0.0.1:3000/deadlock/live/events/recent \
+            | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const v=JSON.parse(s);const a=Array.isArray(v)?v:(v.events??[]);for(const e of a.filter(x=>String(x.key??x.name??'').match(/items|roster|match_clock/)).slice(-120)){console.log(JSON.stringify({source:e.source,key:e.key,name:e.name,matchId:e.matchId,payload:e.payload}))}})"
           echo '--- recent Overwolf HTTP traffic ---'
           sudo sh -c "tail -n 1000 /var/log/nginx/access.log 2>/dev/null | grep -E '/deadlock/live/(matches/.*/build-recommendation|events)' | tail -n 80" || true
           echo '--- relevant API warnings ---'
