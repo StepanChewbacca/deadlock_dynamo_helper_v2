@@ -8,11 +8,7 @@
     "minimum-gep-version": "305.0",
     "author": "Antigravity",
     "description": "Real-time Deadlock build recommendations and telemetry overlay",
-    "icon": "dynamo.png",
-    "icon_gray": "dynamo.png",
-    "launcher_icon": "dynamo.png",
-    "window_icon": "dynamo.png",
-    "dock_button_title": "Deadlock Live Probe"
+    "icon": "dynamo.png"
   },
   "permissions": [
     "GameInfo",
