@@ -1,6 +1,6 @@
 {
   "name": "@deadlock-live-probe/overwolf-client",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "Contextual V3 model-only build with matchup signals",
   "scripts": {

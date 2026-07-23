@@ -53,7 +53,15 @@ function createPanelContent(snapshot: LiveBuildRecommendationSnapshot): Document
 
   const recommendation = snapshot.recommendation;
   if (recommendation) {
-    fragment.append(createPrimaryAction(recommendation.action, snapshot.isStale));
+    fragment.append(
+      createPrimaryAction(
+        recommendation.action,
+        snapshot.isStale,
+        recommendation.recommendationModel === 'CONTEXTUAL_V3'
+          ? recommendation.contextualFeatures?.enemyHeroIds.length ?? 0
+          : undefined,
+      ),
+    );
     if (recommendation.alternatives.length > 0) {
       fragment.append(createAlternatives(recommendation.alternatives.slice(0, 4)));
     }
@@ -127,6 +135,7 @@ function createHeader(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
 function createPrimaryAction(
   action: LiveBuildRecommendationAction,
   isStale: boolean,
+  evaluatedEnemyCount: number | undefined,
 ): HTMLElement {
   const card = document.createElement('div');
   card.className = `live-build-primary live-build-slot-${normalizeSlot(action.item?.slotType)}`;
@@ -165,7 +174,7 @@ function createPrimaryAction(
   explanation.textContent = action.explanation.text;
 
   card.append(top, explanation);
-  const matchup = createMatchupSignals(action);
+  const matchup = createMatchupSignals(action, evaluatedEnemyCount);
   if (matchup) {
     card.append(matchup);
   }
@@ -212,11 +221,12 @@ function createAlternatives(actions: LiveBuildRecommendationAction[]): HTMLEleme
 
 function createMatchupSignals(
   action: LiveBuildRecommendationAction,
+  evaluatedEnemyCount: number | undefined,
 ): HTMLElement | undefined {
   const signals = (action.matchupSignals ?? []).filter(
     (signal) => signal.direction === 'POSITIVE',
   );
-  if (signals.length === 0) {
+  if (signals.length === 0 && evaluatedEnemyCount === undefined) {
     return undefined;
   }
 
@@ -227,7 +237,18 @@ function createMatchupSignals(
 
   const title = document.createElement('span');
   title.className = 'live-build-matchup-title';
-  title.textContent = 'MATCHUP SIGNAL';
+  title.textContent = signals.length > 0 ? 'MATCHUP SIGNAL' : 'MATCHUP CONTEXT';
+
+  const note = document.createElement('span');
+  note.className = 'live-build-matchup-note';
+
+  if (signals.length === 0) {
+    note.textContent = evaluatedEnemyCount && evaluatedEnemyCount > 0
+      ? `${evaluatedEnemyCount} enemies evaluated · no strong individual signal.`
+      : 'Enemy roster unavailable for this recommendation.';
+    section.append(title, note);
+    return section;
+  }
 
   const chips = document.createElement('div');
   chips.className = 'live-build-matchup-chips';
@@ -238,8 +259,6 @@ function createMatchupSignals(
     chips.append(chip);
   }
 
-  const note = document.createElement('span');
-  note.className = 'live-build-matchup-note';
   note.textContent = 'Historical purchase tendency, not win-rate proof.';
   section.append(title, chips, note);
   return section;

@@ -577,14 +577,18 @@ export function createContextualV3MatchupSignals(input: {
   const divisor = input.evidence.length;
   return input.evidence
     .map((value) => {
-      const scoreContribution =
+      const isolatedScoreContribution =
         input.enemyWeight *
-        (value.logProbability - input.baseLogProbability) /
-        divisor;
-      const modelLiftPercent = (Math.exp(scoreContribution) - 1) * 100;
+        (value.logProbability - input.baseLogProbability);
+      const scoreContribution = isolatedScoreContribution / divisor;
+      const modelLiftPercent =
+        (Math.exp(isolatedScoreContribution) - 1) * 100;
       return {
         heroId: value.heroId,
-        direction: scoreContribution >= 0 ? 'POSITIVE' as const : 'NEGATIVE' as const,
+        direction:
+          isolatedScoreContribution >= 0
+            ? 'POSITIVE' as const
+            : 'NEGATIVE' as const,
         scoreContribution,
         modelLiftPercent,
         observationCount: value.observationCount,

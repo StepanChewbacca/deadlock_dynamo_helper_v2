@@ -8,36 +8,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-matchup-visibility-fix:
-    name: Apply matchup visibility fix
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/contextual-v3-matchup-signal-visibility'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
-        with:
-          ref: agent/contextual-v3-matchup-signal-visibility
-          fetch-depth: 0
-      - name: Execute patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/apply-matchup-signal-visibility.py
-          git checkout origin/main -- .github/workflows/ci.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: keep matchup signals visible for full rosters"
-          git push origin HEAD:agent/contextual-v3-matchup-signal-visibility
-
   build-project:
     name: Build project
     runs-on: ubuntu-latest
