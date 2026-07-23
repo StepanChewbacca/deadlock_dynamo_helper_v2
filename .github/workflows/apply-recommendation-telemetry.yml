@@ -1,0 +1,60 @@
+name: Apply recommendation telemetry
+
+on:
+  push:
+    branches:
+      - agent/persist-model-only-recommendation-decisions
+    paths:
+      - scripts/apply-recommendation-telemetry.py
+      - .github/workflows/apply-recommendation-telemetry.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/persist-model-only-recommendation-decisions
+          fetch-depth: 0
+
+      - name: Apply implementation
+        run: python3 scripts/apply-recommendation-telemetry.py
+
+      - name: Validate patch
+        run: git diff --check
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Test API
+        run: yarn workspace @deadlock-live-probe/api test
+
+      - name: Test Overwolf client
+        run: yarn workspace @deadlock-live-probe/overwolf-client test
+
+      - name: Build Overwolf client
+        env:
+          OVERWOLF_PUBLIC_TARGET: ${{ runner.temp }}/overwolf-client/public
+        run: yarn workspace @deadlock-live-probe/overwolf-client build
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: persist model-only recommendation decisions"
+          git push origin HEAD:agent/persist-model-only-recommendation-decisions
