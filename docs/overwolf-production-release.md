@@ -1,13 +1,13 @@
-# Overwolf production release
+# Overwolf sideload rollout
 
-This runbook releases the API, the Contextual V3 model, and the Overwolf client as one production unit.
+This runbook deploys the API and Contextual V3 model, then validates the current unpacked Overwolf client through Developer Mode. OPK packaging and Developer Console publishing are intentionally outside the current scope.
 
-## Release prerequisites
+## Prerequisites
 
 - The public API hostname resolves over HTTPS from the internet.
 - The deployment host contains the approved Contextual V3 artifacts in the persistent `deadlock-storage` volume.
-- Repository variable `PUBLIC_API_BASE_URL` points to the same public API origin used by the Overwolf client.
-- The Overwolf app is available in the Developer Console and is approved for the intended release channel.
+- Repository variable `PUBLIC_API_BASE_URL` points to the public API origin used by the Overwolf client.
+- Overwolf Developer Mode is enabled on the test machine.
 
 ## 1. Deploy the API and model
 
@@ -41,24 +41,35 @@ Expected model status:
 }
 ```
 
-## 2. Build the Overwolf package
+## 2. Build the unpacked Overwolf client
 
-Run the `Build Overwolf OPK` workflow from the `main` branch and provide the deployed public HTTPS API base URL.
+Build the client with the deployed public API base URL:
 
-The workflow:
+```bash
+OVERWOLF_API_BASE_URL=https://your-api.example.com \
+OVERWOLF_PUBLIC_TARGET=/path/to/overwolf-sideload/public \
+yarn workspace @deadlock-live-probe/overwolf-client build
+```
 
-- builds the shared package and Overwolf bundle;
+The build:
+
+- compiles the shared package and Overwolf bundle;
 - embeds the supplied API base URL into the compiled client;
 - updates `externally_connectable` to the matching origin;
-- validates the production manifest and assets;
-- creates a versioned `.opk` package and SHA-256 file;
-- uploads both the `.opk` and unpacked sideload build as workflow artifacts.
+- validates the manifest, windows, permissions, assets, and compiled files;
+- copies the resulting unpacked app to `OVERWOLF_PUBLIC_TARGET`.
 
-Do not reuse an OPK built for another environment because the API origin is embedded during the build.
+CI also uploads the unpacked `public` directory as the `overwolf-client-*` artifact for every successful pull request build.
 
-## 3. Test through Overwolf
+## 3. Load through Overwolf Developer Mode
 
-Use the unpacked artifact or the Overwolf Testing channel before promoting the OPK to Production.
+1. Open Overwolf.
+2. Go to `Settings` > `Support` > `Development Options`.
+3. Click `Load unpacked extension...`.
+4. Select the built `public` directory containing `manifest.json`.
+5. Reload the unpacked extension after every client build.
+
+## 4. Live smoke test
 
 1. Start Deadlock and verify the app launches automatically.
 2. Verify GEP registration reaches `REGISTERED`.
@@ -68,12 +79,6 @@ Use the unpacked artifact or the Overwolf Testing channel before promoting the O
 6. Confirm the overlay can be toggled with `Ctrl+Tab` and the desktop window opens with `Ctrl+Shift+B`.
 7. Confirm the public model status remains `READY` and `fallbackCount` does not continuously increase.
 8. End the match and verify the overlay clears the previous match state.
-
-## 4. Promote to Production
-
-Upload the generated OPK in the Overwolf Developer Console, publish it to the Testing channel, complete the live game smoke test, and then promote the same validated package to the Production channel.
-
-The repository cannot publish to the Overwolf Developer Console automatically. Production promotion requires an authorized Overwolf account.
 
 ## Rollback
 
@@ -87,6 +92,6 @@ Recreate the API container and verify the public recommendation endpoint still r
 
 Overwolf rollback:
 
-- promote the previous known-good OPK in the Developer Console;
-- keep its API origin available until clients have updated;
-- investigate the failed release using API status, fallback counters, Docker logs, and Overwolf logs.
+- load the previous known-good unpacked `public` directory;
+- keep its API origin available;
+- investigate the failed build using API status, fallback counters, Docker logs, and Overwolf logs.
