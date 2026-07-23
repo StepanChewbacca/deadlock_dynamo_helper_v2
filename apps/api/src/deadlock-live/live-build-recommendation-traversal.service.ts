@@ -17,7 +17,10 @@ import {
   HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
-import { deriveContextualV3PreviousActionKeys } from './contextual-v3-live-context';
+import {
+  deriveContextualV3PreviousActionKeys,
+  deriveContextualV3PreviousActions,
+} from './contextual-v3-live-context';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
@@ -457,7 +460,7 @@ export class LiveBuildRecommendationTraversalService {
     if (!decisionId || !telemetry) {
       return;
     }
-    const observedActionKeys = deriveContextualV3PreviousActionKeys(
+    const reconstruction = deriveContextualV3PreviousActions(
       [previousItemIds, currentItemIds],
       (parentItemId) =>
         this.recipeAwareTimelineReconciliationService.getComponentItemIds(
@@ -470,16 +473,11 @@ export class LiveBuildRecommendationTraversalService {
       steamId: localPlayer.steamId,
       heroId: Number(localPlayer.heroId),
       teamId: normalizeTeamId(localPlayer.teamId),
-      observedActionKeys,
+      observedActionKeys: reconstruction.actionKeys,
       observedInventoryStateKey:
         createInventoryStateKeyFromItemIds(currentItemIds),
       observedAtGameTimeS: normalizeGameTime(state.gameTimeSec),
-      reconstructionConfidence:
-        observedActionKeys.length === 1
-          ? 'EXACT_SINGLE_ACTION'
-          : observedActionKeys.length > 1
-            ? 'MULTI_ACTION_INTERVAL'
-            : 'UNRESOLVED',
+      reconstructionConfidence: reconstruction.confidence,
     });
     runtime.pendingDecisionId = undefined;
     runtime.pendingDecisionTraversalKey = undefined;

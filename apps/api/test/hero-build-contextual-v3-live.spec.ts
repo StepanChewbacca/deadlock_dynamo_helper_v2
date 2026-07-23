@@ -4,7 +4,10 @@ import {
   getContextualV3Phase,
   normalizeContextualV3RosterHeroIds,
 } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
-import { deriveContextualV3PreviousActionKeys } from '../src/deadlock-live/contextual-v3-live-context';
+import {
+  deriveContextualV3PreviousActionKeys,
+  deriveContextualV3PreviousActions,
+} from '../src/deadlock-live/contextual-v3-live-context';
 
 describe('Contextual V3 live helpers', () => {
   it('uses the same phase boundaries as offline evaluation', () => {
@@ -106,6 +109,24 @@ describe('Contextual V3 live helpers', () => {
         () => [],
       ),
     ).toEqual(['BUY:300']);
+  });
+
+  it('propagates ambiguous interval confidence from optimal reconstruction', () => {
+    const result = deriveContextualV3PreviousActions(
+      [
+        [100],
+        [300, 400],
+      ],
+      (parentItemId) =>
+        parentItemId === 300 || parentItemId === 400 ? [100] : [],
+    );
+
+    expect(result).toEqual({
+      actionKeys: ['UPGRADE:300', 'BUY:400'],
+      confidence: 'AMBIGUOUS_MULTI_ACTION',
+      ambiguous: true,
+      unresolvedIntervalCount: 0,
+    });
   });
 
   it('canonicalizes roster hero aliases before model lookup', () => {
