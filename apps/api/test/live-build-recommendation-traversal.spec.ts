@@ -23,6 +23,7 @@ describe('live build recommendation traversal', () => {
 
     const input = createTraversalInput(state, localPlayer);
 
+    expect(input.teamId).toBe(1);
     expect(input.itemIds).toEqual([100, 200, 200]);
     expect(input.alliedHeroIds).toEqual([]);
     expect(input.enemyHeroIds).toEqual([13]);
@@ -177,6 +178,38 @@ describe('live build recommendation traversal', () => {
     });
   });
 
+  it('links a served decision to the next observed inventory action', async () => {
+    const telemetry = {
+      recordDecision: jest.fn(() => 'decision-1'),
+      recordObservedAction: jest.fn(),
+      recordDecisionSuperseded: jest.fn(),
+      recordModelError: jest.fn(),
+    };
+    const harness = createHarness(createRecommendMock(), telemetry);
+
+    harness.service.observeState(createState(10, [100]));
+    await harness.service.waitForIdle('match-1');
+    harness.service.observeState(createState(20, [100, 999]));
+
+    expect(telemetry.recordDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          matchId: 'match-1',
+          steamId: 'local',
+          teamId: 1,
+        }),
+      }),
+    );
+    expect(telemetry.recordObservedAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionId: 'decision-1',
+        observedActionKeys: ['BUY:999'],
+        reconstructionConfidence: 'EXACT_SINGLE_ACTION',
+      }),
+    );
+    await harness.service.waitForIdle('match-1');
+  });
+
   it('waits without invoking the recommender when no local player is available', async () => {
     const harness = createHarness();
     const state = createState(10, [100]);
@@ -219,7 +252,15 @@ describe('live build recommendation traversal', () => {
   });
 });
 
-function createHarness(recommend = createRecommendMock()) {
+function createHarness(
+  recommend = createRecommendMock(),
+  telemetry?: {
+    recordDecision: jest.Mock;
+    recordObservedAction: jest.Mock;
+    recordDecisionSuperseded: jest.Mock;
+    recordModelError: jest.Mock;
+  },
+) {
   const present = jest.fn(async (response: HeroBuildRecommendationWithAlternativeFilter) => ({
     ...response,
     action: {
@@ -253,6 +294,7 @@ function createHarness(recommend = createRecommendMock()) {
     { present } as unknown as HeroBuildRecommendationPresentationService,
     { isActionLegalForState } as unknown as HeroBuildRecommendationOwnershipFilterService,
     { getComponentItemIds: jest.fn(() => []) } as never,
+    telemetry as never,
   );
 
   return { service, recommend, present, isActionLegalForState };

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MinimalMatchState, MinimalPlayerState } from '@deadlock-live-probe/shared';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
@@ -14,11 +14,13 @@ import {
 } from './hero-build-recommendation-presentation.service';
 import {
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
+  HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
 import { deriveContextualV3PreviousActionKeys } from './contextual-v3-live-context';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 
 export const LIVE_BUILD_RECOMMENDATION_TIME_BUCKET_S = 120;
 export const LIVE_BUILD_RECOMMENDATION_LIMIT = 5;
@@ -39,6 +41,7 @@ export interface LiveBuildRecommendationTraversalInput {
   matchId: string;
   steamId: string;
   heroId: number;
+  teamId?: number;
   itemIds: number[];
   alliedHeroIds: number[];
   enemyHeroIds: number[];
@@ -54,6 +57,7 @@ export interface LiveBuildRecommendationTraversalSnapshot {
   matchId: string;
   steamId?: string;
   heroId?: number;
+  teamId?: number;
   itemIds: number[];
   alliedHeroIds: number[];
   enemyHeroIds: number[];
@@ -62,6 +66,7 @@ export interface LiveBuildRecommendationTraversalSnapshot {
   gameTimeS?: number;
   timeBucket?: number;
   traversalKey?: string;
+  decisionId?: string;
   isStale: boolean;
   recommendation?: LiveBuildPresentedRecommendation;
   refreshCount: number;
@@ -94,6 +99,8 @@ interface TraversalRuntime {
   worker?: Promise<void>;
   lastObservedAtMs: number;
   inventorySnapshots: number[][];
+  pendingDecisionId?: string;
+  pendingDecisionTraversalKey?: string;
   snapshot: LiveBuildRecommendationTraversalSnapshot;
 }
 
@@ -110,6 +117,9 @@ export class LiveBuildRecommendationTraversalService {
       HeroBuildRecommendationOwnershipFilterService,
     private readonly recipeAwareTimelineReconciliationService:
       RecipeAwareTimelineReconciliationService,
+    @Optional()
+    private readonly recommendationDecisionTelemetryService?:
+      RecommendationDecisionTelemetryService,
   ) {}
 
   observeState(state: MinimalMatchState | undefined): void {
@@ -138,8 +148,22 @@ export class LiveBuildRecommendationTraversalService {
       .map((item) => Number(item.id))
       .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
       .sort((left, right) => left - right);
-    const previousSnapshot = runtime.inventorySnapshots[runtime.inventorySnapshots.length - 1];
-    if (!previousSnapshot || !sameNumberArrays(previousSnapshot, currentItemIds)) {
+    const previousSnapshot =
+      runtime.inventorySnapshots[runtime.inventorySnapshots.length - 1];
+    const inventoryChanged = Boolean(
+      previousSnapshot &&
+        !sameNumberArrays(previousSnapshot, currentItemIds),
+    );
+    if (inventoryChanged && previousSnapshot) {
+      this.recordObservedAction(
+        runtime,
+        state,
+        localPlayer,
+        previousSnapshot,
+        currentItemIds,
+      );
+    }
+    if (!previousSnapshot || inventoryChanged) {
       runtime.inventorySnapshots.push(currentItemIds);
       if (runtime.inventorySnapshots.length > 128) {
         runtime.inventorySnapshots.shift();
@@ -161,11 +185,11 @@ export class LiveBuildRecommendationTraversalService {
       return;
     }
 
-    const inventoryChanged =
+    const recommendationInventoryChanged =
       runtime.snapshot.inventoryStateKey !== undefined &&
       runtime.snapshot.inventoryStateKey !== input.inventoryStateKey;
     const optimisticRecommendation =
-      inventoryChanged && runtime.snapshot.recommendation
+      recommendationInventoryChanged && runtime.snapshot.recommendation
         ? createOptimisticRecommendation(
             runtime.snapshot.recommendation,
             input,
@@ -180,6 +204,7 @@ export class LiveBuildRecommendationTraversalService {
       matchId: input.matchId,
       steamId: input.steamId,
       heroId: input.heroId,
+      teamId: input.teamId,
       itemIds: [...input.itemIds],
       alliedHeroIds: [...input.alliedHeroIds],
       enemyHeroIds: [...input.enemyHeroIds],
@@ -328,6 +353,7 @@ export class LiveBuildRecommendationTraversalService {
       runtime.desiredInput.traversalKey !== runtime.lastAttemptedKey
     ) {
       const input = runtime.desiredInput;
+      const startedAt = Date.now();
       runtime.lastAttemptedKey = input.traversalKey;
       runtime.snapshot.state = runtime.snapshot.recommendation ? 'READY' : 'REFRESHING';
       runtime.snapshot.isStale = runtime.snapshot.recommendation !== undefined;
@@ -365,6 +391,12 @@ export class LiveBuildRecommendationTraversalService {
           continue;
         }
 
+        const decisionId = this.recordServedDecision(
+          runtime,
+          input,
+          recommendation,
+          Date.now() - startedAt,
+        );
         runtime.resolvedKey = input.traversalKey;
         runtime.snapshot = {
           ...runtime.snapshot,
@@ -372,6 +404,7 @@ export class LiveBuildRecommendationTraversalService {
           matchId: input.matchId,
           steamId: input.steamId,
           heroId: input.heroId,
+          teamId: input.teamId,
           itemIds: [...input.itemIds],
           alliedHeroIds: [...input.alliedHeroIds],
           enemyHeroIds: [...input.enemyHeroIds],
@@ -380,6 +413,7 @@ export class LiveBuildRecommendationTraversalService {
           gameTimeS: input.gameTimeS,
           timeBucket: input.timeBucket,
           traversalKey: input.traversalKey,
+          decisionId,
           isStale: false,
           recommendation: presented,
           refreshCount: runtime.snapshot.refreshCount + 1,
@@ -392,6 +426,11 @@ export class LiveBuildRecommendationTraversalService {
           runtime.snapshot.discardedResultCount += 1;
           continue;
         }
+        this.recommendationDecisionTelemetryService?.recordModelError({
+          context: input,
+          error,
+          elapsedMs: Date.now() - startedAt,
+        });
         runtime.snapshot = {
           ...runtime.snapshot,
           state: 'ERROR',
@@ -404,6 +443,101 @@ export class LiveBuildRecommendationTraversalService {
         );
       }
     }
+  }
+
+  private recordObservedAction(
+    runtime: TraversalRuntime,
+    state: MinimalMatchState,
+    localPlayer: MinimalPlayerState,
+    previousItemIds: readonly number[],
+    currentItemIds: readonly number[],
+  ): void {
+    const decisionId = runtime.pendingDecisionId;
+    const telemetry = this.recommendationDecisionTelemetryService;
+    if (!decisionId || !telemetry) {
+      return;
+    }
+    const observedActionKeys = deriveContextualV3PreviousActionKeys(
+      [previousItemIds, currentItemIds],
+      (parentItemId) =>
+        this.recipeAwareTimelineReconciliationService.getComponentItemIds(
+          parentItemId,
+        ),
+    );
+    telemetry.recordObservedAction({
+      decisionId,
+      matchId: state.matchId,
+      steamId: localPlayer.steamId,
+      heroId: Number(localPlayer.heroId),
+      teamId: normalizeTeamId(localPlayer.teamId),
+      observedActionKeys,
+      observedInventoryStateKey:
+        createInventoryStateKeyFromItemIds(currentItemIds),
+      observedAtGameTimeS: normalizeGameTime(state.gameTimeSec),
+      reconstructionConfidence:
+        observedActionKeys.length === 1
+          ? 'EXACT_SINGLE_ACTION'
+          : observedActionKeys.length > 1
+            ? 'MULTI_ACTION_INTERVAL'
+            : 'UNRESOLVED',
+    });
+    runtime.pendingDecisionId = undefined;
+    runtime.pendingDecisionTraversalKey = undefined;
+  }
+
+  private recordServedDecision(
+    runtime: TraversalRuntime,
+    input: LiveBuildRecommendationTraversalInput,
+    recommendation: HeroBuildRecommendationResponse,
+    elapsedMs: number,
+  ): string | undefined {
+    const telemetry = this.recommendationDecisionTelemetryService;
+    if (!telemetry) {
+      return undefined;
+    }
+    if (
+      runtime.pendingDecisionId &&
+      runtime.pendingDecisionTraversalKey &&
+      runtime.pendingDecisionTraversalKey !== input.traversalKey
+    ) {
+      telemetry.recordDecisionSuperseded({
+        decisionId: runtime.pendingDecisionId,
+        matchId: input.matchId,
+        steamId: input.steamId,
+        traversalKey: runtime.pendingDecisionTraversalKey,
+        reason: 'NEW_DECISION_SERVED',
+      });
+    }
+    const decisionId = telemetry.recordDecision({
+      context: input,
+      recommendation,
+      elapsedMs,
+    });
+    runtime.pendingDecisionId = decisionId;
+    runtime.pendingDecisionTraversalKey = input.traversalKey;
+    return decisionId;
+  }
+
+  private supersedePendingDecision(
+    runtime: TraversalRuntime,
+    reason: 'RUNTIME_EVICTED',
+  ): void {
+    if (
+      !runtime.pendingDecisionId ||
+      !runtime.pendingDecisionTraversalKey ||
+      !this.recommendationDecisionTelemetryService
+    ) {
+      return;
+    }
+    this.recommendationDecisionTelemetryService.recordDecisionSuperseded({
+      decisionId: runtime.pendingDecisionId,
+      matchId: runtime.matchId,
+      steamId: runtime.snapshot.steamId ?? '',
+      traversalKey: runtime.pendingDecisionTraversalKey,
+      reason,
+    });
+    runtime.pendingDecisionId = undefined;
+    runtime.pendingDecisionTraversalKey = undefined;
   }
 
   private evictOldRuntimes(): void {
@@ -420,6 +554,7 @@ export class LiveBuildRecommendationTraversalService {
     ) {
       const runtime = removable.shift();
       if (runtime) {
+        this.supersedePendingDecision(runtime, 'RUNTIME_EVICTED');
         this.runtimes.delete(runtime.matchId);
       }
     }
@@ -432,6 +567,7 @@ export function createTraversalInput(
   previousActionKeys: readonly string[] = [],
 ): LiveBuildRecommendationTraversalInput {
   const heroId = Number(localPlayer.heroId);
+  const teamId = normalizeTeamId(localPlayer.teamId);
   const itemIds = localPlayer.items
     .map((item) => Number(item.id))
     .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
@@ -482,6 +618,7 @@ export function createTraversalInput(
     matchId: state.matchId,
     steamId: localPlayer.steamId,
     heroId,
+    teamId,
     itemIds,
     alliedHeroIds,
     enemyHeroIds,
@@ -564,6 +701,18 @@ function createOptimisticHoldAction(
       text: 'The purchased item was detected. Recalculating the next build action.',
     },
   };
+}
+
+function normalizeGameTime(value: number | undefined): number {
+  return Number.isFinite(value)
+    ? Math.max(0, Math.floor(Number(value)))
+    : 0;
+}
+
+function normalizeTeamId(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : undefined;
 }
 
 function formatGameTime(value: number): string {

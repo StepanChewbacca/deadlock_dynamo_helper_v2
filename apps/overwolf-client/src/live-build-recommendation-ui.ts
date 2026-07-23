@@ -276,7 +276,7 @@ function formatFirstMatchupSignal(
 export function formatMatchupSignal(
   signal: NonNullable<LiveBuildRecommendationAction['matchupSignals']>[number],
 ): string {
-  return `VS ${signal.heroName} +${formatPercent(signal.modelLiftPercent)}% model lift · ${signal.observationCount} samples`;
+  return `VS ${signal.heroName} +${formatPercent(signal.contextualPurchaseLiftPercent)}% purchase-pattern lift · ${signal.observationCount} samples`;
 }
 
 function createStateMessage(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {

@@ -407,9 +407,9 @@ function createFullBuildTable(snapshot: LiveBuildRecommendationSnapshot): HTMLEl
   const heading = document.createElement('div');
   heading.className = 'live-build-section-heading';
   const title = document.createElement('h3');
-  title.textContent = 'Full build';
+  title.textContent = 'Projected model path';
   const meta = document.createElement('span');
-  meta.textContent = 'Early / Mid / Late';
+  meta.textContent = 'Synthetic 90-second rollout steps';
   heading.append(title, meta);
   section.append(heading);
 
@@ -661,7 +661,7 @@ function formatEvidence(action: ExtendedLiveBuildRecommendationAction): string {
     (signal) => signal.direction === 'POSITIVE',
   );
   if (matchup) {
-    return `VS ${matchup.heroName} +${formatPercent(matchup.modelLiftPercent)}% (${matchup.observationCount})`;
+    return `VS ${matchup.heroName} +${formatPercent(matchup.contextualPurchaseLiftPercent)}% purchase lift (${matchup.observationCount})`;
   }
   const count = Number(action.historicalCount);
   const probability = Number(action.historicalProbabilityPercent);
