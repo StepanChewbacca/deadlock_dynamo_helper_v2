@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - .github/workflows/diagnose-matchup-signals-production.yml
+      - .github/scripts/diagnose-matchup-signal.js
 
 permissions:
   contents: read
@@ -15,124 +16,28 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 8
     steps:
-      - name: Verify model-only deployment and matchup signals
+      - uses: actions/checkout@v4
+      - name: Verify deployed model-only status
         shell: bash
         run: |
           set -euo pipefail
           cd /home/ubuntu/apps/deadlock_dynamo_helper
-
           expected='cb78aede4d66e2ce5b62bc6c60581d4391b4e755'
-          for attempt in $(seq 1 36); do
-            current="$(git rev-parse HEAD)"
-            if git merge-base --is-ancestor "$expected" "$current"; then
-              break
-            fi
-            if [ "$attempt" -eq 36 ]; then
-              echo "Deployment did not reach $expected; current HEAD is $current" >&2
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo '--- deployed git head ---'
-          git rev-parse HEAD
-          echo '--- containers ---'
+          git merge-base --is-ancestor "$expected" "$(git rev-parse HEAD)"
           sudo docker compose ps
-
-          echo '--- local model status ---'
-          local_status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
-          echo "$local_status"
-          echo "$local_status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['mode']=='PRODUCTION'; assert x['model']['state']=='READY'; assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0"
-
-          echo '--- public model status ---'
-          public_status="$(curl --fail --show-error --silent --max-time 20 https://aboba-telegramovich.duckdns.org/deadlock/analysis/contextual-v3-live/status)"
-          echo "$public_status"
-          echo "$public_status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['mode']=='PRODUCTION'; assert x['model']['state']=='READY'; assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0"
-
-          echo '--- search actual Contextual V3 matchup signal ---'
-          sudo docker compose exec -T api node <<'NODE'
-          const fs = require('node:fs');
-
-          void (async () => {
-            const modelPath = '/app/apps/api/storage/contextual-v3-training/model.json';
-            const model = JSON.parse(fs.readFileSync(modelPath, 'utf8'));
-            const heroIds = Object.keys(model.counts.hero)
-              .map(Number)
-              .filter((value) => Number.isSafeInteger(value) && value > 0)
-              .sort((left, right) => left - right);
-            const enemyIds = [...new Set(
-              Object.keys(model.counts.enemy)
-                .map((key) => Number(key.split('|')[2]))
-                .filter((value) => Number.isSafeInteger(value) && value > 0),
-            )].sort((left, right) => left - right);
-            const phaseTimes = [0, 600, 1200];
-            let attempts = 0;
-            let found;
-
-            outer:
-            for (const heroId of heroIds) {
-              for (const gameTimeS of phaseTimes) {
-                for (const enemyHeroId of enemyIds) {
-                  attempts += 1;
-                  const response = await fetch(
-                    'http://127.0.0.1:3000/deadlock/analysis/build-recommendation',
-                    {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        heroId,
-                        itemIds: [],
-                        gameTimeS,
-                        alliedHeroIds: [],
-                        enemyHeroIds: [enemyHeroId],
-                        previousActionKeys: [],
-                        limit: 20,
-                        minAlternativeHistoricalCount: 0,
-                        minAlternativeConfidence: 0,
-                      }),
-                    },
-                  );
-                  if (!response.ok) {
-                    throw new Error(`Recommendation HTTP ${response.status}`);
-                  }
-                  const recommendation = await response.json();
-                  if (recommendation.recommendationModel !== 'CONTEXTUAL_V3') {
-                    throw new Error('Recommendation did not come from Contextual V3');
-                  }
-                  const actions = [recommendation.action, ...recommendation.alternatives];
-                  const action = actions.find(
-                    (candidate) => Array.isArray(candidate.matchupSignals) && candidate.matchupSignals.length > 0,
-                  );
-                  if (action) {
-                    found = {
-                      heroId,
-                      gameTimeS,
-                      enemyHeroId,
-                      actionKey: action.actionKey,
-                      label: action.label,
-                      matchupSignals: action.matchupSignals,
-                      recommendationModel: recommendation.recommendationModel,
-                    };
-                    break outer;
-                  }
-                  if (attempts >= 600) {
-                    break outer;
-                  }
-                }
-              }
-            }
-
-            if (!found) {
-              throw new Error(`No matchup signal found in ${attempts} model-only recommendations`);
-            }
-            console.log(JSON.stringify({ attempts, found }, null, 2));
-          })().catch((error) => {
-            console.error(error);
-            process.exitCode = 1;
-          });
-          NODE
-
-          echo '--- final model status ---'
-          final_status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
-          echo "$final_status"
-          echo "$final_status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0; assert x['modelErrorCount']==0"
+          status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
+          echo "$status"
+          echo "$status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['mode']=='PRODUCTION'; assert x['model']['state']=='READY'; assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0; assert x['modelErrorCount']==0"
+      - name: Print actual matchup signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          sudo docker compose exec -T api node < "$GITHUB_WORKSPACE/.github/scripts/diagnose-matchup-signal.js"
+      - name: Recheck model-only counters
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --fail --show-error --silent --max-time 20 http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status)"
+          echo "$status"
+          echo "$status" | python3 -c "import json,sys; x=json.load(sys.stdin); assert x['modelOnly'] is True; assert x['fallbackEnabled'] is False; assert x['baselineResponseCount']==0; assert x['fallbackCount']==0; assert x['modelErrorCount']==0"
