@@ -15,24 +15,35 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 5
     steps:
-      - name: Inspect active nginx route
+      - name: Verify repaired public route
         shell: bash
         run: |
           set +e
-          echo '--- nginx files ---'
-          sudo grep -R -n -E 'server_name[[:space:]]+aboba-telegramovich\.duckdns\.org|location[[:space:]]+/deadlock|proxy_pass' \
-            /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -n 120 || true
-          echo '--- nginx syntax ---'
-          sudo nginx -t 2>&1 || true
-          echo '--- direct API ---'
-          curl --show-error --silent --output /tmp/direct-body --write-out 'status=%{http_code}\n' \
-            'http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status' || true
-          head -c 600 /tmp/direct-body 2>/dev/null || true
+          host='aboba-telegramovich.duckdns.org'
+          echo '--- cleanup duplicate config ---'
+          sudo rm -f "/etc/nginx/sites-enabled/${host}.before-deadlock-route"
+          echo '--- active route ---'
+          sudo grep -R -n -E 'location[[:space:]]+\^~[[:space:]]+/deadlock/|proxy_pass[[:space:]]+http://127\.0\.0\.1:3000' \
+            /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
+          echo '--- nginx syntax and reload ---'
+          sudo nginx -t
+          syntax_status=$?
+          if [ "$syntax_status" -eq 0 ]; then
+            sudo systemctl reload nginx
+          fi
+          echo '--- local HTTPS ---'
+          curl --show-error --silent --output /tmp/local-body --write-out 'status=%{http_code}\n' \
+            --resolve "${host}:443:127.0.0.1" \
+            "https://${host}/deadlock/analysis/contextual-v3-live/status"
+          local_status=$?
+          cat /tmp/local-body 2>/dev/null || true
           echo
-          echo '--- nginx API ---'
-          curl --insecure --show-error --silent --output /tmp/nginx-body --write-out 'status=%{http_code}\n' \
-            --resolve 'aboba-telegramovich.duckdns.org:443:127.0.0.1' \
-            'https://aboba-telegramovich.duckdns.org/deadlock/analysis/contextual-v3-live/status' || true
-          head -c 600 /tmp/nginx-body 2>/dev/null || true
+          echo '--- public HTTPS ---'
+          curl --show-error --silent --retry 5 --retry-delay 2 --retry-all-errors \
+            --output /tmp/public-body --write-out 'status=%{http_code}\n' \
+            "https://${host}/deadlock/analysis/contextual-v3-live/status"
+          public_status=$?
+          cat /tmp/public-body 2>/dev/null || true
           echo
+          echo "syntax_status=$syntax_status local_status=$local_status public_status=$public_status"
           exit 1
