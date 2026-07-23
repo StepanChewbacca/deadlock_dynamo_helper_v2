@@ -19,4 +19,4 @@ Database reset, backup, migration, and raw metadata reprocessing instructions ar
 
 For setup, sideloading, and live validation, see the [Overwolf Deadlock Live Probe Runbook](docs/overwolf-deadlock-live-probe-runbook.md).
 
-For API deployment, OPK packaging, Testing-channel verification, Production promotion, and rollback, see the [Overwolf Production Release Runbook](docs/overwolf-production-release.md).
+For API deployment, unpacked Overwolf build, Developer Mode loading, live verification, and rollback, see the [Overwolf Sideload Rollout Runbook](docs/overwolf-production-release.md).
