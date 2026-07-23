@@ -84,7 +84,22 @@ jobs:
           retention-days: 3
 
       - name: Test Overwolf client
-        run: yarn workspace @deadlock-live-probe/overwolf-client test
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/overwolf-client test > "$RUNNER_TEMP/overwolf-test.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/overwolf-test.log"
+          exit "$status"
+
+      - name: Upload failed Overwolf test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-telemetry-overwolf-test-${{ github.run_id }}
+          path: ${{ runner.temp }}/overwolf-test.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Build Overwolf client
         env:
