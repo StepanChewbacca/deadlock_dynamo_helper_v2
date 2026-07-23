@@ -55,6 +55,25 @@ describe('Contextual V3 live helpers', () => {
     expect(signals[0].modelLiftPercent).toBeGreaterThan(0.5);
   });
 
+  it('keeps isolated matchup lift visible with a full enemy roster', () => {
+    const signals = createContextualV3MatchupSignals({
+      baseLogProbability: -2,
+      enemyWeight: 0.12,
+      evidence: [
+        { heroId: 13, logProbability: -1.95, observationCount: 80 },
+        { heroId: 14, logProbability: -2, observationCount: 80 },
+        { heroId: 15, logProbability: -2, observationCount: 80 },
+        { heroId: 16, logProbability: -2, observationCount: 80 },
+        { heroId: 17, logProbability: -2, observationCount: 80 },
+      ],
+    });
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0].heroId).toBe(13);
+    expect(signals[0].scoreContribution).toBeCloseTo(0.0012, 6);
+    expect(signals[0].modelLiftPercent).toBeGreaterThan(0.5);
+  });
+
   it('reconstructs buy, upgrade, and sell actions from live inventory snapshots', () => {
     const recipes = new Map<number, number[]>([[300, [100, 200]]]);
     const actions = deriveContextualV3PreviousActionKeys(
