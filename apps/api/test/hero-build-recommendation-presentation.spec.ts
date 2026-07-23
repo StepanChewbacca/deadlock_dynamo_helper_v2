@@ -1,4 +1,5 @@
 import {
+  HeroBuildPresentationHeroSource,
   HeroBuildPresentationItemSource,
   presentHeroBuildRecommendation,
 } from '../src/deadlock-live/hero-build-recommendation-presentation.service';
@@ -7,6 +8,11 @@ import {
   HeroBuildRecommendationMode,
   HeroBuildRecommendationResponse,
 } from '../src/deadlock-live/hero-build-recommendation.service';
+
+const HAZE: HeroBuildPresentationHeroSource = {
+  heroId: 13,
+  name: 'Haze',
+};
 
 const ITEM: HeroBuildPresentationItemSource = {
   itemId: 200,
@@ -65,6 +71,31 @@ describe('hero build recommendation presentation', () => {
     expect(result.action.explanation.code).toBe('SUBSET_STATE_EVIDENCE');
     expect(result.action.explanation.evidenceLevel).toBe('INFERRED');
     expect(result.action.explanation.text).toContain('2 extra current item(s)');
+  });
+
+  it('enriches model matchup signals with enemy hero names', () => {
+    const response = createResponse('BACKOFF', createAction({
+      matchupSignals: [
+        {
+          heroId: 13,
+          direction: 'POSITIVE',
+          scoreContribution: 0.04,
+          modelLiftPercent: 4.08,
+          observationCount: 84,
+        },
+      ],
+    }));
+
+    const result = presentHeroBuildRecommendation(response, [ITEM], [HAZE]);
+
+    expect(result.action.matchupSignals).toEqual([
+      expect.objectContaining({
+        heroId: 13,
+        heroName: 'Haze',
+        modelLiftPercent: 4.08,
+        observationCount: 84,
+      }),
+    ]);
   });
 
   it('presents hold without requiring item metadata', () => {

@@ -6,6 +6,7 @@ import { Item } from './entities/item.entity';
 import { canonicalHeroId, heroIdAliases } from './hero-id-aliases';
 import {
   HeroBuildRecommendationAction,
+  HeroBuildRecommendationMatchupSignal,
   HeroBuildRecommendationResponse,
 } from './hero-build-recommendation.service';
 
@@ -34,13 +35,22 @@ export interface HeroBuildPresentationExplanation {
   text: string;
 }
 
-export type HeroBuildPresentedAction = HeroBuildRecommendationAction & {
+export interface HeroBuildPresentedMatchupSignal
+  extends HeroBuildRecommendationMatchupSignal {
+  heroName: string;
+}
+
+export type HeroBuildPresentedAction = Omit<
+  HeroBuildRecommendationAction,
+  'matchupSignals'
+> & {
   label: string;
   confidencePercent: number;
   historicalProbabilityPercent: number;
   typicalGameTimeLabel: string;
   item?: HeroBuildPresentedItem;
   situationalAgainstHeroName?: string;
+  matchupSignals?: HeroBuildPresentedMatchupSignal[];
   explanation: HeroBuildPresentationExplanation;
 };
 
@@ -158,6 +168,12 @@ function presentAction(
   const situationalAgainstHeroName = situationalAgainstHeroId === undefined
     ? undefined
     : heroNameByCanonicalId.get(canonicalHeroId(situationalAgainstHeroId));
+  const matchupSignals = action.matchupSignals?.map((signal) => ({
+    ...signal,
+    heroName:
+      heroNameByCanonicalId.get(canonicalHeroId(signal.heroId)) ??
+      `Hero ${signal.heroId}`,
+  }));
 
   return {
     ...action,
@@ -167,6 +183,7 @@ function presentAction(
     typicalGameTimeLabel: formatGameTime(action.averageGameTimeS),
     item,
     situationalAgainstHeroName,
+    matchupSignals,
     explanation: createExplanation(action, response),
   };
 }
@@ -279,7 +296,10 @@ function collectSituationalHeroLookupIds(
   response: HeroBuildRecommendationResponse,
 ): number[] {
   const heroIds = [response.action, ...response.alternatives]
-    .map(getSituationalAgainstHeroId)
+    .flatMap((action) => [
+      getSituationalAgainstHeroId(action),
+      ...(action.matchupSignals ?? []).map((signal) => signal.heroId),
+    ])
     .filter((heroId): heroId is number => heroId !== undefined)
     .flatMap((heroId) => heroIdAliases(heroId));
   return [...new Set(heroIds)].sort((left, right) => left - right);

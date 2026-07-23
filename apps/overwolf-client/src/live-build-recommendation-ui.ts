@@ -165,6 +165,10 @@ function createPrimaryAction(
   explanation.textContent = action.explanation.text;
 
   card.append(top, explanation);
+  const matchup = createMatchupSignals(action);
+  if (matchup) {
+    card.append(matchup);
+  }
   return card;
 }
 
@@ -188,7 +192,10 @@ function createAlternatives(actions: LiveBuildRecommendationAction[]): HTMLEleme
     label.textContent = action.label;
 
     const metadata = document.createElement('span');
-    metadata.textContent = formatItemMetadata(action);
+    metadata.textContent = [
+      formatItemMetadata(action),
+      formatFirstMatchupSignal(action),
+    ].filter(Boolean).join(' | ');
 
     copy.append(label, metadata);
 
@@ -201,6 +208,56 @@ function createAlternatives(actions: LiveBuildRecommendationAction[]): HTMLEleme
   }
 
   return section;
+}
+
+function createMatchupSignals(
+  action: LiveBuildRecommendationAction,
+): HTMLElement | undefined {
+  const signals = (action.matchupSignals ?? []).filter(
+    (signal) => signal.direction === 'POSITIVE',
+  );
+  if (signals.length === 0) {
+    return undefined;
+  }
+
+  const section = document.createElement('div');
+  section.className = 'live-build-matchup';
+  section.title =
+    'Historical purchase pattern used by Contextual V3. This is model influence, not proven win-rate counter effectiveness.';
+
+  const title = document.createElement('span');
+  title.className = 'live-build-matchup-title';
+  title.textContent = 'MATCHUP SIGNAL';
+
+  const chips = document.createElement('div');
+  chips.className = 'live-build-matchup-chips';
+  for (const signal of signals.slice(0, 2)) {
+    const chip = document.createElement('span');
+    chip.className = 'live-build-matchup-chip';
+    chip.textContent = formatMatchupSignal(signal);
+    chips.append(chip);
+  }
+
+  const note = document.createElement('span');
+  note.className = 'live-build-matchup-note';
+  note.textContent = 'Historical purchase tendency, not win-rate proof.';
+  section.append(title, chips, note);
+  return section;
+}
+
+function formatFirstMatchupSignal(
+  action: LiveBuildRecommendationAction,
+): string {
+  const signal = action.matchupSignals?.find(
+    (value) => value.direction === 'POSITIVE',
+  );
+  return signal ? formatMatchupSignal(signal) : '';
+}
+
+export function formatMatchupSignal(
+  signal: NonNullable<LiveBuildRecommendationAction['matchupSignals']>[number],
+): string {
+  return `VS ${signal.heroName} +${formatPercent(signal.modelLiftPercent)}% model lift · ${signal.observationCount} samples`;
 }
 
 function createStateMessage(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
@@ -381,6 +438,40 @@ function injectStyles(): void {
     }
     .live-build-confidence strong { font-size: 0.82rem; }
     .live-build-confidence span { color: #9ca3af; font-size: 0.48rem; }
+    .live-build-matchup {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin-top: 0.42rem;
+      padding-top: 0.38rem;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .live-build-matchup-title {
+      color: #67e8f9;
+      font-size: 0.52rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .live-build-matchup-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+    }
+    .live-build-matchup-chip {
+      padding: 0.18rem 0.3rem;
+      border: 1px solid rgba(103,232,249,0.24);
+      border-radius: 4px;
+      background: rgba(8,145,178,0.12);
+      color: #a5f3fc;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.51rem;
+      line-height: 1.2;
+    }
+    .live-build-matchup-note {
+      color: #7f8794;
+      font-size: 0.48rem;
+      line-height: 1.2;
+    }
     .live-build-explanation {
       margin-top: 0.4rem;
       color: #c4c7ce;
@@ -410,6 +501,7 @@ function injectStyles(): void {
       overflow-wrap: anywhere;
     }
     .hud-container.compact .live-build-explanation,
+    .hud-container.compact .live-build-matchup,
     .hud-container.compact .live-build-alternatives {
       display: none;
     }

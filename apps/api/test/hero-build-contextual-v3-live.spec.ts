@@ -1,5 +1,6 @@
 import {
   assignLiveArchetype,
+  createContextualV3MatchupSignals,
   getContextualV3Phase,
   normalizeContextualV3RosterHeroIds,
 } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
@@ -30,6 +31,28 @@ describe('Contextual V3 live helpers', () => {
     );
     expect(assignLiveArchetype(10, [], definitions)).toBe('UNKNOWN');
     expect(assignLiveArchetype(10, ['BUY:999'], definitions)).toBe('OTHER');
+  });
+
+  it('keeps only supported positive enemy matchup contributions', () => {
+    const signals = createContextualV3MatchupSignals({
+      baseLogProbability: -2,
+      enemyWeight: 0.12,
+      evidence: [
+        { heroId: 13, logProbability: -1, observationCount: 120 },
+        { heroId: 14, logProbability: -2.5, observationCount: 90 },
+        { heroId: 15, logProbability: -0.5, observationCount: 12 },
+      ],
+    });
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toEqual(
+      expect.objectContaining({
+        heroId: 13,
+        direction: 'POSITIVE',
+        observationCount: 120,
+      }),
+    );
+    expect(signals[0].modelLiftPercent).toBeGreaterThan(0.5);
   });
 
   it('reconstructs buy, upgrade, and sell actions from live inventory snapshots', () => {

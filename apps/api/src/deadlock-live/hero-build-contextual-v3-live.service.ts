@@ -15,6 +15,7 @@ import {
 } from './hero-build-contextual-v3-candidate-evaluation.service';
 import {
   HeroBuildRecommendationAction,
+  HeroBuildRecommendationMatchupSignal,
   HeroBuildRecommendationResponse,
 } from './hero-build-recommendation.service';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
@@ -34,6 +35,9 @@ const DEFAULT_ARCHETYPE_WEIGHT = 0.5;
 const DEFAULT_ALLY_WEIGHT = 0.08;
 const DEFAULT_ENEMY_WEIGHT = 0.12;
 const MAX_PUBLIC_RECOMMENDATIONS = 20;
+const MAX_MATCHUP_SIGNALS_PER_ACTION = 2;
+const MIN_MATCHUP_SIGNAL_OBSERVATIONS = 30;
+const MIN_MATCHUP_SIGNAL_LIFT_PERCENT = 0.5;
 const TOTAL_CACHE = new WeakMap<object, number>();
 
 export type ContextualV3LiveState = 'READY' | 'UNAVAILABLE';
@@ -185,10 +189,20 @@ interface ParsedAction {
   publicActionKey: string;
 }
 
-interface ScoredAction {
+interface RawScoredAction {
   parsed: ParsedAction;
   score: number;
+  matchupSignals: HeroBuildRecommendationMatchupSignal[];
+}
+
+interface ScoredAction extends RawScoredAction {
   probability: number;
+}
+
+export interface ContextualV3EnemyMatchupEvidence {
+  heroId: number;
+  logProbability: number;
+  observationCount: number;
 }
 
 @Injectable()
@@ -547,6 +561,50 @@ export function assignLiveArchetype(
   return definition?.id ?? 'OTHER';
 }
 
+export function createContextualV3MatchupSignals(input: {
+  baseLogProbability: number;
+  enemyWeight: number;
+  evidence: readonly ContextualV3EnemyMatchupEvidence[];
+}): HeroBuildRecommendationMatchupSignal[] {
+  if (
+    input.evidence.length === 0 ||
+    !Number.isFinite(input.baseLogProbability) ||
+    !Number.isFinite(input.enemyWeight)
+  ) {
+    return [];
+  }
+
+  const divisor = input.evidence.length;
+  return input.evidence
+    .map((value) => {
+      const scoreContribution =
+        input.enemyWeight *
+        (value.logProbability - input.baseLogProbability) /
+        divisor;
+      const modelLiftPercent = (Math.exp(scoreContribution) - 1) * 100;
+      return {
+        heroId: value.heroId,
+        direction: scoreContribution >= 0 ? 'POSITIVE' as const : 'NEGATIVE' as const,
+        scoreContribution,
+        modelLiftPercent,
+        observationCount: value.observationCount,
+      };
+    })
+    .filter(
+      (value) =>
+        value.direction === 'POSITIVE' &&
+        value.observationCount >= MIN_MATCHUP_SIGNAL_OBSERVATIONS &&
+        value.modelLiftPercent >= MIN_MATCHUP_SIGNAL_LIFT_PERCENT,
+    )
+    .sort(
+      (left, right) =>
+        right.scoreContribution - left.scoreContribution ||
+        right.observationCount - left.observationCount ||
+        left.heroId - right.heroId,
+    )
+    .slice(0, MAX_MATCHUP_SIGNALS_PER_ACTION);
+}
+
 function scoreCandidates(input: {
   candidates: readonly string[];
   model: SerializedModel;
@@ -605,17 +663,21 @@ function scoreCandidates(input: {
             ),
           ) - base
         : 0;
-      const enemyDelta = input.enemyHeroIds.length > 0
-        ? average(
-            input.enemyHeroIds.map((heroId) =>
-              logProbability(
-                input.model.counts.enemy[`${baseKey}|${heroId}`],
-                sourceActionKey,
-                input.candidates.length,
-                smoothing,
-              ),
-            ),
-          ) - base
+      const enemyEvidence = input.enemyHeroIds.map((heroId) => {
+        const counts = input.model.counts.enemy[`${baseKey}|${heroId}`];
+        return {
+          heroId,
+          logProbability: logProbability(
+            counts,
+            sourceActionKey,
+            input.candidates.length,
+            smoothing,
+          ),
+          observationCount: counts?.[sourceActionKey] ?? 0,
+        };
+      });
+      const enemyDelta = enemyEvidence.length > 0
+        ? average(enemyEvidence.map((value) => value.logProbability)) - base
         : 0;
       return {
         parsed,
@@ -624,13 +686,16 @@ function scoreCandidates(input: {
           weights.archetype * archetypeDelta +
           weights.allies * allyDelta +
           weights.enemies * enemyDelta,
+        matchupSignals: createContextualV3MatchupSignals({
+          baseLogProbability: base,
+          enemyWeight: weights.enemies,
+          evidence: enemyEvidence,
+        }),
       };
     })
-    .filter((value): value is { parsed: ParsedAction; score: number } =>
-      value !== undefined,
-    );
+    .filter((value): value is RawScoredAction => value !== undefined);
 
-  const bestByPublicAction = new Map<string, { parsed: ParsedAction; score: number }>();
+  const bestByPublicAction = new Map<string, RawScoredAction>();
   for (const value of raw) {
     const existing = bestByPublicAction.get(value.parsed.publicActionKey);
     if (!existing || value.score > existing.score) {
@@ -665,7 +730,7 @@ function buildRecommendationActions(
   const phaseTotal = countTotal(phaseCounts);
   const heroTotal = countTotal(heroCounts);
 
-  return scored.map(({ parsed, probability }) => {
+  return scored.map(({ parsed, probability, matchupSignals }) => {
     const predictedCounts = new Map(currentCounts);
     if (parsed.publicActionType === 'UPGRADE') {
       for (const componentItemId of catalog.componentsByParent.get(parsed.itemId) ?? []) {
@@ -700,6 +765,7 @@ function buildRecommendationActions(
         parsed.publicActionType === 'BUY' ? currentOwnedCount : undefined,
       observedOwnedCountLimit:
         parsed.publicActionType === 'BUY' ? currentOwnedCount + 1 : undefined,
+      matchupSignals,
       predictedStateKey: createStateKeyFromCounts(predictedCounts),
       score: probability,
       confidence: probability,
