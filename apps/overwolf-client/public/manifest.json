@@ -3,7 +3,7 @@
   "type": "WebApp",
   "meta": {
     "name": "Deadlock Live Probe",
-    "version": "0.1.7",
+    "version": "0.1.8",
     "minimum-overwolf-version": "0.197.0",
     "minimum-gep-version": "305.0",
     "author": "Antigravity",
