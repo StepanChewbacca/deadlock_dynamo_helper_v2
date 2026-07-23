@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 30
     env:
       PUBLIC_API_BASE_URL: ${{ vars.PUBLIC_API_BASE_URL || 'https://aboba-telegramovich.duckdns.org' }}
+      DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -74,6 +75,84 @@ jobs:
           cd /home/ubuntu/apps/deadlock_dynamo_helper
           sudo docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status').then(async (response) => { const status = await response.json(); console.log(JSON.stringify(status)); if (!response.ok || status.mode !== 'PRODUCTION' || status.model?.state !== 'READY') process.exit(1); }).catch((error) => { console.error(error); process.exit(1); });"
           sudo docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/deadlock/live/build-recommendations/status').then(async (response) => { const status = await response.json(); console.log(JSON.stringify(status)); if (!response.ok || typeof status.trackedMatchCount !== 'number') process.exit(1); }).catch((error) => { console.error(error); process.exit(1); });"
+
+      - name: Restore DuckDNS record when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_host="${PUBLIC_API_BASE_URL#https://}"
+          public_host="${public_host%%/*}"
+          public_host="${public_host%%:*}"
+
+          if [[ "$public_host" != *.duckdns.org ]]; then
+            echo "Public host $public_host is not managed by DuckDNS."
+            exit 0
+          fi
+
+          resolve_public_host() {
+            getent ahostsv4 "$public_host" | awk 'NR == 1 { print $1 }'
+          }
+
+          resolved_ip="$(resolve_public_host || true)"
+          if [ -n "$resolved_ip" ]; then
+            echo "DuckDNS already resolves $public_host to $resolved_ip."
+            exit 0
+          fi
+
+          duckdns_token="${DUCKDNS_TOKEN:-}"
+          for env_file in \
+            /home/ubuntu/apps/deadlock_dynamo_helper/.env \
+            /home/ubuntu/apps/aboba-telegramovich/.env \
+            /etc/duckdns/duckdns.env; do
+            if [ -n "$duckdns_token" ] || [ ! -r "$env_file" ]; then
+              continue
+            fi
+            duckdns_token="$(sed -n 's/^DUCKDNS_TOKEN=//p' "$env_file" | tail -n 1 | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+          done
+
+          if [ -z "$duckdns_token" ]; then
+            echo 'DuckDNS does not resolve and DUCKDNS_TOKEN is unavailable.' >&2
+            echo 'Add the repository secret DUCKDNS_TOKEN or DUCKDNS_TOKEN to the deployment .env.' >&2
+            exit 1
+          fi
+
+          duckdns_domain="${public_host%.duckdns.org}"
+          update_result="$(curl --fail --show-error --silent --get \
+            'https://www.duckdns.org/update' \
+            --data-urlencode "domains=$duckdns_domain" \
+            --data-urlencode "token=$duckdns_token" \
+            --data-urlencode 'ip=')"
+          if [ "$update_result" != 'OK' ]; then
+            echo "DuckDNS update failed: $update_result" >&2
+            exit 1
+          fi
+
+          for attempt in $(seq 1 30); do
+            resolved_ip="$(resolve_public_host || true)"
+            if [ -n "$resolved_ip" ]; then
+              echo "DuckDNS resolves $public_host to $resolved_ip."
+              exit 0
+            fi
+            echo "Waiting for DuckDNS propagation ($attempt/30)."
+            sleep 5
+          done
+
+          echo "DuckDNS update succeeded but $public_host still does not resolve." >&2
+          exit 1
+
+      - name: Verify HTTPS reverse proxy locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_host="${PUBLIC_API_BASE_URL#https://}"
+          public_host="${public_host%%/*}"
+          public_host="${public_host%%:*}"
+          status="$(curl --fail --show-error --silent \
+            --resolve "$public_host:443:127.0.0.1" \
+            "$PUBLIC_API_BASE_URL/deadlock/analysis/contextual-v3-live/status")"
+          echo "$status"
+          echo "$status" | grep -q '"mode":"PRODUCTION"'
+          echo "$status" | grep -q '"state":"READY"'
 
       - name: Verify public API route
         shell: bash
