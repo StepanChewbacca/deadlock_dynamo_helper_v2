@@ -22,10 +22,6 @@ for (const field of [
   'author',
   'description',
   'icon',
-  'icon_gray',
-  'launcher_icon',
-  'window_icon',
-  'dock_button_title',
 ]) {
   assert(
     typeof manifest.meta?.[field] === 'string' && manifest.meta[field].trim().length > 0,
@@ -81,12 +77,10 @@ for (const [windowName, windowConfig] of Object.entries(manifest.data?.windows |
   );
 }
 
-for (const field of ['icon', 'icon_gray', 'launcher_icon', 'window_icon']) {
-  const assetPath = path.join(publicDir, manifest.meta?.[field] || '');
-  assert(fs.existsSync(assetPath), `Manifest asset ${field} is missing.`);
-  if (fs.existsSync(assetPath)) {
-    assertPng(assetPath, field);
-  }
+const iconPath = path.join(publicDir, manifest.meta?.icon || '');
+assert(fs.existsSync(iconPath), 'Manifest icon is missing.');
+if (fs.existsSync(iconPath)) {
+  assertPng(iconPath, 'icon');
 }
 
 const distDir = path.join(publicDir, 'dist');
@@ -97,11 +91,11 @@ assert(
 );
 
 if (errors.length > 0) {
-  throw new Error(`Overwolf release validation failed:\n- ${errors.join('\n- ')}`);
+  throw new Error(`Overwolf sideload validation failed:\n- ${errors.join('\n- ')}`);
 }
 
 console.log(
-  `Overwolf release ${manifest.meta.version} validated for Deadlock ${DEADLOCK_GAME_ID}.`,
+  `Overwolf sideload ${manifest.meta.version} validated for Deadlock ${DEADLOCK_GAME_ID}.`,
 );
 
 function assert(condition, message) {
