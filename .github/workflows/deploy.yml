@@ -147,6 +147,9 @@ jobs:
           public_host="${PUBLIC_API_BASE_URL#https://}"
           public_host="${public_host%%/*}"
           public_host="${public_host%%:*}"
+
+          sudo rm -f "/etc/nginx/sites-enabled/${public_host}.before-deadlock-route"
+
           sudo env PUBLIC_API_HOST="$public_host" python3 - <<'PY'
           import os
           import re
@@ -213,7 +216,9 @@ jobs:
                   raise SystemExit(f'HTTPS nginx server block was not found for {host}.')
 
           if updated != source:
-              backup_path = config_path.with_name(config_path.name + '.before-deadlock-route')
+              backup_dir = Path('/var/backups/nginx')
+              backup_dir.mkdir(parents=True, exist_ok=True)
+              backup_path = backup_dir / f'{host}.before-deadlock-route'
               if not backup_path.exists():
                   shutil.copy2(config_path, backup_path)
               config_path.write_text(updated)
@@ -221,6 +226,7 @@ jobs:
           else:
               print('Nginx Deadlock route is already up to date.')
           PY
+
           sudo nginx -t
           sudo systemctl reload nginx
 
