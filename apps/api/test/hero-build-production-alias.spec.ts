@@ -1,4 +1,4 @@
-import type { ContextualHeroBuildRecommendationV2Service } from '../src/deadlock-live/contextual-hero-build-recommendation-v2.service';
+import type { HeroBuildContextualV3LiveService } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
 import type { HeroBuildRecommendationResponse } from '../src/deadlock-live/hero-build-recommendation.service';
 import type {
   HeroBuildPolicy,
@@ -8,17 +8,17 @@ import { ProductionHeroBuildRecommendationService } from '../src/deadlock-live/p
 import type { RecipeAwareTimelineReconciliationService } from '../src/deadlock-live/recipe-aware-timeline-reconciliation.service';
 
 describe('ProductionHeroBuildRecommendationService hero aliases', () => {
-  const previousShadowEnabled = process.env.DEADLOCK_CONTEXTUAL_SHADOW_ENABLED;
+  const previousLiveMode = process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE;
   const previousShadowSampleRate =
-    process.env.DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE;
+    process.env.DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE;
 
   afterEach(() => {
     restoreEnvironmentValue(
-      'DEADLOCK_CONTEXTUAL_SHADOW_ENABLED',
-      previousShadowEnabled,
+      'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE',
+      previousLiveMode,
     );
     restoreEnvironmentValue(
-      'DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE',
+      'DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE',
       previousShadowSampleRate,
     );
     jest.restoreAllMocks();
@@ -30,8 +30,8 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
   ])(
     'uses canonical policy for alias $requestedHeroId and preserves the requested response id',
     async ({ requestedHeroId, canonicalHeroId }) => {
-      process.env.DEADLOCK_CONTEXTUAL_SHADOW_ENABLED = 'true';
-      process.env.DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE = '1';
+      process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE = 'SHADOW';
+      process.env.DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE = '1';
 
       const policy = createPolicy(canonicalHeroId);
       const transitionService = {
@@ -47,13 +47,14 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
         getComponentItemIds: jest.fn(() => []),
       } as unknown as RecipeAwareTimelineReconciliationService;
       const contextualService = {
-        rerank: jest.fn(
-          async (
+        getStatus: jest.fn(() => ({ state: 'READY' })),
+        recommend: jest.fn(
+          (
             request: { heroId: number; enemyHeroIds?: number[] },
             baseline: HeroBuildRecommendationResponse,
           ) => createContextualResponse(request, baseline),
         ),
-      } as unknown as ContextualHeroBuildRecommendationV2Service;
+      } as unknown as HeroBuildContextualV3LiveService;
       const service = new ProductionHeroBuildRecommendationService(
         transitionService,
         recipeService,
@@ -73,7 +74,7 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
       expect(response.mode).toBe('EXACT');
       expect(response.action.actionKey).toBe('BUY:100');
       expect(transitionService.getHeroPolicy).toHaveBeenCalledWith(canonicalHeroId);
-      expect(contextualService.rerank).toHaveBeenCalledWith(
+      expect(contextualService.recommend).toHaveBeenCalledWith(
         expect.objectContaining({ heroId: canonicalHeroId }),
         expect.objectContaining({ heroId: requestedHeroId }),
       );
@@ -81,7 +82,7 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
   );
 
   it('leaves canonical hero ids unchanged', async () => {
-    process.env.DEADLOCK_CONTEXTUAL_SHADOW_ENABLED = 'false';
+    process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE = 'BASELINE';
 
     const policy = createPolicy(2);
     const transitionService = {
@@ -93,8 +94,9 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
       getComponentItemIds: jest.fn(() => []),
     } as unknown as RecipeAwareTimelineReconciliationService;
     const contextualService = {
-      rerank: jest.fn(),
-    } as unknown as ContextualHeroBuildRecommendationV2Service;
+      getStatus: jest.fn(() => ({ state: 'READY' })),
+      recommend: jest.fn(),
+    } as unknown as HeroBuildContextualV3LiveService;
     const service = new ProductionHeroBuildRecommendationService(
       transitionService,
       recipeService,
@@ -111,7 +113,7 @@ describe('ProductionHeroBuildRecommendationService hero aliases', () => {
 
     expect(response.heroId).toBe(2);
     expect(transitionService.getHeroPolicy).toHaveBeenCalledWith(2);
-    expect(contextualService.rerank).not.toHaveBeenCalled();
+    expect(contextualService.recommend).not.toHaveBeenCalled();
   });
 });
 
@@ -156,43 +158,22 @@ function createContextualResponse(
   request: { heroId: number; enemyHeroIds?: number[] },
   baseline: HeroBuildRecommendationResponse,
 ) {
-  const action = {
-    ...baseline.action,
-    baseScore: baseline.action.score,
-    contextualScore: baseline.action.score,
-    baseRank: 1,
-    contextualRank: 1,
-    contextualLogitBonus: 0,
-    rosterInteractionLogOdds: 0,
-    observedEnemyCount: request.enemyHeroIds?.length ?? 0,
-    eligibleEnemyCount: 0,
-    wasPromotedByContext: false,
-    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2' as const,
-    configId: 'test',
-    enemySignals: [],
-    contextEvidence: [],
-  };
   return {
     ...baseline,
     heroId: request.heroId,
-    enemyHeroIds: [...(request.enemyHeroIds ?? [])],
-    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2' as const,
-    config: {
-      id: 'test',
-      candidateLimit: 5,
-      minimumActionObservations: 1,
-      minimumContextObservations: 1,
-      shrinkageStrength: 1,
-      lambda: 0,
-      maximumLogitBonus: 0,
-      maximumPromotionDistance: 1,
+    recommendationModel: 'CONTEXTUAL_V3' as const,
+    modelVersion: 'CONTEXTUAL_V3_HIERARCHICAL_COUNT_RANKER_1',
+    modelSha256: 'test',
+    candidateSetPolicy: 'TRAIN_OBSERVED_GLOBAL_BACKOFF_LEGAL_SHORTLIST',
+    candidateLimit: 128,
+    buildArchetypeId: 'UNKNOWN',
+    contextualFeatures: {
+      phase: 'EARLY' as const,
+      alliedHeroIds: [],
+      enemyHeroIds: [...(request.enemyHeroIds ?? [])],
+      previousActionCount: 0,
+      archetypeApplied: false,
     },
-    evaluatedCandidateCount: 1,
-    promotedCandidateCount: 0,
-    changedTop1: false,
-    changedTop3: false,
-    action,
-    alternatives: [],
   };
 }
 

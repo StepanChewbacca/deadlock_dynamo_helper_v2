@@ -5,6 +5,7 @@ import {
   HeroBuildRecommendationService,
 } from '../src/deadlock-live/hero-build-recommendation.service';
 import { LiveMatchStateService } from '../src/deadlock-live/live-match-state.service';
+import { RecipeAwareTimelineReconciliationService } from '../src/deadlock-live/recipe-aware-timeline-reconciliation.service';
 
 describe('HeroBuildRecommendationController matchup context', () => {
   it('infers enemy heroes from the newest matching live state when omitted', async () => {
@@ -102,10 +103,13 @@ function createHarness() {
     },
   ]);
 
+  const getSnapshots = jest.fn(() => []);
+  const getComponentItemIds = jest.fn(() => []);
   const controller = new HeroBuildRecommendationController(
     { recommend } as unknown as HeroBuildRecommendationService,
     { present } as unknown as HeroBuildRecommendationPresentationService,
-    { getAllStates } as unknown as LiveMatchStateService,
+    { getAllStates, getSnapshots } as unknown as LiveMatchStateService,
+    { getComponentItemIds } as unknown as RecipeAwareTimelineReconciliationService,
   );
 
   return { controller, recommend, present, getAllStates };
