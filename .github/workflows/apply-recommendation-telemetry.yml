@@ -66,7 +66,22 @@ jobs:
           retention-days: 3
 
       - name: Test API
-        run: yarn workspace @deadlock-live-probe/api test
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test > "$RUNNER_TEMP/api-test.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/api-test.log"
+          exit "$status"
+
+      - name: Upload failed API test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-telemetry-api-test-${{ github.run_id }}
+          path: ${{ runner.temp }}/api-test.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Test Overwolf client
         run: yarn workspace @deadlock-live-probe/overwolf-client test
