@@ -16,7 +16,9 @@ import {
   HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
+import { deriveContextualV3PreviousActionKeys } from './contextual-v3-live-context';
 import { createInventoryStateKeyFromItemIds } from './hero-build-transition-aggregation.service';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
 export const LIVE_BUILD_RECOMMENDATION_TIME_BUCKET_S = 120;
 export const LIVE_BUILD_RECOMMENDATION_LIMIT = 5;
@@ -38,7 +40,9 @@ export interface LiveBuildRecommendationTraversalInput {
   steamId: string;
   heroId: number;
   itemIds: number[];
+  alliedHeroIds: number[];
   enemyHeroIds: number[];
+  previousActionKeys: string[];
   inventoryStateKey: string;
   gameTimeS: number;
   timeBucket: number;
@@ -87,6 +91,7 @@ interface TraversalRuntime {
   lastAttemptedKey?: string;
   worker?: Promise<void>;
   lastObservedAtMs: number;
+  inventorySnapshots: number[][];
   snapshot: LiveBuildRecommendationTraversalSnapshot;
 }
 
@@ -101,6 +106,8 @@ export class LiveBuildRecommendationTraversalService {
       HeroBuildRecommendationPresentationService,
     private readonly heroBuildRecommendationOwnershipFilterService:
       HeroBuildRecommendationOwnershipFilterService,
+    private readonly recipeAwareTimelineReconciliationService:
+      RecipeAwareTimelineReconciliationService,
   ) {}
 
   observeState(state: MinimalMatchState | undefined): void {
@@ -125,7 +132,25 @@ export class LiveBuildRecommendationTraversalService {
       return;
     }
 
-    const input = createTraversalInput(state, localPlayer);
+    const currentItemIds = localPlayer.items
+      .map((item) => Number(item.id))
+      .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
+      .sort((left, right) => left - right);
+    const previousSnapshot = runtime.inventorySnapshots[runtime.inventorySnapshots.length - 1];
+    if (!previousSnapshot || !sameNumberArrays(previousSnapshot, currentItemIds)) {
+      runtime.inventorySnapshots.push(currentItemIds);
+      if (runtime.inventorySnapshots.length > 128) {
+        runtime.inventorySnapshots.shift();
+      }
+    }
+    const previousActionKeys = deriveContextualV3PreviousActionKeys(
+      runtime.inventorySnapshots,
+      (parentItemId) =>
+        this.recipeAwareTimelineReconciliationService.getComponentItemIds(
+          parentItemId,
+        ),
+    );
+    const input = createTraversalInput(state, localPlayer, previousActionKeys);
     if (
       runtime.desiredInput?.traversalKey === input.traversalKey ||
       runtime.lastAttemptedKey === input.traversalKey
@@ -218,6 +243,7 @@ export class LiveBuildRecommendationTraversalService {
     const runtime: TraversalRuntime = {
       matchId,
       lastObservedAtMs: observedAt.getTime(),
+      inventorySnapshots: [],
       snapshot: {
         state: 'WAITING_FOR_LOCAL_PLAYER',
         matchId,
@@ -304,7 +330,9 @@ export class LiveBuildRecommendationTraversalService {
         const recommendationRequest: HeroBuildContextualRecommendationRequest = {
           heroId: input.heroId,
           itemIds: [...input.itemIds],
+          alliedHeroIds: [...input.alliedHeroIds],
           enemyHeroIds: [...input.enemyHeroIds],
+          previousActionKeys: [...input.previousActionKeys],
           gameTimeS: input.gameTimeS,
           limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
         };
@@ -391,12 +419,26 @@ export class LiveBuildRecommendationTraversalService {
 export function createTraversalInput(
   state: MinimalMatchState,
   localPlayer: MinimalPlayerState,
+  previousActionKeys: readonly string[] = [],
 ): LiveBuildRecommendationTraversalInput {
   const heroId = Number(localPlayer.heroId);
   const itemIds = localPlayer.items
     .map((item) => Number(item.id))
     .filter((itemId) => Number.isSafeInteger(itemId) && itemId > 0)
     .sort((left, right) => left - right);
+  const alliedHeroIds = localPlayer.teamId === undefined
+    ? []
+    : [...new Set(
+        Object.values(state.playersBySteamId)
+          .filter(
+            (player) =>
+              player.steamId !== localPlayer.steamId &&
+              player.teamId === localPlayer.teamId &&
+              Number.isSafeInteger(player.heroId) &&
+              Number(player.heroId) > 0,
+          )
+          .map((player) => Number(player.heroId)),
+      )].sort((left, right) => left - right);
   const enemyHeroIds = localPlayer.teamId === undefined
     ? []
     : [...new Set(
@@ -420,7 +462,9 @@ export function createTraversalInput(
     localPlayer.steamId,
     heroId,
     inventoryStateKey,
+    alliedHeroIds.join(','),
     enemyHeroIds.join(','),
+    previousActionKeys.join(','),
     timeBucket,
   ].join(':');
 
@@ -429,7 +473,9 @@ export function createTraversalInput(
     steamId: localPlayer.steamId,
     heroId,
     itemIds,
+    alliedHeroIds,
     enemyHeroIds,
+    previousActionKeys: [...previousActionKeys],
     inventoryStateKey,
     gameTimeS,
     timeBucket,
@@ -543,4 +589,12 @@ function cloneSnapshot(
         }
       : undefined,
   };
+}
+
+
+function sameNumberArrays(left: readonly number[], right: readonly number[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }

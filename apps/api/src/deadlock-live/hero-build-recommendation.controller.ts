@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { canonicalHeroId } from './hero-id-aliases';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
+import { deriveContextualV3PreviousActionKeys } from './contextual-v3-live-context';
 import {
   filterHeroBuildRecommendationAlternatives,
   HERO_BUILD_DEFAULT_MIN_ALTERNATIVE_CONFIDENCE,
@@ -23,6 +24,7 @@ import {
 import { preferUpgradeOverComponentSell } from './hero-build-upgrade-preference';
 import { LiveMatchStateService } from './live-match-state.service';
 import { ProductionHeroBuildRecommendationService } from './production-hero-build-recommendation.service';
+import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
 export class RecommendHeroBuildDto {
   heroId!: number;
@@ -39,6 +41,12 @@ interface ValidatedRecommendHeroBuildRequest {
   alternativeFilter: HeroBuildAlternativeFilterOptions;
 }
 
+interface ResolvedLiveRecommendationContext {
+  alliedHeroIds: number[];
+  enemyHeroIds: number[];
+  previousActionKeys: string[];
+}
+
 @Controller('deadlock/analysis/build-recommendation')
 export class HeroBuildRecommendationController {
   constructor(
@@ -47,17 +55,23 @@ export class HeroBuildRecommendationController {
     private readonly heroBuildRecommendationPresentationService:
       HeroBuildRecommendationPresentationService,
     private readonly liveMatchStateService: LiveMatchStateService,
+    private readonly recipeAwareTimelineReconciliationService:
+      RecipeAwareTimelineReconciliationService,
   ) {}
 
   @Post()
   async recommend(@Body() dto: RecommendHeroBuildDto) {
     const validated = validateRequest(dto);
-    const enemyHeroIds =
-      validated.recommendationRequest.enemyHeroIds ??
-      this.resolveLiveEnemyHeroIds(validated.recommendationRequest.heroId);
+    const liveContext = this.resolveLiveContext(
+      validated.recommendationRequest.heroId,
+    );
     const contextualRequest: HeroBuildContextualRecommendationRequest = {
       ...validated.recommendationRequest,
-      enemyHeroIds,
+      enemyHeroIds:
+        validated.recommendationRequest.enemyHeroIds ??
+        liveContext.enemyHeroIds,
+      alliedHeroIds: liveContext.alliedHeroIds,
+      previousActionKeys: liveContext.previousActionKeys,
       limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
     };
     const response = await this.heroBuildRecommendationService.recommend(
@@ -75,7 +89,7 @@ export class HeroBuildRecommendationController {
     return this.heroBuildRecommendationPresentationService.present(preferred);
   }
 
-  private resolveLiveEnemyHeroIds(heroId: number): number[] {
+  private resolveLiveContext(heroId: number): ResolvedLiveRecommendationContext {
     const canonicalRequestedHeroId = canonicalHeroId(heroId);
     const states = this.liveMatchStateService
       .getAllStates()
@@ -85,31 +99,61 @@ export class HeroBuildRecommendationController {
       );
 
     for (const state of states) {
-      const players = Object.values(state.playersBySteamId);
-      const localPlayer = players.find(
-        (player) =>
+      const entries = Object.entries(state.playersBySteamId);
+      const localEntry = entries.find(
+        ([, player]) =>
           player.isLocal === true &&
           Number.isSafeInteger(player.heroId) &&
           canonicalHeroId(Number(player.heroId)) === canonicalRequestedHeroId,
       );
-      if (!localPlayer || localPlayer.teamId === undefined) {
+      if (!localEntry || localEntry[1].teamId === undefined) {
         continue;
       }
 
-      return [...new Set(
-        players
+      const [localPlayerId, localPlayer] = localEntry;
+      const alliedHeroIds = [...new Set(
+        entries
           .filter(
-            (player) =>
+            ([playerId, player]) =>
+              playerId !== localPlayerId &&
+              player.teamId === localPlayer.teamId &&
+              Number.isSafeInteger(player.heroId) &&
+              Number(player.heroId) > 0,
+          )
+          .map(([, player]) => Number(player.heroId)),
+      )].sort((left, right) => left - right);
+      const enemyHeroIds = [...new Set(
+        entries
+          .filter(
+            ([, player]) =>
               player.teamId !== undefined &&
               player.teamId !== localPlayer.teamId &&
               Number.isSafeInteger(player.heroId) &&
               Number(player.heroId) > 0,
           )
-          .map((player) => Number(player.heroId)),
+          .map(([, player]) => Number(player.heroId)),
       )].sort((left, right) => left - right);
+      const inventorySnapshots = this.liveMatchStateService
+        .getSnapshots(state.matchId)
+        .map((snapshot) => snapshot.playersBySteamId[localPlayerId]?.itemIds)
+        .filter((itemIds): itemIds is number[] => Array.isArray(itemIds));
+      inventorySnapshots.push(localPlayer.items.map((item) => item.id));
+      const previousActionKeys = deriveContextualV3PreviousActionKeys(
+        inventorySnapshots,
+        (parentItemId) =>
+          this.recipeAwareTimelineReconciliationService.getComponentItemIds(
+            parentItemId,
+          ),
+      );
+
+      return { alliedHeroIds, enemyHeroIds, previousActionKeys };
     }
 
-    return [];
+    return {
+      alliedHeroIds: [],
+      enemyHeroIds: [],
+      previousActionKeys: [],
+    };
   }
 }
 

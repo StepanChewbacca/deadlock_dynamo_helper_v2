@@ -1,7 +1,4 @@
-import type {
-  ContextualHeroBuildRecommendationV2Service,
-  HeroBuildContextualV2RecommendationResponse,
-} from '../src/deadlock-live/contextual-hero-build-recommendation-v2.service';
+import type { HeroBuildContextualV3LiveService } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
 import {
   adjustPValuesBenjaminiHochberg,
   buildHeroBuildOfflinePairedStatisticalSummary,
@@ -18,25 +15,25 @@ import { ProductionHeroBuildRecommendationService } from '../src/deadlock-live/p
 import type { RecipeAwareTimelineReconciliationService } from '../src/deadlock-live/recipe-aware-timeline-reconciliation.service';
 
 describe('contextual v2 foundation', () => {
-  const previousShadowEnabled = process.env.DEADLOCK_CONTEXTUAL_SHADOW_ENABLED;
+  const previousLiveMode = process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE;
   const previousShadowSampleRate =
-    process.env.DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE;
+    process.env.DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE;
 
   afterEach(() => {
     restoreEnvironmentValue(
-      'DEADLOCK_CONTEXTUAL_SHADOW_ENABLED',
-      previousShadowEnabled,
+      'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE',
+      previousLiveMode,
     );
     restoreEnvironmentValue(
-      'DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE',
+      'DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE',
       previousShadowSampleRate,
     );
     jest.restoreAllMocks();
   });
 
   it('returns the baseline recommendation while evaluating contextual ranking in shadow', async () => {
-    process.env.DEADLOCK_CONTEXTUAL_SHADOW_ENABLED = 'true';
-    process.env.DEADLOCK_CONTEXTUAL_SHADOW_SAMPLE_RATE = '1';
+    process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE = 'SHADOW';
+    process.env.DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE = '1';
 
     const policy = createPolicy();
     const transitionService = {
@@ -49,10 +46,30 @@ describe('contextual v2 foundation', () => {
     const recipeService = {
       getComponentItemIds: jest.fn(() => []),
     } as unknown as RecipeAwareTimelineReconciliationService;
-    const contextualResponse = createContextualResponse();
     const contextualService = {
-      rerank: jest.fn(async () => contextualResponse),
-    } as unknown as ContextualHeroBuildRecommendationV2Service;
+      getStatus: jest.fn(() => ({ state: 'READY' })),
+      recommend: jest.fn((_request, baseline) => ({
+        ...baseline,
+        recommendationModel: 'CONTEXTUAL_V3',
+        modelVersion: 'CONTEXTUAL_V3_HIERARCHICAL_COUNT_RANKER_1',
+        modelSha256: 'test',
+        candidateSetPolicy: 'TRAIN_OBSERVED_GLOBAL_BACKOFF_LEGAL_SHORTLIST',
+        candidateLimit: 128,
+        buildArchetypeId: 'UNKNOWN',
+        contextualFeatures: {
+          phase: 'EARLY',
+          alliedHeroIds: [],
+          enemyHeroIds: [2, 3, 4, 5, 6],
+          previousActionCount: 0,
+          archetypeApplied: false,
+        },
+        action: {
+          ...baseline.action,
+          itemId: 200,
+          actionKey: 'BUY:200',
+        },
+      })),
+    } as unknown as HeroBuildContextualV3LiveService;
     const service = new ProductionHeroBuildRecommendationService(
       transitionService,
       recipeService,
@@ -69,8 +86,7 @@ describe('contextual v2 foundation', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(response.action.actionKey).toBe('BUY:100');
-    expect(contextualService.rerank).toHaveBeenCalledTimes(1);
-    expect(contextualResponse.action.actionKey).toBe('BUY:200');
+    expect(contextualService.recommend).toHaveBeenCalledTimes(1);
   });
 
   it('creates a leak-free chronological train, validation, and test split', () => {
@@ -208,72 +224,6 @@ function createPolicy(): HeroBuildPolicy {
         },
       ],
     ]),
-  };
-}
-
-function createContextualResponse(): HeroBuildContextualV2RecommendationResponse {
-  const action = {
-    type: 'BUY',
-    sourceActionType: 'BUY',
-    itemId: 200,
-    actionKey: 'BUY:200',
-    historicalCount: 5,
-    historicalProbability: 0.5,
-    averageGameTimeS: 60,
-    matchedStateKey: 'EMPTY',
-    matchedStateObservationCount: 10,
-    stateDistance: 0,
-    missingItemCount: 0,
-    extraItemCount: 0,
-    matchedBySubset: true,
-    predictedStateKey: '200x1',
-    score: 0.7,
-    confidence: 0.7,
-    baseScore: 0.5,
-    contextualScore: 0.7,
-    baseRank: 2,
-    contextualRank: 1,
-    contextualLogitBonus: 0.1,
-    rosterInteractionLogOdds: 0.5,
-    observedEnemyCount: 5,
-    eligibleEnemyCount: 3,
-    wasPromotedByContext: true,
-    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2',
-    configId: 'test',
-    enemySignals: [],
-    contextEvidence: [],
-  } as HeroBuildContextualV2RecommendationResponse['action'];
-
-  return {
-    mode: 'EXACT',
-    heroId: 1,
-    requestedStateKey: 'EMPTY',
-    gameTimeS: 60,
-    matchedStateKey: 'EMPTY',
-    stateDistance: 0,
-    missingItemCount: 0,
-    extraItemCount: 0,
-    matchedBySubset: true,
-    observationCount: 10,
-    candidateStateCount: 1,
-    enemyHeroIds: [2, 3, 4, 5, 6],
-    modelVersion: 'NEXT_ACTION_ROSTER_SHRINKAGE_V2',
-    config: {
-      id: 'test',
-      candidateLimit: 5,
-      minimumActionObservations: 1,
-      minimumContextObservations: 1,
-      shrinkageStrength: 1,
-      lambda: 0.1,
-      maximumLogitBonus: 0.1,
-      maximumPromotionDistance: 1,
-    },
-    evaluatedCandidateCount: 2,
-    promotedCandidateCount: 1,
-    changedTop1: true,
-    changedTop3: true,
-    action,
-    alternatives: [],
   };
 }
 

@@ -24,6 +24,8 @@ import { HeroBuildContextualV3CandidateEvaluationController } from './hero-build
 import { HeroBuildContextualV3CandidateEvaluationService } from './hero-build-contextual-v3-candidate-evaluation.service';
 import { HeroBuildContextualV3FinalTestController } from './hero-build-contextual-v3-final-test.controller';
 import { HeroBuildContextualV3FinalTestService } from './hero-build-contextual-v3-final-test.service';
+import { HeroBuildContextualV3LiveController } from './hero-build-contextual-v3-live.controller';
+import { HeroBuildContextualV3LiveService } from './hero-build-contextual-v3-live.service';
 import { HeroBuildContextualV3TrainingController } from './hero-build-contextual-v3-training.controller';
 import { HeroBuildContextualV3TrainingCoordinatorService } from './hero-build-contextual-v3-training-coordinator.service';
 import { HeroBuildContextualV3TrainingService } from './hero-build-contextual-v3-training.service';
@@ -116,6 +118,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3TrainingController,
     HeroBuildContextualV3CandidateEvaluationController,
     HeroBuildContextualV3FinalTestController,
+    HeroBuildContextualV3LiveController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -145,6 +148,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3TrainingCoordinatorService,
     HeroBuildContextualV3CandidateEvaluationService,
     HeroBuildContextualV3FinalTestService,
+    HeroBuildContextualV3LiveService,
     {
       provide: HeroBuildOfflineEvaluationService,
       useExisting: HeroBuildOfflineEvaluationResilientService,
@@ -154,7 +158,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     ProductionHeroBuildRecommendationService,
     {
       provide: HeroBuildRecommendationService,
-      useExisting: ContextualHeroBuildRecommendationService,
+      useExisting: ProductionHeroBuildRecommendationService,
     },
     HeroBuildRecommendationOwnershipFilterService,
     LiveHeroBuildRecommendationPresentationService,
@@ -207,6 +211,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3TrainingCoordinatorService,
     HeroBuildContextualV3CandidateEvaluationService,
     HeroBuildContextualV3FinalTestService,
+    HeroBuildContextualV3LiveService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
