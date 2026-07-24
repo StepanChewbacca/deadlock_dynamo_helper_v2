@@ -153,3 +153,13 @@ GET /deadlock/analysis/recommendation-value-v4-training/model
 ```
 
 Only one run can execute at a time. Completing a run does not switch production recommendation serving.
+
+## Operational sequence
+
+1. Rebuild Recommendation Decision Dataset V4 and confirm its audit passed.
+2. Verify that the source contains enough `outcomeEligible` rows and matches for a meaningful chronological validation split.
+3. Start Value V4 training with the source SHA-256 pinned when reproducibility is required.
+4. Wait for the training status to become `COMPLETE` or `FAILED`.
+5. Inspect the value-model audit, class balance, log loss, Brier score, ROC AUC, and calibration report.
+6. Treat a failed release gate as a hard block for policy-selection experiments.
+7. Even after a passed gate, do not use score differences as causal action uplift. The next stage must perform offline policy evaluation with propensity, overlap, and effective-sample-size diagnostics before any shadow rollout.
