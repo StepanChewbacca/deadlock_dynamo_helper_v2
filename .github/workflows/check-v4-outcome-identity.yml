@@ -1,0 +1,85 @@
+name: Check V4 outcome identity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/check-v4-outcome-identity.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event.pull_request.head.ref == 'diagnostics/check-v4-outcome-identity-20260724'
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Inspect historical player outcome identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_repo=/home/ubuntu/apps/deadlock_dynamo_helper
+          cd "$deploy_repo"
+          mkdir -p "$GITHUB_WORKSPACE/outcome-identity-result"
+          sudo docker compose exec -T api node <<'NODE' > "$GITHUB_WORKSPACE/outcome-identity-result/report.json"
+          const fs = require('node:fs');
+          const readline = require('node:readline');
+          const path = '/app/apps/api/storage/contextual-v3-training/validation.ndjson';
+          const maps = {
+            matchPlayer: new Map(),
+            matchPlayerTeam: new Map(),
+            matchPlayerHero: new Map(),
+            matchTeam: new Map(),
+          };
+          const conflicts = { matchPlayer: 0, matchPlayerTeam: 0, matchPlayerHero: 0, matchTeam: 0 };
+          const examples = [];
+          let rows = 0;
+          function observe(name, key, outcome, row) {
+            const existing = maps[name].get(key);
+            if (existing !== undefined && existing !== outcome) {
+              conflicts[name] += 1;
+              if (examples.length < 30 && name === 'matchPlayer') {
+                examples.push({
+                  key,
+                  previousOutcome: existing,
+                  currentOutcome: outcome,
+                  matchId: row.matchId,
+                  playerId: row.playerId,
+                  team: row.features?.team,
+                  heroId: row.features?.heroId,
+                  decisionId: row.decisionId,
+                });
+              }
+            } else {
+              maps[name].set(key, outcome);
+            }
+          }
+          (async () => {
+            const rl = readline.createInterface({ input: fs.createReadStream(path), crlfDelay: Infinity });
+            for await (const line of rl) {
+              if (!line.trim()) continue;
+              const row = JSON.parse(line);
+              rows += 1;
+              const outcome = Boolean(row.outcomeLabel?.playerWon);
+              const matchId = String(row.matchId);
+              const playerId = String(row.playerId);
+              const team = String(row.features?.team);
+              const heroId = String(row.features?.heroId);
+              observe('matchPlayer', `${matchId}\u0000${playerId}`, outcome, row);
+              observe('matchPlayerTeam', `${matchId}\u0000${playerId}\u0000${team}`, outcome, row);
+              observe('matchPlayerHero', `${matchId}\u0000${playerId}\u0000${heroId}`, outcome, row);
+              observe('matchTeam', `${matchId}\u0000${team}`, outcome, row);
+            }
+            process.stdout.write(JSON.stringify({ rows, conflicts, uniqueKeys: Object.fromEntries(Object.entries(maps).map(([k,v]) => [k, v.size])), examples }, null, 2));
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-outcome-identity-${{ github.sha }}
+          path: outcome-identity-result
+          retention-days: 7
