@@ -93,8 +93,8 @@ replace_once(
 
 replace_once(
     controller,
-    "  HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,\n",
-    "",
+    "  HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,\n  HERO_BUILD_DECISION_DATASET_V3_MAX_BATCH_SIZE,",
+    "  HERO_BUILD_DECISION_DATASET_V3_MAX_BATCH_SIZE,",
 )
 replace_once(
     controller,
