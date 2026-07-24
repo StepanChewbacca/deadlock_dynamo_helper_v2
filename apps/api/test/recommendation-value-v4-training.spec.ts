@@ -179,13 +179,14 @@ describe('recommendation value v4 training', () => {
     });
   });
 
-  it('allows opposite player outcomes within the same eligible match', async () => {
+  it('allows opposite outcomes for the same historical player identifier on different teams', async () => {
     const rows = createSourceRows();
     rows.push(
       createRow({
         decisionId: 'opponent-decision',
         matchId: 'match-1',
-        steamId: 'steam-opponent',
+        steamId: rows[0].steamId,
+        teamId: 2,
         occurredAt: '2026-01-01T00:04:00.000Z',
         actionKey: 'BUY:3',
         playerWon: false,
@@ -407,6 +408,7 @@ function createRow(input: {
   actionKey: string;
   playerWon: boolean;
   steamId?: string;
+  teamId?: number;
   inventoryStateKey?: string;
   previousActionKeys?: string[];
 }): RecommendationDecisionDatasetV4Row {
@@ -418,7 +420,7 @@ function createRow(input: {
     matchId: input.matchId,
     steamId: input.steamId ?? `steam-${input.matchId}`,
     heroId: 72,
-    teamId: 1,
+    teamId: input.teamId ?? 1,
     itemIds: input.inventoryStateKey === '1x1' ? [1] : [],
     alliedHeroIds: [2, 3, 4, 5, 6],
     enemyHeroIds: [11, 12, 13, 14, 15, 16],

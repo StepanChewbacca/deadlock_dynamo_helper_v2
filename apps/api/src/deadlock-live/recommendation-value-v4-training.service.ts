@@ -726,7 +726,7 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
       }
       eligibleDecisionIds.add(row.decisionId);
       const outcome = Boolean(row.outcomeLabel.playerWon);
-      const matchPlayerKey = `${row.matchId}\u0000${row.steamId}`;
+      const matchPlayerKey = `${row.matchId}\u0000${row.steamId}\u0000${row.teamId ?? 'UNKNOWN_TEAM'}`;
       const existingOutcome = outcomesByMatchPlayer.get(matchPlayerKey);
       if (existingOutcome !== undefined && existingOutcome !== outcome) {
         conflictingEligibleMatchOutcomeCount += 1;
