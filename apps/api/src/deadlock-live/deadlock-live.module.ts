@@ -73,7 +73,9 @@ import { RecentMatchCrawlerService } from './recent-match-crawler.service';
 import { RecentMatchRosterRepairService } from './recent-match-roster-repair.service';
 import { RecentMatchesWindowController } from './recent-matches-window.controller';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
+import { RecommendationDecisionDatasetV4Controller } from './recommendation-decision-dataset-v4.controller';
 import { RecommendationDecisionTelemetryController } from './recommendation-decision-telemetry.controller';
+import { RecommendationDecisionDatasetV4Service } from './recommendation-decision-dataset-v4.service';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 import { RecommendationOutcomeLinkerService } from './recommendation-outcome-linker.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
@@ -122,6 +124,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3CandidateEvaluationController,
     HeroBuildContextualV3FinalTestController,
     HeroBuildContextualV3LiveController,
+    RecommendationDecisionDatasetV4Controller,
     RecommendationDecisionTelemetryController,
     SkillBuildAnalysisController,
     ReferenceDataController,
@@ -154,6 +157,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3FinalTestService,
     HeroBuildContextualV3LiveService,
     RecommendationDecisionTelemetryService,
+    RecommendationDecisionDatasetV4Service,
     RecommendationOutcomeLinkerService,
     {
       provide: HeroBuildOfflineEvaluationService,
@@ -219,6 +223,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3FinalTestService,
     HeroBuildContextualV3LiveService,
     RecommendationDecisionTelemetryService,
+    RecommendationDecisionDatasetV4Service,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
