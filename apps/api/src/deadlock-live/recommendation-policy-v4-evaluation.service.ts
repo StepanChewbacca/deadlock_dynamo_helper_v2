@@ -187,7 +187,13 @@ interface ValueSerializedModel {
     priorStrength: number;
     minContextObservations: number;
   };
+  maximumAbsoluteLogitResidual: number;
   weights: {
+    heroTeamTime: number;
+    inventory: number;
+    previousActionTail: number;
+    alliedRosterAverage: number;
+    enemyRosterAverage: number;
     heroTimeAction: number;
     inventoryAction: number;
     previousActionTailAction: number;
@@ -198,6 +204,11 @@ interface ValueSerializedModel {
     global: BinaryCount;
     hero: BinaryCountTableRecord;
     heroTime: BinaryCountTableRecord;
+    heroTeamTime: BinaryCountTableRecord;
+    heroTimeInventory: BinaryCountTableRecord;
+    heroTimePreviousTail: BinaryCountTableRecord;
+    ally: BinaryCountTableRecord;
+    enemy: BinaryCountTableRecord;
     heroTimeAction: BinaryCountTableRecord;
     heroTimeInventoryAction: BinaryCountTableRecord;
     heroTimePreviousTailAction: BinaryCountTableRecord;
@@ -1247,9 +1258,9 @@ function valueProbability(
         model.options.priorStrength,
       )
     : heroProbability;
-  let weighted = base;
-  let totalWeight = 1;
-  const addContext = (
+  const baseLogit = probabilityLogit(base);
+  let residual = 0;
+  const addResidual = (
     count: BinaryCount | undefined,
     weight: number,
   ): void => {
@@ -1261,66 +1272,103 @@ function valueProbability(
     ) {
       return;
     }
-    weighted +=
+    residual +=
       weight *
-      posteriorProbability(count, base, model.options.priorStrength);
-    totalWeight += weight;
+      (probabilityLogit(
+        posteriorProbability(count, base, model.options.priorStrength),
+      ) -
+        baseLogit);
   };
-  addContext(
+  const addAverageResidual = (
+    counts: readonly (BinaryCount | undefined)[],
+    weight: number,
+  ): void => {
+    const deltas = counts
+      .filter((count) =>
+        hasMinimumBinaryObservations(
+          count,
+          model.options.minContextObservations,
+        ),
+      )
+      .map(
+        (count) =>
+          probabilityLogit(
+            posteriorProbability(count, base, model.options.priorStrength),
+          ) - baseLogit,
+      );
+    if (deltas.length > 0) {
+      residual += weight * average(deltas);
+    }
+  };
+
+  addResidual(
+    model.counts.heroTeamTime[
+      `${baseKey}|${features.teamId ?? 'UNKNOWN_TEAM'}`
+    ],
+    model.weights.heroTeamTime,
+  );
+  addResidual(
+    model.counts.heroTimeInventory[
+      `${baseKey}|${features.inventoryStateKey}`
+    ],
+    model.weights.inventory,
+  );
+  addResidual(
+    model.counts.heroTimePreviousTail[
+      `${baseKey}|${features.previousActionTailKey}`
+    ],
+    model.weights.previousActionTail,
+  );
+  addAverageResidual(
+    features.alliedHeroIds.map(
+      (heroId) => model.counts.ally[`${baseKey}|${heroId}`],
+    ),
+    model.weights.alliedRosterAverage,
+  );
+  addAverageResidual(
+    features.enemyHeroIds.map(
+      (heroId) => model.counts.enemy[`${baseKey}|${heroId}`],
+    ),
+    model.weights.enemyRosterAverage,
+  );
+  addResidual(
     model.counts.heroTimeAction[`${baseKey}|${actionKey}`],
     model.weights.heroTimeAction,
   );
-  addContext(
+  addResidual(
     model.counts.heroTimeInventoryAction[
       `${baseKey}|${features.inventoryStateKey}|${actionKey}`
     ],
     model.weights.inventoryAction,
   );
-  addContext(
+  addResidual(
     model.counts.heroTimePreviousTailAction[
       `${baseKey}|${features.previousActionTailKey}|${actionKey}`
     ],
     model.weights.previousActionTailAction,
   );
-  const allyProbabilities = features.alliedHeroIds
-    .map(
-      (heroId) =>
-        model.counts.allyAction[`${baseKey}|${heroId}|${actionKey}`],
-    )
-    .filter((count) =>
-      hasMinimumBinaryObservations(
-        count,
-        model.options.minContextObservations,
-      ),
-    )
-    .map((count) =>
-      posteriorProbability(count, base, model.options.priorStrength),
-    );
-  if (allyProbabilities.length > 0) {
-    weighted +=
-      model.weights.alliedRosterActionAverage * average(allyProbabilities);
-    totalWeight += model.weights.alliedRosterActionAverage;
-  }
-  const enemyProbabilities = features.enemyHeroIds
-    .map(
-      (heroId) =>
-        model.counts.enemyAction[`${baseKey}|${heroId}|${actionKey}`],
-    )
-    .filter((count) =>
-      hasMinimumBinaryObservations(
-        count,
-        model.options.minContextObservations,
-      ),
-    )
-    .map((count) =>
-      posteriorProbability(count, base, model.options.priorStrength),
-    );
-  if (enemyProbabilities.length > 0) {
-    weighted +=
-      model.weights.enemyRosterActionAverage * average(enemyProbabilities);
-    totalWeight += model.weights.enemyRosterActionAverage;
-  }
-  return clampProbability(weighted / totalWeight);
+  addAverageResidual(
+    features.alliedHeroIds.map(
+      (heroId) => model.counts.allyAction[`${baseKey}|${heroId}|${actionKey}`],
+    ),
+    model.weights.alliedRosterActionAverage,
+  );
+  addAverageResidual(
+    features.enemyHeroIds.map(
+      (heroId) => model.counts.enemyAction[`${baseKey}|${heroId}|${actionKey}`],
+    ),
+    model.weights.enemyRosterActionAverage,
+  );
+  return clampProbability(
+    probabilityFromLogit(
+      baseLogit +
+        clamp(
+          residual,
+          -model.maximumAbsoluteLogitResidual,
+          model.maximumAbsoluteLogitResidual,
+        ),
+    ),
+  );
 }
 
 function buildReleaseGate(input: {
@@ -1578,6 +1626,12 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
   if (
     !isPositiveNumber(options.priorStrength) ||
     !isPositiveInteger(options.minContextObservations) ||
+    !isPositiveNumber(value.maximumAbsoluteLogitResidual) ||
+    !isFiniteNumber(weights.heroTeamTime) ||
+    !isFiniteNumber(weights.inventory) ||
+    !isFiniteNumber(weights.previousActionTail) ||
+    !isFiniteNumber(weights.alliedRosterAverage) ||
+    !isFiniteNumber(weights.enemyRosterAverage) ||
     !isFiniteNumber(weights.heroTimeAction) ||
     !isFiniteNumber(weights.inventoryAction) ||
     !isFiniteNumber(weights.previousActionTailAction) ||
@@ -1593,7 +1647,13 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
       priorStrength: options.priorStrength,
       minContextObservations: options.minContextObservations,
     },
+    maximumAbsoluteLogitResidual: value.maximumAbsoluteLogitResidual,
     weights: {
+      heroTeamTime: weights.heroTeamTime,
+      inventory: weights.inventory,
+      previousActionTail: weights.previousActionTail,
+      alliedRosterAverage: weights.alliedRosterAverage,
+      enemyRosterAverage: weights.enemyRosterAverage,
       heroTimeAction: weights.heroTimeAction,
       inventoryAction: weights.inventoryAction,
       previousActionTailAction: weights.previousActionTailAction,
@@ -1604,6 +1664,13 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
       global: asBinaryCount(counts.global),
       hero: asBinaryCountTableRecord(counts.hero),
       heroTime: asBinaryCountTableRecord(counts.heroTime),
+      heroTeamTime: asBinaryCountTableRecord(counts.heroTeamTime),
+      heroTimeInventory: asBinaryCountTableRecord(counts.heroTimeInventory),
+      heroTimePreviousTail: asBinaryCountTableRecord(
+        counts.heroTimePreviousTail,
+      ),
+      ally: asBinaryCountTableRecord(counts.ally),
+      enemy: asBinaryCountTableRecord(counts.enemy),
       heroTimeAction: asBinaryCountTableRecord(counts.heroTimeAction),
       heroTimeInventoryAction: asBinaryCountTableRecord(
         counts.heroTimeInventoryAction,
@@ -1794,6 +1861,19 @@ function hasMinimumBinaryObservations(
 function probabilityLogit(probability: number): number {
   const value = clampProbability(probability);
   return Math.log(value / (1 - value));
+}
+
+function probabilityFromLogit(value: number): number {
+  if (value >= 0) {
+    const exponent = Math.exp(-value);
+    return 1 / (1 + exponent);
+  }
+  const exponent = Math.exp(value);
+  return exponent / (1 + exponent);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function clampProbability(value: number): number {

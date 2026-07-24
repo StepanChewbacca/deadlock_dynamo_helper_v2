@@ -165,3 +165,11 @@ Only one run can execute at a time. Completing a run does not switch production 
 5. Inspect the value-model audit, class balance, log loss, Brier score, ROC AUC, and calibration report.
 6. Treat a failed release gate as a hard block for policy-selection experiments.
 7. Even after a passed gate, do not use score differences as causal action uplift. The next stage must perform offline policy evaluation with propensity, overlap, and effective-sample-size diagnostics before any shadow rollout.
+
+## Contextual residual model revision
+
+The second model revision keeps the chronological match-level split and beta-binomial shrinkage, but combines supported context evidence as bounded log-odds residuals around the hero/time prior. It adds team side, inventory, previous-action history, allied roster, and enemy roster context both with and without the hypothetical action. The default shrinkage settings are `priorStrength = 100` and `minContextObservations = 20`, selected from the historical tuning sweep. The release gate remains unchanged and must still pass before any policy-selection use.
+
+The six-configuration historical sweep evaluated 78,144 validation decisions across 390 matches. Its best original-model configuration reached ROC AUC `0.5248285`, expected calibration error `0.0124251`, and a positive Brier-score delta, but improved log loss over the hero/time baseline by only `0.0000707`. That evidence motivated adding non-action context and replacing weighted probability averaging with bounded shrunk logit residuals rather than weakening the existing release threshold.
+
+Policy V4 validates and deserializes the complete contextual-residual model contract, including every residual weight, context count table, and the residual clamp, before evaluating any candidate policy.

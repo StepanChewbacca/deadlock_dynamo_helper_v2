@@ -22,7 +22,7 @@ import {
 
 export const RECOMMENDATION_VALUE_V4_TRAINING_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_VALUE_V4_MODEL_VERSION =
-  'RECOMMENDATION_VALUE_V4_HIERARCHICAL_BETA_BINOMIAL_1' as const;
+  'RECOMMENDATION_VALUE_V4_CONTEXTUAL_LOGIT_RESIDUAL_2' as const;
 
 const DEFAULT_SOURCE_DIRECTORY =
   '/app/apps/api/storage/recommendation-decision-dataset-v4';
@@ -132,6 +132,11 @@ interface RecommendationValueV4Model {
   global: BinaryCount;
   hero: BinaryCountTable;
   heroTime: BinaryCountTable;
+  heroTeamTime: BinaryCountTable;
+  heroTimeInventory: BinaryCountTable;
+  heroTimePreviousTail: BinaryCountTable;
+  ally: BinaryCountTable;
+  enemy: BinaryCountTable;
   heroTimeAction: BinaryCountTable;
   heroTimeInventoryAction: BinaryCountTable;
   heroTimePreviousTailAction: BinaryCountTable;
@@ -531,13 +536,19 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
         featureCutoff: 'DECISION_SERVED_TIME_PLUS_HYPOTHETICAL_ACTION',
         causalInterpretationAllowed: false,
         options,
+        combination: 'SHRUNK_CONTEXT_LOGIT_RESIDUALS',
+        maximumAbsoluteLogitResidual: 1.5,
         weights: {
-          base: 1,
-          heroTimeAction: 1.5,
-          inventoryAction: 0.75,
-          previousActionTailAction: 0.5,
-          alliedRosterActionAverage: 0.2,
-          enemyRosterActionAverage: 0.3,
+          heroTeamTime: 0.7,
+          inventory: 0.35,
+          previousActionTail: 0.2,
+          alliedRosterAverage: 0.12,
+          enemyRosterAverage: 0.18,
+          heroTimeAction: 0.45,
+          inventoryAction: 0.2,
+          previousActionTailAction: 0.12,
+          alliedRosterActionAverage: 0.05,
+          enemyRosterActionAverage: 0.08,
         },
         counts: serializeModel(model),
       };
@@ -878,6 +889,11 @@ function createModel(): RecommendationValueV4Model {
     global: { wins: 0, total: 0 },
     hero: new Map(),
     heroTime: new Map(),
+    heroTeamTime: new Map(),
+    heroTimeInventory: new Map(),
+    heroTimePreviousTail: new Map(),
+    ally: new Map(),
+    enemy: new Map(),
     heroTimeAction: new Map(),
     heroTimeInventoryAction: new Map(),
     heroTimePreviousTailAction: new Map(),
@@ -895,9 +911,27 @@ function updateModel(
   incrementBinaryCount(model.global, won);
   const heroKey = String(features.heroId);
   const baseKey = `${features.heroId}|${features.timeBucket}`;
+  const teamKey = `${baseKey}|${features.teamId ?? 'UNKNOWN_TEAM'}`;
   const actionKey = features.actionKey;
   incrementBinaryTable(model.hero, heroKey, won);
   incrementBinaryTable(model.heroTime, baseKey, won);
+  incrementBinaryTable(model.heroTeamTime, teamKey, won);
+  incrementBinaryTable(
+    model.heroTimeInventory,
+    `${baseKey}|${features.inventoryStateKey}`,
+    won,
+  );
+  incrementBinaryTable(
+    model.heroTimePreviousTail,
+    `${baseKey}|${features.previousActionTailKey}`,
+    won,
+  );
+  for (const allyHeroId of features.alliedHeroIds) {
+    incrementBinaryTable(model.ally, `${baseKey}|${allyHeroId}`, won);
+  }
+  for (const enemyHeroId of features.enemyHeroIds) {
+    incrementBinaryTable(model.enemy, `${baseKey}|${enemyHeroId}`, won);
+  }
   incrementBinaryTable(model.heroTimeAction, `${baseKey}|${actionKey}`, won);
   incrementBinaryTable(
     model.heroTimeInventoryAction,
@@ -965,65 +999,118 @@ function predictValue(
   const features = row.features;
   const baseKey = `${features.heroId}|${features.timeBucket}`;
   const base = predictHeroTime(model, row, options);
-  let weightedProbability = base;
-  let totalWeight = 1;
-  const addContext = (count: BinaryCount | undefined, weight: number): void => {
+  const baseLogit = probabilityLogit(base);
+  let residual = 0;
+  const addResidual = (
+    count: BinaryCount | undefined,
+    weight: number,
+  ): void => {
     if (!hasMinimumObservations(count, options.minContextObservations)) {
       return;
     }
-    weightedProbability +=
-      weight * posteriorProbability(count, base, options.priorStrength);
-    totalWeight += weight;
+    const probability = posteriorProbability(
+      count,
+      base,
+      options.priorStrength,
+    );
+    residual += weight * (probabilityLogit(probability) - baseLogit);
   };
-  addContext(
-    model.heroTimeAction.get(`${baseKey}|${features.actionKey}`),
-    1.5,
+  const addAverageResidual = (
+    counts: readonly (BinaryCount | undefined)[],
+    weight: number,
+  ): void => {
+    const deltas = counts
+      .filter((count) =>
+        hasMinimumObservations(count, options.minContextObservations),
+      )
+      .map((count) =>
+        probabilityLogit(
+          posteriorProbability(count, base, options.priorStrength),
+        ) - baseLogit,
+      );
+    if (deltas.length > 0) {
+      residual += weight * average(deltas);
+    }
+  };
+
+  addResidual(
+    model.heroTeamTime.get(
+      `${baseKey}|${features.teamId ?? 'UNKNOWN_TEAM'}`,
+    ),
+    0.7,
   );
-  addContext(
+  addResidual(
+    model.heroTimeInventory.get(`${baseKey}|${features.inventoryStateKey}`),
+    0.35,
+  );
+  addResidual(
+    model.heroTimePreviousTail.get(
+      `${baseKey}|${features.previousActionTailKey}`,
+    ),
+    0.2,
+  );
+  addAverageResidual(
+    features.alliedHeroIds.map((heroId) =>
+      model.ally.get(`${baseKey}|${heroId}`),
+    ),
+    0.12,
+  );
+  addAverageResidual(
+    features.enemyHeroIds.map((heroId) =>
+      model.enemy.get(`${baseKey}|${heroId}`),
+    ),
+    0.18,
+  );
+  addResidual(
+    model.heroTimeAction.get(`${baseKey}|${features.actionKey}`),
+    0.45,
+  );
+  addResidual(
     model.heroTimeInventoryAction.get(
       `${baseKey}|${features.inventoryStateKey}|${features.actionKey}`,
     ),
-    0.75,
+    0.2,
   );
-  addContext(
+  addResidual(
     model.heroTimePreviousTailAction.get(
       `${baseKey}|${features.previousActionTailKey}|${features.actionKey}`,
     ),
-    0.5,
+    0.12,
   );
-  const allyProbabilities = features.alliedHeroIds
-    .map((allyHeroId) =>
-      model.allyAction.get(
-        `${baseKey}|${allyHeroId}|${features.actionKey}`,
-      ),
-    )
-    .filter((count) =>
-      hasMinimumObservations(count, options.minContextObservations),
-    )
-    .map((count) =>
-      posteriorProbability(count, base, options.priorStrength),
-    );
-  if (allyProbabilities.length > 0) {
-    weightedProbability += 0.2 * average(allyProbabilities);
-    totalWeight += 0.2;
+  addAverageResidual(
+    features.alliedHeroIds.map((heroId) =>
+      model.allyAction.get(`${baseKey}|${heroId}|${features.actionKey}`),
+    ),
+    0.05,
+  );
+  addAverageResidual(
+    features.enemyHeroIds.map((heroId) =>
+      model.enemyAction.get(`${baseKey}|${heroId}|${features.actionKey}`),
+    ),
+    0.08,
+  );
+
+  return clampProbability(
+    probabilityFromLogit(baseLogit + clamp(residual, -1.5, 1.5)),
+  );
+}
+
+function probabilityLogit(probability: number): number {
+  const normalized = clampProbability(probability);
+  return Math.log(normalized / (1 - normalized));
+}
+
+function probabilityFromLogit(value: number): number {
+  if (value >= 0) {
+    const exponent = Math.exp(-value);
+    return 1 / (1 + exponent);
   }
-  const enemyProbabilities = features.enemyHeroIds
-    .map((enemyHeroId) =>
-      model.enemyAction.get(
-        `${baseKey}|${enemyHeroId}|${features.actionKey}`,
-      ),
-    )
-    .filter((count) =>
-      hasMinimumObservations(count, options.minContextObservations),
-    )
-    .map((count) =>
-      posteriorProbability(count, base, options.priorStrength),
-    );
-  if (enemyProbabilities.length > 0) {
-    weightedProbability += 0.3 * average(enemyProbabilities);
-    totalWeight += 0.3;
-  }
-  return clampProbability(weightedProbability / totalWeight);
+  const exponent = Math.exp(value);
+  return exponent / (1 + exponent);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function posteriorProbability(
@@ -1069,6 +1156,11 @@ function serializeModel(
     global: { ...model.global },
     hero: serializeBinaryTable(model.hero),
     heroTime: serializeBinaryTable(model.heroTime),
+    heroTeamTime: serializeBinaryTable(model.heroTeamTime),
+    heroTimeInventory: serializeBinaryTable(model.heroTimeInventory),
+    heroTimePreviousTail: serializeBinaryTable(model.heroTimePreviousTail),
+    ally: serializeBinaryTable(model.ally),
+    enemy: serializeBinaryTable(model.enemy),
     heroTimeAction: serializeBinaryTable(model.heroTimeAction),
     heroTimeInventoryAction: serializeBinaryTable(
       model.heroTimeInventoryAction,
@@ -1399,14 +1491,14 @@ function normalizeOptions(
     priorStrength: normalizeNumber(
       request.priorStrength,
       'priorStrength',
-      20,
+      100,
       0.1,
       10_000,
     ),
     minContextObservations: normalizeInteger(
       request.minContextObservations,
       'minContextObservations',
-      5,
+      20,
       1,
       100_000,
     ),

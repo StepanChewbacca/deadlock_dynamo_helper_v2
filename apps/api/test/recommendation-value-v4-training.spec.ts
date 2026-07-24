@@ -97,6 +97,15 @@ describe('recommendation value v4 training', () => {
       modelKind: 'OBSERVATIONAL_WIN_PROBABILITY',
       target: 'PLAYER_WON',
       causalInterpretationAllowed: false,
+      combination: 'SHRUNK_CONTEXT_LOGIT_RESIDUALS',
+      maximumAbsoluteLogitResidual: 1.5,
+      counts: {
+        heroTeamTime: expect.any(Object),
+        heroTimeInventory: expect.any(Object),
+        heroTimePreviousTail: expect.any(Object),
+        ally: expect.any(Object),
+        enemy: expect.any(Object),
+      },
     });
 
     const evaluation = JSON.parse(
