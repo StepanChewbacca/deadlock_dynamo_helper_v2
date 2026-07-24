@@ -81,6 +81,12 @@ service = replace_once(
     "    Number.isSafeInteger(Number(value.heroId)) &&",
     "source hero validation",
 )
+service = replace_once(
+    service,
+    "function isErrorWithCode(\n  value: unknown,\n): value is Error & { code: string } {\n  return value instanceof Error && 'code' in value;\n}",
+    "function isErrorWithCode(\n  value: unknown,\n): value is Error & { code: string } {\n  return isRecord(value) && typeof value.code === 'string';\n}",
+    "filesystem error guard",
+)
 service_path.write_text(service)
 
 test_path = Path("apps/api/test/recommendation-behavioral-v4-training.spec.ts")
