@@ -33,7 +33,7 @@ describe('Recommendation offline three-way split', () => {
     expect(split.tuning).toHaveLength(1);
     expect(split.test).toHaveLength(2);
     expect(split.train[0].matchId).toBe('10');
-    expect(split.test.at(-1)?.matchId).toBe('1');
+    expect(split.test[split.test.length - 1]?.matchId).toBe('1');
     expect(split.descriptorSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(
       new Set([

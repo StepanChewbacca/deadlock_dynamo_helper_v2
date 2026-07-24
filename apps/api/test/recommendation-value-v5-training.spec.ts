@@ -3,10 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  RECOMMENDATION_VALUE_V5_MODEL_VERSION,
   RecommendationValueV5TrainingService,
   prepareRecommendationValueV5Row,
 } from '../src/deadlock-live/recommendation-value-v5-training.service';
+import {
+  RECOMMENDATION_VALUE_V5_MODEL_VERSION,
+} from '../src/deadlock-live/recommendation-value-v5-model';
 import {
   RECOMMENDATION_DECISION_DATASET_V4_VERSION,
   type RecommendationDecisionDatasetV4Row,
