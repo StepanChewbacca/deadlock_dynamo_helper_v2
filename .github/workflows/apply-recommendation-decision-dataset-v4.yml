@@ -1,0 +1,99 @@
+name: Apply recommendation decision dataset V4
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-recommendation-decision-dataset-v4.yml
+      - scripts/apply-recommendation-decision-dataset-v4.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/add-recommendation-decision-dataset-v4'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Apply integration patch
+        run: python3 scripts/apply-recommendation-decision-dataset-v4.py
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api build > "$RUNNER_TEMP/api-build.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 200 "$RUNNER_TEMP/api-build.log"
+            exit "$status"
+          fi
+          tail -n 20 "$RUNNER_TEMP/api-build.log"
+
+      - name: Upload failed API build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-dataset-v4-api-build-${{ github.sha }}
+          path: ${{ runner.temp }}/api-build.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Test API
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test > "$RUNNER_TEMP/api-tests.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 240 "$RUNNER_TEMP/api-tests.log"
+            exit "$status"
+          fi
+          tail -n 30 "$RUNNER_TEMP/api-tests.log"
+
+      - name: Upload failed API test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-dataset-v4-api-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/api-tests.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove temporary implementation files
+        run: rm .github/workflows/apply-recommendation-decision-dataset-v4.yml scripts/apply-recommendation-decision-dataset-v4.py
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit verified implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: add recommendation decision dataset v4"
+          git push
