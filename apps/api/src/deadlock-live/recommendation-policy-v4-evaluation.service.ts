@@ -1626,6 +1626,12 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
   if (
     !isPositiveNumber(options.priorStrength) ||
     !isPositiveInteger(options.minContextObservations) ||
+    !isPositiveNumber(value.maximumAbsoluteLogitResidual) ||
+    !isFiniteNumber(weights.heroTeamTime) ||
+    !isFiniteNumber(weights.inventory) ||
+    !isFiniteNumber(weights.previousActionTail) ||
+    !isFiniteNumber(weights.alliedRosterAverage) ||
+    !isFiniteNumber(weights.enemyRosterAverage) ||
     !isFiniteNumber(weights.heroTimeAction) ||
     !isFiniteNumber(weights.inventoryAction) ||
     !isFiniteNumber(weights.previousActionTailAction) ||
@@ -1641,7 +1647,13 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
       priorStrength: options.priorStrength,
       minContextObservations: options.minContextObservations,
     },
+    maximumAbsoluteLogitResidual: value.maximumAbsoluteLogitResidual,
     weights: {
+      heroTeamTime: weights.heroTeamTime,
+      inventory: weights.inventory,
+      previousActionTail: weights.previousActionTail,
+      alliedRosterAverage: weights.alliedRosterAverage,
+      enemyRosterAverage: weights.enemyRosterAverage,
       heroTimeAction: weights.heroTimeAction,
       inventoryAction: weights.inventoryAction,
       previousActionTailAction: weights.previousActionTailAction,
@@ -1652,6 +1664,13 @@ function parseValueModel(value: Record<string, unknown>): ValueSerializedModel {
       global: asBinaryCount(counts.global),
       hero: asBinaryCountTableRecord(counts.hero),
       heroTime: asBinaryCountTableRecord(counts.heroTime),
+      heroTeamTime: asBinaryCountTableRecord(counts.heroTeamTime),
+      heroTimeInventory: asBinaryCountTableRecord(counts.heroTimeInventory),
+      heroTimePreviousTail: asBinaryCountTableRecord(
+        counts.heroTimePreviousTail,
+      ),
+      ally: asBinaryCountTableRecord(counts.ally),
+      enemy: asBinaryCountTableRecord(counts.enemy),
       heroTimeAction: asBinaryCountTableRecord(counts.heroTimeAction),
       heroTimeInventoryAction: asBinaryCountTableRecord(
         counts.heroTimeInventoryAction,
@@ -1842,6 +1861,19 @@ function hasMinimumBinaryObservations(
 function probabilityLogit(probability: number): number {
   const value = clampProbability(probability);
   return Math.log(value / (1 - value));
+}
+
+function probabilityFromLogit(value: number): number {
+  if (value >= 0) {
+    const exponent = Math.exp(-value);
+    return 1 / (1 + exponent);
+  }
+  const exponent = Math.exp(value);
+  return exponent / (1 + exponent);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function clampProbability(value: number): number {
