@@ -103,6 +103,10 @@ GET /deadlock/analysis/recommendation-decision-dataset-v4-historical-bootstrap/a
 
 `maxRows` is intended for smoke tests. Production training should use the complete held-out validation artifact.
 
+## Operational order
+
+Run the complete historical bootstrap before redirecting any V4 trainer to this directory. Pin the produced dataset SHA-256 in each training request and keep historical training output directories separate from live-telemetry training output directories. The expected sequence is bootstrap, Behavioral V4, Value V4, then Policy V4 Evaluation.
+
 ## Safety
 
 - live telemetry is never modified
