@@ -76,11 +76,13 @@ import { RecentMatchesWindowService } from './recent-matches-window.service';
 import { RecommendationBehavioralV4TrainingController } from './recommendation-behavioral-v4-training.controller';
 import { RecommendationPolicyV4EvaluationController } from './recommendation-policy-v4-evaluation.controller';
 import { RecommendationValueV4TrainingController } from './recommendation-value-v4-training.controller';
+import { RecommendationDecisionDatasetV4HistoricalBootstrapController } from './recommendation-decision-dataset-v4-historical-bootstrap.controller';
 import { RecommendationDecisionDatasetV4Controller } from './recommendation-decision-dataset-v4.controller';
 import { RecommendationDecisionTelemetryController } from './recommendation-decision-telemetry.controller';
 import { RecommendationBehavioralV4TrainingService } from './recommendation-behavioral-v4-training.service';
 import { RecommendationPolicyV4EvaluationService } from './recommendation-policy-v4-evaluation.service';
 import { RecommendationValueV4TrainingService } from './recommendation-value-v4-training.service';
+import { RecommendationDecisionDatasetV4HistoricalBootstrapService } from './recommendation-decision-dataset-v4-historical-bootstrap.service';
 import { RecommendationDecisionDatasetV4Service } from './recommendation-decision-dataset-v4.service';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 import { RecommendationOutcomeLinkerService } from './recommendation-outcome-linker.service';
@@ -133,6 +135,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecommendationBehavioralV4TrainingController,
     RecommendationPolicyV4EvaluationController,
     RecommendationValueV4TrainingController,
+    RecommendationDecisionDatasetV4HistoricalBootstrapController,
     RecommendationDecisionDatasetV4Controller,
     RecommendationDecisionTelemetryController,
     SkillBuildAnalysisController,
@@ -167,6 +170,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3LiveService,
     RecommendationDecisionTelemetryService,
     RecommendationDecisionDatasetV4Service,
+    RecommendationDecisionDatasetV4HistoricalBootstrapService,
     RecommendationBehavioralV4TrainingService,
     RecommendationValueV4TrainingService,
     RecommendationPolicyV4EvaluationService,
@@ -236,6 +240,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3LiveService,
     RecommendationDecisionTelemetryService,
     RecommendationDecisionDatasetV4Service,
+    RecommendationDecisionDatasetV4HistoricalBootstrapService,
     RecommendationBehavioralV4TrainingService,
     RecommendationValueV4TrainingService,
     RecommendationPolicyV4EvaluationService,
