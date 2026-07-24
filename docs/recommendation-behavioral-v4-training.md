@@ -110,3 +110,12 @@ GET /deadlock/analysis/recommendation-behavioral-v4-training/model
 ```
 
 Only one run can execute at a time. Existing completed artifacts remain readable until a new run passes source validation and starts replacing outputs.
+
+## Operational sequence
+
+1. Complete a Recommendation Decision Dataset V4 rebuild.
+2. Confirm the V4 audit passed and inspect the exact-action eligible row count.
+3. Start Behavioral V4 training with the source artifact SHA-256 pinned when reproducibility is required.
+4. Wait for the training status to reach `COMPLETE` or `FAILED`.
+5. Inspect `audit.json` and `evaluation.json` before considering any shadow or production integration.
+6. Do not load the generated model into live serving unless its release gate passed and a separate guarded rollout change has been reviewed.
