@@ -248,7 +248,6 @@ async function createFixture(root: string) {
   const modelSha256 = 'a'.repeat(64);
   await Promise.all([
     writeJson(join(trainingDirectory, 'manifest.json'), {
-      auditPassed: true,
       artifacts: {
         validation: {
           fileName: 'validation.ndjson',
