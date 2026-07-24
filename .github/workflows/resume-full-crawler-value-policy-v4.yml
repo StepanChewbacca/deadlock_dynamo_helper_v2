@@ -1,0 +1,56 @@
+name: Resume full crawler Value and Policy V4
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/resume-full-crawler-value-policy-v4.yml
+      - scripts/resume-full-crawler-value-policy-v4.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  resume:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-full-crawler-recommendation-cycle-20260724'
+    runs-on: self-hosted
+    timeout-minutes: 360
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resume Value and Policy V4
+        run: node scripts/resume-full-crawler-value-policy-v4.mjs
+
+      - name: Restore production API configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          sudo docker compose up -d --force-recreate --no-deps api
+          rm -f /tmp/full-crawler-value-policy-resume.override.yml
+          for attempt in $(seq 1 180); do
+            if curl --max-time 10 --fail --silent http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Upload Value and Policy resume results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-crawler-value-policy-resume-${{ github.sha }}
+          path: full-crawler-value-policy-resume-result
+          if-no-files-found: warn
+          retention-days: 14
