@@ -115,6 +115,20 @@ The diagnostic gate checks:
 
 Even when every numeric condition passes, `productionRolloutAuthorized` remains `false`. Actual historical propensities were not logged, Value V4 is observational, and unobserved confounding can invalidate causal or policy-value claims.
 
+## Operational sequence
+
+Run the pipeline against one immutable source generation in this order:
+
+1. Materialize Recommendation Decision Dataset V4.
+2. Record the Dataset V4 SHA-256 from its manifest.
+3. Train Behavioral V4 with `expectedSourceSha256` pinned to that hash.
+4. Train Value V4 with the same pinned Dataset V4 hash and compatible chronological split settings.
+5. Confirm both training audits pass and retain their validation and model SHA-256 values.
+6. Start Policy V4 evaluation with all three expected hashes pinned.
+7. Inspect candidate coverage, support, clipping, effective sample size, estimator stability, and bootstrap intervals before interpreting the shadow-readiness gate.
+
+Do not compare artifacts generated from different Dataset V4 hashes. Future shadow serving should log the actual stochastic action probabilities; only then can a later evaluator replace estimated behavior propensities with true logging propensities.
+
 ## Persistence
 
 Default output directory:
