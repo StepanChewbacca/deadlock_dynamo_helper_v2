@@ -1,0 +1,149 @@
+name: Audit full crawler dataset
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/audit-full-crawler-dataset.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.event.pull_request.head.ref == 'diagnostics/audit-full-crawler-dataset-20260724'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Audit crawler database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p crawler-dataset-audit
+          postgres_container=aboba-telegramovich-postgres-1
+          query() {
+            sudo docker exec "$postgres_container" psql -U postgres -d deadlock_builds -At -F $'\t' -c "$1"
+          }
+
+          query "SELECT json_build_object(
+            'generatedAt', now(),
+            'databaseSizeBytes', pg_database_size(current_database()),
+            'matchCount', (SELECT count(*) FROM matches),
+            'matchPlayerCount', (SELECT count(*) FROM match_players),
+            'itemRowCount', (SELECT count(*) FROM match_player_items),
+            'skillUpgradeRowCount', (SELECT count(*) FROM match_player_skill_upgrades),
+            'minMatchStartTime', (SELECT min(\"startTime\") FROM matches),
+            'maxMatchStartTime', (SELECT max(\"startTime\") FROM matches),
+            'maxMatchCrawledAt', (SELECT max(\"crawledAt\") FROM matches),
+            'maxPlayerCrawledAt', (SELECT max(\"crawledAt\") FROM match_players),
+            'maxMatchId', (SELECT max(\"matchId\") FROM matches)
+          );" > crawler-dataset-audit/summary.json
+
+          query "WITH player_counts AS (
+            SELECT \"matchId\", count(*) AS player_count
+            FROM match_players
+            GROUP BY \"matchId\"
+          ), item_counts AS (
+            SELECT mp.\"matchId\", count(*) AS item_count,
+                   count(DISTINCT mpi.\"matchPlayerId\") AS players_with_items
+            FROM match_players mp
+            LEFT JOIN match_player_items mpi ON mpi.\"matchPlayerId\" = mp.id
+            GROUP BY mp.\"matchId\"
+          ), eligible AS (
+            SELECT m.\"matchId\",
+                   coalesce(pc.player_count, 0) AS player_count,
+                   coalesce(ic.item_count, 0) AS item_count,
+                   coalesce(ic.players_with_items, 0) AS players_with_items,
+                   m.\"startTime\",
+                   m.\"crawledAt\",
+                   m.\"durationS\",
+                   m.\"winningTeam\"
+            FROM matches m
+            LEFT JOIN player_counts pc ON pc.\"matchId\" = m.\"matchId\"
+            LEFT JOIN item_counts ic ON ic.\"matchId\" = m.\"matchId\"
+          )
+          SELECT json_build_object(
+            'matchesWithAnyPlayers', count(*) FILTER (WHERE player_count > 0),
+            'matchesWithTwelvePlayers', count(*) FILTER (WHERE player_count = 12),
+            'matchesWithAnyItems', count(*) FILTER (WHERE item_count > 0),
+            'matchesWithAllPlayersHavingItems', count(*) FILTER (WHERE player_count = 12 AND players_with_items = 12),
+            'matchesWithOutcome', count(*) FILTER (WHERE \"winningTeam\" IS NOT NULL),
+            'matchesWithDuration', count(*) FILTER (WHERE \"durationS\" IS NOT NULL AND \"durationS\" > 0),
+            'strictEligibleMatchCount', count(*) FILTER (
+              WHERE player_count = 12
+                AND players_with_items = 12
+                AND item_count > 0
+                AND \"winningTeam\" IS NOT NULL
+                AND \"durationS\" IS NOT NULL
+                AND \"durationS\" > 0
+            ),
+            'latestStrictEligibleStartTime', max(\"startTime\") FILTER (
+              WHERE player_count = 12
+                AND players_with_items = 12
+                AND item_count > 0
+                AND \"winningTeam\" IS NOT NULL
+                AND \"durationS\" IS NOT NULL
+                AND \"durationS\" > 0
+            ),
+            'oldestStrictEligibleStartTime', min(\"startTime\") FILTER (
+              WHERE player_count = 12
+                AND players_with_items = 12
+                AND item_count > 0
+                AND \"winningTeam\" IS NOT NULL
+                AND \"durationS\" IS NOT NULL
+                AND \"durationS\" > 0
+            )
+          ) FROM eligible;" > crawler-dataset-audit/eligibility.json
+
+          query "WITH counts AS (
+            SELECT \"matchId\", count(*) AS player_count
+            FROM match_players
+            GROUP BY \"matchId\"
+          )
+          SELECT json_agg(row_to_json(t) ORDER BY t.player_count)
+          FROM (
+            SELECT player_count, count(*) AS match_count
+            FROM counts
+            GROUP BY player_count
+          ) t;" > crawler-dataset-audit/player-count-histogram.json
+
+          query "SELECT json_agg(row_to_json(t) ORDER BY t.day)
+          FROM (
+            SELECT date_trunc('day', \"crawledAt\")::date AS day, count(*) AS match_count
+            FROM matches
+            WHERE \"crawledAt\" >= now() - interval '30 days'
+            GROUP BY 1
+          ) t;" > crawler-dataset-audit/recent-crawl-volume.json
+
+          query "SELECT json_agg(row_to_json(t) ORDER BY t.start_time DESC)
+          FROM (
+            SELECT m.\"matchId\" AS match_id,
+                   m.\"startTime\" AS start_time,
+                   m.\"crawledAt\" AS crawled_at,
+                   count(DISTINCT mp.id) AS player_count,
+                   count(mpi.id) AS item_count,
+                   count(DISTINCT mpi.\"matchPlayerId\") AS players_with_items
+            FROM matches m
+            LEFT JOIN match_players mp ON mp.\"matchId\" = m.\"matchId\"
+            LEFT JOIN match_player_items mpi ON mpi.\"matchPlayerId\" = mp.id
+            GROUP BY m.\"matchId\", m.\"startTime\", m.\"crawledAt\"
+            ORDER BY m.\"startTime\" DESC
+            LIMIT 20
+          ) t;" > crawler-dataset-audit/latest-matches.json
+
+          sudo docker exec "$postgres_container" psql -U postgres -d deadlock_builds -c "\\d+ matches" > crawler-dataset-audit/matches-schema.txt
+          sudo docker exec "$postgres_container" psql -U postgres -d deadlock_builds -c "\\d+ match_players" > crawler-dataset-audit/match-players-schema.txt
+          sudo docker exec "$postgres_container" psql -U postgres -d deadlock_builds -c "\\d+ match_player_items" > crawler-dataset-audit/match-player-items-schema.txt
+
+      - name: Upload crawler dataset audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawler-dataset-audit-${{ github.sha }}
+          path: crawler-dataset-audit
+          retention-days: 14
