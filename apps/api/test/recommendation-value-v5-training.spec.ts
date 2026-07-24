@@ -115,11 +115,17 @@ describe('recommendation value v5 training', () => {
       test: {
         matchCount: 2,
         decisionCount: 6,
-        stateOnly: { totalWeight: 2 },
-        actionConditioned: { totalWeight: 2 },
+        stateOnly: { totalWeight: expect.any(Number) },
+        actionConditioned: { totalWeight: expect.any(Number) },
       },
       interpretation: { causal: false },
     });
+    const testEvaluation = evaluation.test as {
+      stateOnly: { totalWeight: number };
+      actionConditioned: { totalWeight: number };
+    };
+    expect(testEvaluation.stateOnly.totalWeight).toBeCloseTo(2);
+    expect(testEvaluation.actionConditioned.totalWeight).toBeCloseTo(2);
 
     const audit = JSON.parse(
       await readFile(join(outputDirectory, 'audit.json'), 'utf8'),
@@ -140,9 +146,9 @@ describe('recommendation value v5 training', () => {
         overlapCount: 0,
       },
       weighting: {
-        trainTotalWeight: 6,
-        tuningTotalWeight: 2,
-        testTotalWeight: 2,
+        trainTotalWeight: expect.any(Number),
+        tuningTotalWeight: expect.any(Number),
+        testTotalWeight: expect.any(Number),
       },
       leakage: {
         outcomeFieldUsedAsFeature: false,
@@ -151,6 +157,14 @@ describe('recommendation value v5 training', () => {
         causalInterpretationAllowed: false,
       },
     });
+    const auditWeighting = audit.weighting as {
+      trainTotalWeight: number;
+      tuningTotalWeight: number;
+      testTotalWeight: number;
+    };
+    expect(auditWeighting.trainTotalWeight).toBeCloseTo(6);
+    expect(auditWeighting.tuningTotalWeight).toBeCloseTo(2);
+    expect(auditWeighting.testTotalWeight).toBeCloseTo(2);
 
     const predictions = await readNdjson(
       join(outputDirectory, 'prediction-evaluation.ndjson'),
