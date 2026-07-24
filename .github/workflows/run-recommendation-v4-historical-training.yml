@@ -27,9 +27,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Pin fixed production commit
-        run: sed -i 's/64c25ebcb0b43e5546d8be70570631a9f57e94fe/1712ee381e98ed8a2ff703f45872533221500889/' scripts/run-recommendation-v4-historical-training.mjs
-
       - name: Run historical bootstrap and training
         run: node scripts/run-recommendation-v4-historical-training.mjs
 
