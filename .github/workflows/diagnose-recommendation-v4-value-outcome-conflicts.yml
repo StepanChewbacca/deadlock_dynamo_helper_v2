@@ -1,0 +1,35 @@
+name: Diagnose recommendation V4 value outcome conflicts
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-recommendation-v4-value-outcome-conflicts.yml
+      - scripts/diagnose-recommendation-v4-value-outcome-conflicts.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'diagnostics/recommendation-v4-value-outcome-conflicts-20260724'
+    runs-on: self-hosted
+    timeout-minutes: 60
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Diagnose historical outcome conflicts
+        run: node scripts/diagnose-recommendation-v4-value-outcome-conflicts.mjs
+
+      - name: Upload diagnostic result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v4-value-outcome-conflicts-${{ github.sha }}
+          path: recommendation-v4-value-outcome-conflict-result
+          if-no-files-found: error
+          retention-days: 7
