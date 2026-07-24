@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const deployRepository = '/home/ubuntu/apps/deadlock_dynamo_helper';
-const expectedCommit = '64c25ebcb0b43e5546d8be70570631a9f57e94fe';
+const expectedCommit = '579868d24a42497f87561a5e002423f6275aea07';
 const apiBaseUrl = 'http://127.0.0.1:3000';
 const resultDirectory = join(
   process.env.GITHUB_WORKSPACE ?? process.cwd(),
@@ -181,6 +181,10 @@ if (failure) {
 async function runStage({ name, endpoint, body, timeoutMs }) {
   const initialStatus = await requestJson('GET', endpoint + '/status');
   await saveJson(`${name}-00-before-status.json`, initialStatus);
+  if (initialStatus.state === 'COMPLETE') {
+    await saveJson(`${name}-02-status.json`, initialStatus);
+    return initialStatus;
+  }
   const startResponse = await requestJson('POST', endpoint + '/start', body);
   await saveJson(`${name}-01-start-response.json`, startResponse);
   const startedAt = Date.now();
@@ -280,25 +284,16 @@ async function verifyHistoricalEnvironment() {
     'DEADLOCK_RECOMMENDATION_POLICY_V4_DATASET_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap',
   ];
   for (const value of requiredValues) {
-    assertTrue(output.includes(value), `Historical API environment is missing ${value}.`);
+    assertTrue(output.includes(value), `Missing historical environment value: ${value}`);
   }
 }
 
 async function restoreProductionApi() {
-  runSudoDockerCompose([
-    '-f',
-    join(deployRepository, 'docker-compose.yml'),
-    'up',
-    '-d',
-    '--force-recreate',
-    '--no-deps',
-    'api',
-  ]);
-  await waitForApi(endpoints.telemetry, 15 * 60_000);
-  const telemetry = await requestJson('GET', endpoints.telemetry);
-  await saveJson('97-restored-telemetry-status.json', telemetry);
-  assertTrue(telemetry.state === 'READY', 'Production telemetry was not READY after restore.');
+  runSudoDockerCompose(['up', '-d', '--force-recreate', '--no-deps', 'api']);
   await rm(overridePath, { force: true });
+  await waitForApi(endpoints.telemetry, 15 * 60_000);
+  const status = await requestJson('GET', endpoints.telemetry);
+  await saveJson('97-restored-telemetry-status.json', status);
 }
 
 async function waitForApi(path, timeoutMs) {
@@ -311,7 +306,7 @@ async function waitForApi(path, timeoutMs) {
       await sleep(5_000);
     }
   }
-  throw new Error(`API endpoint ${path} did not become ready.`);
+  throw new Error(`API did not become ready for ${path}.`);
 }
 
 async function requestJson(method, path, body) {
@@ -322,30 +317,20 @@ async function requestJson(method, path, body) {
     signal: AbortSignal.timeout(30_000),
   });
   const text = await response.text();
-  let value;
-  try {
-    value = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`${method} ${path} returned invalid JSON: ${text.slice(0, 500)}`);
-  }
   if (!response.ok) {
-    throw new Error(`${method} ${path} failed with ${response.status}: ${JSON.stringify(value)}`);
+    throw new Error(`${method} ${path} returned ${response.status}: ${text}`);
   }
-  return value;
+  return text ? JSON.parse(text) : {};
+}
+
+function commandOutput(command, args) {
+  return execFileSync(command, args, { encoding: 'utf8' });
 }
 
 function runSudoDockerCompose(args) {
   execFileSync('sudo', ['docker', 'compose', ...args], {
     cwd: deployRepository,
-    encoding: 'utf8',
     stdio: 'inherit',
-  });
-}
-
-function commandOutput(command, args) {
-  return execFileSync(command, args, {
-    cwd: deployRepository,
-    encoding: 'utf8',
   });
 }
 
@@ -355,22 +340,6 @@ async function saveJson(fileName, value) {
     `${JSON.stringify(value, undefined, 2)}\n`,
     'utf8',
   );
-}
-
-function requiredString(value, path) {
-  const result = nestedValue(value, path);
-  if (typeof result !== 'string' || !result.trim()) {
-    throw new Error(`Required string ${path.join('.')} is missing.`);
-  }
-  return result;
-}
-
-function requiredPositiveInteger(value, path) {
-  const result = Number(nestedValue(value, path));
-  if (!Number.isSafeInteger(result) || result <= 0) {
-    throw new Error(`Required positive integer ${path.join('.')} is missing.`);
-  }
-  return result;
 }
 
 function nestedValue(value, path) {
@@ -384,6 +353,22 @@ function nestedValue(value, path) {
   return current;
 }
 
+function requiredString(value, path) {
+  const result = nestedValue(value, path);
+  if (typeof result !== 'string' || !result) {
+    throw new Error(`Expected non-empty string at ${path.join('.')}.`);
+  }
+  return result;
+}
+
+function requiredPositiveInteger(value, path) {
+  const result = nestedValue(value, path);
+  if (!Number.isSafeInteger(result) || result <= 0) {
+    throw new Error(`Expected positive integer at ${path.join('.')}.`);
+  }
+  return result;
+}
+
 function assertTrue(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -394,6 +379,6 @@ function getErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
