@@ -52,3 +52,15 @@ compose = replace_once(
     "behavioral V4 environment line",
 )
 compose_path.write_text(compose)
+
+service_path = Path(
+    "apps/api/src/deadlock-live/recommendation-value-v4-training.service.ts"
+)
+service = service_path.read_text()
+service = replace_once(
+    service,
+    "      const outcome = row.outcomeLabel.playerWon;",
+    "      const outcome = Boolean(row.outcomeLabel.playerWon);",
+    "eligible match outcome normalization",
+)
+service_path.write_text(service)
