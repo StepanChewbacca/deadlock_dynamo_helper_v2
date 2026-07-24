@@ -1,0 +1,63 @@
+name: Apply recommendation V4 bootstrap audit fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-recommendation-v4-bootstrap-audit-fix.yml
+      - scripts/apply-recommendation-v4-bootstrap-audit-fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/recommendation-v4-bootstrap-training-audit-contract'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply contract fix
+        run: python3 scripts/apply-recommendation-v4-bootstrap-audit-fix.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build -w @deadlock-live-probe/shared
+
+      - name: Build domain package
+        run: npm run build -w @deadlock-live-probe/domain
+
+      - name: Build API
+        run: npm run build -w @deadlock-live-probe/api
+
+      - name: Test API
+        run: npm test -w @deadlock-live-probe/api -- --runInBand
+
+      - name: Remove temporary implementation files
+        run: rm -f .github/workflows/apply-recommendation-v4-bootstrap-audit-fix.yml scripts/apply-recommendation-v4-bootstrap-audit-fix.py
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/deadlock-live/recommendation-decision-dataset-v4-historical-bootstrap.service.ts apps/api/test/recommendation-decision-dataset-v4-historical-bootstrap.spec.ts .github/workflows/apply-recommendation-v4-bootstrap-audit-fix.yml scripts/apply-recommendation-v4-bootstrap-audit-fix.py
+          git commit -m "fix: validate historical bootstrap training audit"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
