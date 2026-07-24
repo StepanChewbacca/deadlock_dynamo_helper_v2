@@ -22,6 +22,8 @@ The trainer requires a completed V4 `dataset.ndjson`, `manifest.json`, and `audi
 
 Only rows where both `trainingEligibility.exactAction` and `trainingEligibility.outcome` are true are used. The exact observed action becomes a prospective action feature and `playerWon` is the target.
 
+`playerWon` is a player-perspective label. Outcome consistency is therefore validated per `(matchId, steamId)`, while train and validation splitting remains strictly match-level. Different players from opposing teams in one match are expected to have opposite labels and are not a conflict.
+
 ## Interpretation
 
 The model estimates:
