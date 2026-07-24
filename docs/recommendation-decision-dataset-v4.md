@@ -79,6 +79,12 @@ GET /deadlock/analysis/recommendation-decision-dataset-v4/audit
 
 Only one build can run at a time. Rebuilding always reads the current complete telemetry log and replaces the previous V4 artifact.
 
+## Operations
+
+Dataset generation is explicit rather than automatic. Run a rebuild after enough new `ACTION_OBSERVED` or `MATCH_OUTCOME` events have accumulated, then inspect `status`, `audit`, and `manifest` before using the artifact for training.
+
+A rebuild waits for queued telemetry writes before reading the event log. The source path, source hash, artifact hash, row count, and eligibility counts are persisted so a training run can pin the exact materialized input.
+
 ## Audit policy
 
 The audit fails when there are no decision rows, invalid telemetry lines, duplicate event IDs, or duplicate decision IDs. Orphan lifecycle events and conflicting outcomes are reported as warnings and excluded from eligible training subsets.
