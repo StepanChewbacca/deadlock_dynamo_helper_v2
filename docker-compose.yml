@@ -42,6 +42,10 @@ services:
       - DEADLOCK_RECOMMENDATION_BEHAVIORAL_V4_TRAINING_DIR=${DEADLOCK_RECOMMENDATION_BEHAVIORAL_V4_TRAINING_DIR:-/app/apps/api/storage/recommendation-behavioral-v4-training}
       - DEADLOCK_RECOMMENDATION_VALUE_V4_SOURCE_DIR=${DEADLOCK_RECOMMENDATION_VALUE_V4_SOURCE_DIR:-/app/apps/api/storage/recommendation-decision-dataset-v4}
       - DEADLOCK_RECOMMENDATION_VALUE_V4_TRAINING_DIR=${DEADLOCK_RECOMMENDATION_VALUE_V4_TRAINING_DIR:-/app/apps/api/storage/recommendation-value-v4-training}
+      - DEADLOCK_RECOMMENDATION_POLICY_V4_DATASET_DIR=${DEADLOCK_RECOMMENDATION_POLICY_V4_DATASET_DIR:-/app/apps/api/storage/recommendation-decision-dataset-v4}
+      - DEADLOCK_RECOMMENDATION_POLICY_V4_BEHAVIORAL_DIR=${DEADLOCK_RECOMMENDATION_POLICY_V4_BEHAVIORAL_DIR:-/app/apps/api/storage/recommendation-behavioral-v4-training}
+      - DEADLOCK_RECOMMENDATION_POLICY_V4_VALUE_DIR=${DEADLOCK_RECOMMENDATION_POLICY_V4_VALUE_DIR:-/app/apps/api/storage/recommendation-value-v4-training}
+      - DEADLOCK_RECOMMENDATION_POLICY_V4_OUTPUT_DIR=${DEADLOCK_RECOMMENDATION_POLICY_V4_OUTPUT_DIR:-/app/apps/api/storage/recommendation-policy-v4-evaluation}
       - DEADLOCK_CONTEXTUAL_V3_SOURCE_DIR=${DEADLOCK_CONTEXTUAL_V3_SOURCE_DIR:-/app/apps/api/storage/build-decision-dataset-v3}
       - DEADLOCK_CONTEXTUAL_V3_TRAINING_DIR=${DEADLOCK_CONTEXTUAL_V3_TRAINING_DIR:-/app/apps/api/storage/contextual-v3-training}
       - DEADLOCK_CONTEXTUAL_V3_CANDIDATE_EVALUATION_DIR=${DEADLOCK_CONTEXTUAL_V3_CANDIDATE_EVALUATION_DIR:-/app/apps/api/storage/contextual-v3-candidate-evaluation-v2}
