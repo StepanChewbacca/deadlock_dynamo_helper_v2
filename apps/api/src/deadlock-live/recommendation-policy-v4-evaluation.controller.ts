@@ -9,6 +9,7 @@ import {
 import {
   RecommendationPolicyV4EvaluationService,
   type RecommendationPolicyV4EvaluationStartRequest,
+  type RecommendationPolicyV4EvaluationStatus,
 } from './recommendation-policy-v4-evaluation.service';
 
 @Controller('deadlock/analysis/recommendation-policy-v4-evaluation')
@@ -20,7 +21,7 @@ export class RecommendationPolicyV4EvaluationController {
   @Post('start')
   async start(
     @Body() request: RecommendationPolicyV4EvaluationStartRequest = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<RecommendationPolicyV4EvaluationStatus> {
     try {
       return await this.service.start(request);
     } catch (error) {
@@ -32,7 +33,7 @@ export class RecommendationPolicyV4EvaluationController {
   }
 
   @Get('status')
-  getStatus(): Record<string, unknown> {
+  getStatus(): RecommendationPolicyV4EvaluationStatus {
     return this.service.getStatus();
   }
 
