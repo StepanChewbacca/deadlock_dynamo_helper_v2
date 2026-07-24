@@ -1,0 +1,42 @@
+name: Apply Value V4 player outcome grouping fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-value-v4-player-outcome-grouping-fix.yml
+      - scripts/apply-value-v4-player-outcome-grouping-fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'fix/value-v4-player-outcome-grouping'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Apply fix
+        run: python3 scripts/apply-value-v4-player-outcome-grouping-fix.py
+
+      - name: Remove temporary files
+        run: rm -f .github/workflows/apply-value-v4-player-outcome-grouping-fix.yml scripts/apply-value-v4-player-outcome-grouping-fix.py
+
+      - name: Verify diff
+        run: git diff --check
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/deadlock-live/recommendation-value-v4-training.service.ts apps/api/test/recommendation-value-v4-training.spec.ts .github/workflows/apply-value-v4-player-outcome-grouping-fix.yml scripts/apply-value-v4-player-outcome-grouping-fix.py
+          git commit -m "fix: scope value outcomes by player"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
