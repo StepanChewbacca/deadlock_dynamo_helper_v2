@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseOptions } from './database/data-source';
 import { DeadlockLiveModule } from './deadlock-live/deadlock-live.module';
+import { RecommendationValueV5Module } from './deadlock-live/recommendation-value-v5.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { DeadlockLiveModule } from './deadlock-live/deadlock-live.module';
       migrationsRun: process.env.DB_RUN_MIGRATIONS === 'true',
     }),
     DeadlockLiveModule,
+    RecommendationValueV5Module,
   ],
 })
 export class AppModule {}
