@@ -30,8 +30,7 @@ import {
 } from './hero-build-offline-evaluation.service';
 
 export const HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION = 1;
-export const HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES = 13_000;
-export const HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES = 13_000;
+export const HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES = 1_000_000;
 export const HERO_BUILD_DECISION_DATASET_V3_DEFAULT_BATCH_SIZE = 100;
 export const HERO_BUILD_DECISION_DATASET_V3_MIN_BATCH_SIZE = 10;
 export const HERO_BUILD_DECISION_DATASET_V3_MAX_BATCH_SIZE = 500;
@@ -65,7 +64,7 @@ export interface HeroBuildDecisionDatasetV3StartRequest {
 }
 
 export interface HeroBuildDecisionDatasetV3Options {
-  maxMatches: number;
+  maxMatches?: number;
   batchSize: number;
   includeSellActions: boolean;
 }
@@ -99,7 +98,10 @@ export interface HeroBuildDecisionDatasetV3Audit {
   generatedAt: string;
   passed: boolean;
   source: {
+    totalAvailableMatchCount: number;
     selectedMatchCount: number;
+    excludedByLimitMatchCount: number;
+    snapshotCrawledAt?: string;
     matchCountWithRows: number;
     playerCountWithRows: number;
     sourcePlayerCount: number;
@@ -147,7 +149,10 @@ export interface HeroBuildDecisionDatasetV3Manifest {
   rowOrder: 'HERO_ID_MATCH_TIME_DECISION_SEQUENCE';
   options: HeroBuildDecisionDatasetV3Options;
   source: {
+    totalAvailableMatchCount: number;
     selectedMatchCount: number;
+    excludedByLimitMatchCount: number;
+    snapshotCrawledAt?: string;
     selectedWindowStartTime: string;
     selectedWindowEndTime: string;
     sourceWindowLastRefreshedAt?: string;
@@ -232,6 +237,8 @@ interface DatasetCheckpoint {
   startedAt: string;
   options: HeroBuildDecisionDatasetV3Options;
   sourceWindowLastRefreshedAt?: string;
+  sourceSnapshotCrawledAt?: string;
+  totalAvailableMatchCount: number;
   descriptors: PersistedDescriptor[];
   heroIds: number[];
   nextHeroIndex: number;
@@ -312,7 +319,7 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
     if (this.status.state === 'RUNNING') {
       throw new Error('Contextual V3 decision dataset extraction is already running.');
     }
-    const options = normalizeOptions(request);
+    const options = normalizeHeroBuildDecisionDatasetV3Options(request);
     const loaded = await this.dataLoader.loadMatchDescriptors(options.maxMatches);
     const descriptors = loaded.descriptors
       .map((descriptor) => ({
@@ -345,6 +352,9 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       options,
       sourceWindowLastRefreshedAt:
         loaded.sourceLastRefreshedAt?.toISOString(),
+      sourceSnapshotCrawledAt:
+        loaded.sourceSnapshotCrawledAt?.toISOString(),
+      totalAvailableMatchCount: loaded.totalAvailableMatchCount,
       descriptors,
       heroIds,
       nextHeroIndex: 0,
@@ -711,6 +721,11 @@ function buildAudit(
     'Candidate sets are intentionally not materialized in this extraction stage.',
     'Build archetypes are intentionally not assigned; buildPrefixKey is observed history, not an archetype label.',
   ];
+  if (checkpoint.descriptors.length < checkpoint.totalAvailableMatchCount) {
+    warnings.push(
+      `${checkpoint.totalAvailableMatchCount - checkpoint.descriptors.length} matches were excluded by the explicit maxMatches request.`,
+    );
+  }
   if (state.excludedSequenceCount > 0) {
     warnings.push(
       `${state.excludedSequenceCount} player sequences were excluded because they were not safe to evaluate.`,
@@ -735,7 +750,13 @@ function buildAudit(
       state.invalidItemIdCount === 0 &&
       state.nonMonotonicGameTimeCount === 0,
     source: {
+      totalAvailableMatchCount: checkpoint.totalAvailableMatchCount,
       selectedMatchCount: state.selectedMatchCount,
+      excludedByLimitMatchCount: Math.max(
+        0,
+        checkpoint.totalAvailableMatchCount - checkpoint.descriptors.length,
+      ),
+      snapshotCrawledAt: checkpoint.sourceSnapshotCrawledAt,
       matchCountWithRows: state.matchIdsWithRows.length,
       playerCountWithRows: state.playerKeysWithRows.length,
       sourcePlayerCount: state.sourcePlayerCount,
@@ -790,7 +811,13 @@ async function buildManifest(
     rowOrder: 'HERO_ID_MATCH_TIME_DECISION_SEQUENCE',
     options: { ...checkpoint.options },
     source: {
+      totalAvailableMatchCount: checkpoint.totalAvailableMatchCount,
       selectedMatchCount: checkpoint.descriptors.length,
+      excludedByLimitMatchCount: Math.max(
+        0,
+        checkpoint.totalAvailableMatchCount - checkpoint.descriptors.length,
+      ),
+      snapshotCrawledAt: checkpoint.sourceSnapshotCrawledAt,
       selectedWindowStartTime: checkpoint.descriptors[0].startTime,
       selectedWindowEndTime:
         checkpoint.descriptors[checkpoint.descriptors.length - 1].startTime,
@@ -863,13 +890,12 @@ function getHeroAudit(
   return created;
 }
 
-function normalizeOptions(
+export function normalizeHeroBuildDecisionDatasetV3Options(
   request: HeroBuildDecisionDatasetV3StartRequest,
 ): HeroBuildDecisionDatasetV3Options {
   return {
-    maxMatches: boundedInteger(
+    maxMatches: optionalBoundedInteger(
       request.maxMatches,
-      HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,
       1,
       HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES,
       'maxMatches',
@@ -883,6 +909,23 @@ function normalizeOptions(
     ),
     includeSellActions: request.includeSellActions ?? false,
   };
+}
+
+function optionalBoundedInteger(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fieldName: string,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(
+      `${fieldName} must be a safe integer from ${minimum} to ${maximum}.`,
+    );
+  }
+  return value;
 }
 
 function boundedInteger(
