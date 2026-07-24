@@ -23,7 +23,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Diagnose historical outcome conflicts
-        run: node scripts/diagnose-recommendation-v4-value-outcome-conflicts.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recommendation-v4-value-outcome-conflict-result
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          sudo docker compose exec -T api node --input-type=module - \
+            < "$GITHUB_WORKSPACE/scripts/diagnose-recommendation-v4-value-outcome-conflicts.mjs" \
+            > "$GITHUB_WORKSPACE/recommendation-v4-value-outcome-conflict-result/diagnostic.json"
 
       - name: Upload diagnostic result
         if: always()
