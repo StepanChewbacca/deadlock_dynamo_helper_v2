@@ -64,7 +64,7 @@ module = replace_in_section(
 module = replace_in_section(
     module,
     "  exports: [",
-    "]\n})",
+    "  ],\n})",
     "    RecommendationDecisionDatasetV4Service,\n    RecommendationBehavioralV4TrainingService,\n",
     "    RecommendationDecisionDatasetV4Service,\n"
     "    RecommendationDecisionDatasetV4HistoricalBootstrapService,\n"
