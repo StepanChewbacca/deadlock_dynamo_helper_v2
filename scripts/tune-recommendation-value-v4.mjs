@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const deployRepository = '/home/ubuntu/apps/deadlock_dynamo_helper';
-const expectedCommit = '579868d24a42497f87561a5e002423f6275aea07';
+const expectedCommit = '18a4aa4b00cd95df27f9f25d8e5311034b803cd3';
 const apiBaseUrl = 'http://127.0.0.1:3000';
 const outputDirectory = join(process.env.GITHUB_WORKSPACE ?? process.cwd(), 'value-v4-tuning-results');
 const overridePath = '/tmp/recommendation-value-v4-tuning.override.yml';
@@ -19,7 +19,6 @@ const configurations = [
 ];
 
 await mkdir(outputDirectory, { recursive: true });
-let failure;
 try {
   await waitForDeployment();
   await configureHistoricalApi();
@@ -35,7 +34,6 @@ try {
   await writeJson('00-ranking.json', { generatedAt: new Date().toISOString(), best, results });
   await runConfiguration(best.configuration, 'best-final');
 } catch (error) {
-  failure = error;
   await writeJson('99-failure.json', {
     failedAt: new Date().toISOString(),
     error: error instanceof Error ? error.message : String(error),
@@ -104,7 +102,7 @@ async function runConfiguration(configuration, name) {
     configuration,
     modelSha256: manifest?.artifacts?.model?.sha256,
     releaseGate: evaluation.releaseGate,
-    value: evaluation.value,
+    valueModel: evaluation.valueModel,
     globalBaseline: evaluation.globalBaseline,
     heroTimeBaseline: evaluation.heroTimeBaseline,
     score: scoringTuple(evaluation),
@@ -112,16 +110,22 @@ async function runConfiguration(configuration, name) {
 }
 
 function scoringTuple(evaluation) {
-  const value = evaluation.value;
+  const valueModel = evaluation.valueModel;
+  if (!valueModel) {
+    throw new Error('Value V4 evaluation is missing valueModel metrics.');
+  }
   const baselines = [evaluation.globalBaseline, evaluation.heroTimeBaseline];
+  if (baselines.some((entry) => !entry)) {
+    throw new Error('Value V4 evaluation is missing baseline metrics.');
+  }
   const bestLogLoss = Math.min(...baselines.map((entry) => entry.logLoss));
   const bestBrier = Math.min(...baselines.map((entry) => entry.brierScore));
   return {
     releaseGatePassed: Boolean(evaluation.releaseGate?.passed),
-    logLossImprovement: bestLogLoss - value.logLoss,
-    brierImprovement: bestBrier - value.brierScore,
-    rocAuc: value.rocAuc,
-    calibrationError: value.calibration?.expectedCalibrationError,
+    logLossImprovement: bestLogLoss - valueModel.logLoss,
+    brierImprovement: bestBrier - valueModel.brierScore,
+    rocAuc: valueModel.rocAuc,
+    calibrationError: valueModel.calibration?.expectedCalibrationError,
   };
 }
 
