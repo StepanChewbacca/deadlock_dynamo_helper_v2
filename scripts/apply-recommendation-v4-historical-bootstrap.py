@@ -8,6 +8,25 @@ def replace_once(content: str, old: str, new: str, label: str) -> str:
     return content.replace(old, new, 1)
 
 
+def replace_in_section(
+    content: str,
+    start_marker: str,
+    end_marker: str,
+    old: str,
+    new: str,
+    label: str,
+) -> str:
+    start = content.find(start_marker)
+    end = content.find(end_marker, start)
+    if start < 0 or end < 0:
+        raise RuntimeError(f"Could not find {label} section")
+    section = content[start:end]
+    count = section.count(old)
+    if count != 1:
+        raise RuntimeError(f"Expected exactly one {label} occurrence, found {count}")
+    return content[:start] + section.replace(old, new, 1) + content[end:]
+
+
 module_path = Path("apps/api/src/deadlock-live/deadlock-live.module.ts")
 module = module_path.read_text()
 module = replace_once(
@@ -32,16 +51,20 @@ module = replace_once(
     "    RecommendationDecisionDatasetV4Controller,\n",
     "historical bootstrap controller registration",
 )
-module = replace_once(
+module = replace_in_section(
     module,
+    "  providers: [",
+    "  exports: [",
     "    RecommendationDecisionDatasetV4Service,\n    RecommendationBehavioralV4TrainingService,\n",
     "    RecommendationDecisionDatasetV4Service,\n"
     "    RecommendationDecisionDatasetV4HistoricalBootstrapService,\n"
     "    RecommendationBehavioralV4TrainingService,\n",
     "historical bootstrap provider registration",
 )
-module = replace_once(
+module = replace_in_section(
     module,
+    "  exports: [",
+    "]\n})",
     "    RecommendationDecisionDatasetV4Service,\n    RecommendationBehavioralV4TrainingService,\n",
     "    RecommendationDecisionDatasetV4Service,\n"
     "    RecommendationDecisionDatasetV4HistoricalBootstrapService,\n"
