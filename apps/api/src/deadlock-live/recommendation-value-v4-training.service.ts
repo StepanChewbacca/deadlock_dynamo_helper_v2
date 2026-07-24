@@ -725,7 +725,7 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
         duplicateEligibleDecisionCount += 1;
       }
       eligibleDecisionIds.add(row.decisionId);
-      const outcome = row.outcomeLabel.playerWon;
+      const outcome = Boolean(row.outcomeLabel.playerWon);
       const existingOutcome = outcomesByMatch.get(row.matchId);
       if (existingOutcome !== undefined && existingOutcome !== outcome) {
         conflictingEligibleMatchOutcomeCount += 1;

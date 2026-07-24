@@ -74,9 +74,11 @@ import { RecentMatchRosterRepairService } from './recent-match-roster-repair.ser
 import { RecentMatchesWindowController } from './recent-matches-window.controller';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
 import { RecommendationBehavioralV4TrainingController } from './recommendation-behavioral-v4-training.controller';
+import { RecommendationValueV4TrainingController } from './recommendation-value-v4-training.controller';
 import { RecommendationDecisionDatasetV4Controller } from './recommendation-decision-dataset-v4.controller';
 import { RecommendationDecisionTelemetryController } from './recommendation-decision-telemetry.controller';
 import { RecommendationBehavioralV4TrainingService } from './recommendation-behavioral-v4-training.service';
+import { RecommendationValueV4TrainingService } from './recommendation-value-v4-training.service';
 import { RecommendationDecisionDatasetV4Service } from './recommendation-decision-dataset-v4.service';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 import { RecommendationOutcomeLinkerService } from './recommendation-outcome-linker.service';
@@ -127,6 +129,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3FinalTestController,
     HeroBuildContextualV3LiveController,
     RecommendationBehavioralV4TrainingController,
+    RecommendationValueV4TrainingController,
     RecommendationDecisionDatasetV4Controller,
     RecommendationDecisionTelemetryController,
     SkillBuildAnalysisController,
@@ -162,6 +165,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecommendationDecisionTelemetryService,
     RecommendationDecisionDatasetV4Service,
     RecommendationBehavioralV4TrainingService,
+    RecommendationValueV4TrainingService,
     RecommendationOutcomeLinkerService,
     {
       provide: HeroBuildOfflineEvaluationService,
@@ -229,6 +233,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecommendationDecisionTelemetryService,
     RecommendationDecisionDatasetV4Service,
     RecommendationBehavioralV4TrainingService,
+    RecommendationValueV4TrainingService,
     HeroBuildRecommendationService,
     HeroBuildRecommendationPresentationService,
     SituationalRecommendationDiagnosticsService,
