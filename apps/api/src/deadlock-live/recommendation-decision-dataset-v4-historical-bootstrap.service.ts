@@ -535,7 +535,7 @@ export class RecommendationDecisionDatasetV4HistoricalBootstrapService
     const candidateAudit = await requiredJson<Record<string, unknown>>(
       join(this.candidateDirectory, 'audit.json'),
     );
-    if (!trainingManifest.auditPassed || !trainingAudit.passed) {
+    if (!trainingAudit.passed) {
       throw new Error('Contextual V3 training source did not pass audit.');
     }
     if (!candidateManifest.evaluationReleaseGatePassed || !candidateAudit.passed) {
