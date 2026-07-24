@@ -366,7 +366,7 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
       }
       if (passSummary.conflictingEligibleMatchOutcomeCount > 0) {
         throw new Error(
-          'The outcome-eligible source subset contains conflicting outcomes within a match.',
+          'The outcome-eligible source subset contains conflicting outcomes for one player within a match.',
         );
       }
       const split = selectRecommendationValueV4ChronologicalSplit(
@@ -709,7 +709,7 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
 
   private async collectSplitDescriptors(): Promise<SourcePassSummary> {
     const matches = new Map<string, RecommendationValueV4MatchDescriptor>();
-    const outcomesByMatch = new Map<string, boolean>();
+    const outcomesByMatchPlayer = new Map<string, boolean>();
     const eligibleDecisionIds = new Set<string>();
     let sourceRows = 0;
     let eligibleRows = 0;
@@ -726,11 +726,12 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
       }
       eligibleDecisionIds.add(row.decisionId);
       const outcome = Boolean(row.outcomeLabel.playerWon);
-      const existingOutcome = outcomesByMatch.get(row.matchId);
+      const matchPlayerKey = `${row.matchId}\u0000${row.steamId}`;
+      const existingOutcome = outcomesByMatchPlayer.get(matchPlayerKey);
       if (existingOutcome !== undefined && existingOutcome !== outcome) {
         conflictingEligibleMatchOutcomeCount += 1;
       } else {
-        outcomesByMatch.set(row.matchId, outcome);
+        outcomesByMatchPlayer.set(matchPlayerKey, outcome);
       }
       const existing = matches.get(row.matchId);
       if (

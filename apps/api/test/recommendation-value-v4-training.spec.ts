@@ -179,7 +179,33 @@ describe('recommendation value v4 training', () => {
     });
   });
 
-  it('rejects conflicting outcomes within one eligible match', async () => {
+  it('allows opposite player outcomes within the same eligible match', async () => {
+    const rows = createSourceRows();
+    rows.push(
+      createRow({
+        decisionId: 'opponent-decision',
+        matchId: 'match-1',
+        steamId: 'steam-opponent',
+        occurredAt: '2026-01-01T00:04:00.000Z',
+        actionKey: 'BUY:3',
+        playerWon: false,
+      }),
+    );
+    await writeSourceArtifacts(rows, sourceDirectory, 11);
+    const service = new RecommendationValueV4TrainingService();
+    await service.onModuleInit();
+
+    await service.start({ trainFraction: 0.6 });
+    await service.waitForIdle();
+
+    expect(service.getStatus()).toMatchObject({
+      state: 'COMPLETE',
+      eligibleSourceRowCount: 11,
+      sourceMatchCount: 5,
+    });
+  });
+
+  it('rejects conflicting outcomes for one player within one eligible match', async () => {
     const rows = createSourceRows();
     rows[1] = {
       ...rows[1],
@@ -197,7 +223,7 @@ describe('recommendation value v4 training', () => {
 
     expect(service.getStatus()).toMatchObject({
       state: 'FAILED',
-      error: expect.stringContaining('conflicting outcomes within a match'),
+      error: expect.stringContaining('conflicting outcomes for one player within a match'),
     });
   });
 
@@ -380,6 +406,7 @@ function createRow(input: {
   occurredAt: string;
   actionKey: string;
   playerWon: boolean;
+  steamId?: string;
   inventoryStateKey?: string;
   previousActionKeys?: string[];
 }): RecommendationDecisionDatasetV4Row {
@@ -389,7 +416,7 @@ function createRow(input: {
     decisionId: input.decisionId,
     decisionOccurredAt: input.occurredAt,
     matchId: input.matchId,
-    steamId: `steam-${input.matchId}`,
+    steamId: input.steamId ?? `steam-${input.matchId}`,
     heroId: 72,
     teamId: 1,
     itemIds: input.inventoryStateKey === '1x1' ? [1] : [],
