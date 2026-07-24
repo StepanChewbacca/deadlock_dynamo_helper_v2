@@ -417,10 +417,16 @@ function createRow(input: {
   };
 }
 
-async function readNdjson(path: string): Promise<Record<string, any>[]> {
+async function readNdjson(
+  path: string,
+): Promise<Array<{ decisionId: string; matchId: string } & Record<string, unknown>>> {
   return (await readFile(path, 'utf8'))
     .trim()
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, any>);
+    .map(
+      (line) =>
+        JSON.parse(line) as { decisionId: string; matchId: string } &
+          Record<string, unknown>,
+    );
 }

@@ -647,6 +647,7 @@ export class RecommendationBehavioralV4TrainingService implements OnModuleInit {
       };
       const manifest = await buildManifest({
         sourceManifest,
+        sourceDirectory: this.sourceDirectory,
         sourceSha256,
         options,
         split,
@@ -1207,6 +1208,7 @@ function buildEvaluation(input: {
 
 async function buildManifest(input: {
   sourceManifest: RecommendationDecisionDatasetV4Manifest;
+  sourceDirectory: string;
   sourceSha256: string;
   options: RecommendationBehavioralV4TrainingOptions;
   split: RecommendationBehavioralV4ChronologicalSplit;
@@ -1227,7 +1229,7 @@ async function buildManifest(input: {
     generatedAt: input.generatedAt,
     source: {
       datasetVersion: input.sourceManifest.datasetVersion,
-      directory: DEFAULT_SOURCE_DIRECTORY,
+      directory: input.sourceDirectory,
       artifactSha256: input.sourceSha256,
       sourceRowCount: input.sourceManifest.artifact.rowCount,
       exactActionEligibleRowCount: input.eligibleRows,
@@ -1499,7 +1501,7 @@ function isSourceRow(
     typeof value.decisionId === 'string' &&
     typeof value.matchId === 'string' &&
     typeof value.decisionOccurredAt === 'string' &&
-    Number.isSafeInteger(value.heroId) &&
+    Number.isSafeInteger(Number(value.heroId)) &&
     Array.isArray(value.candidateActions) &&
     isRecord(value.observedLabel) &&
     isRecord(value.trainingEligibility)
@@ -1599,7 +1601,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isErrorWithCode(
   value: unknown,
 ): value is Error & { code: string } {
-  return value instanceof Error && 'code' in value;
+  return isRecord(value) && typeof value.code === 'string';
 }
 
 function toNumber(value: unknown): number {
