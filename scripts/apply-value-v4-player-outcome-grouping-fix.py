@@ -77,8 +77,8 @@ test = replace_once(
 )
 test = replace_once(
     test,
-    "       error: expect.stringContaining('conflicting outcomes within a match'),\n",
-    "       error: expect.stringContaining('conflicting outcomes for one player within a match'),\n",
+    "      error: expect.stringContaining('conflicting outcomes within a match'),\n",
+    "      error: expect.stringContaining('conflicting outcomes for one player within a match'),\n",
     "conflict assertion",
 )
 test = replace_once(
