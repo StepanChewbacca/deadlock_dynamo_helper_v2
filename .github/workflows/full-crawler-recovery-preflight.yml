@@ -22,7 +22,7 @@ jobs:
           echo "DEPLOY_COMMIT=$(git -C "$deploy" rev-parse HEAD)"
           echo "VOLUME=$volume"
           echo '--- disk ---'
-          df -h "$volume"
+          sudo df -h "$volume"
           echo '--- docker compose ---'
           sudo docker compose -f "$deploy/docker-compose.yml" ps
           echo '--- training processes ---'
@@ -40,10 +40,10 @@ jobs:
             recommendation-policy-v4-full-crawler-v2-20260724; do
             path="$volume/$name"
             echo "### $name"
-            if [ -d "$path" ]; then
+            if sudo test -d "$path"; then
               sudo du -sh "$path" || true
               sudo find "$path" -maxdepth 1 -type f -printf '%f %s bytes %TY-%Tm-%TdT%TH:%TM:%TS\n' | sort || true
-              if [ -f "$path/manifest.json" ]; then
+              if sudo test -f "$path/manifest.json"; then
                 echo 'manifest:'
                 sudo head -c 4000 "$path/manifest.json"
                 echo
