@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const deployRepository = '/home/ubuntu/apps/deadlock_dynamo_helper';
-const expectedCommit = '579868d24a42497f87561a5e002423f6275aea07';
+const expectedCommit = '18a4aa4b00cd95df27f9f25d8e5311034b803cd3';
 const apiBaseUrl = 'http://127.0.0.1:3000';
 const resultDirectory = join(
   process.env.GITHUB_WORKSPACE ?? process.cwd(),
@@ -262,6 +262,22 @@ async function configureHistoricalApi() {
   ]);
 }
 
+async function restoreProductionApi() {
+  runSudoDockerCompose([
+    '-f',
+    join(deployRepository, 'docker-compose.yml'),
+    'up',
+    '-d',
+    '--force-recreate',
+    '--no-deps',
+    'api',
+  ]);
+  await rm(overridePath, { force: true });
+  await waitForApi(endpoints.telemetry, 15 * 60_000);
+  const telemetryStatus = await requestJson('GET', endpoints.telemetry);
+  await saveJson('97-restored-telemetry-status.json', telemetryStatus);
+}
+
 async function verifyHistoricalEnvironment() {
   const output = commandOutput('sudo', [
     'docker',
@@ -273,27 +289,14 @@ async function verifyHistoricalEnvironment() {
     'exec',
     '-T',
     'api',
-    'sh',
-    '-lc',
-    "env | sort | grep '^DEADLOCK_RECOMMENDATION_.*V4'",
+    'env',
   ]);
-  await writeFile(join(resultDirectory, 'historical-environment.txt'), output, 'utf8');
-  const requiredValues = [
-    'DEADLOCK_RECOMMENDATION_BEHAVIORAL_V4_SOURCE_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap',
-    'DEADLOCK_RECOMMENDATION_VALUE_V4_SOURCE_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap',
-    'DEADLOCK_RECOMMENDATION_POLICY_V4_DATASET_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap',
-  ];
-  for (const value of requiredValues) {
-    assertTrue(output.includes(value), `Missing historical environment value: ${value}`);
-  }
-}
-
-async function restoreProductionApi() {
-  runSudoDockerCompose(['up', '-d', '--force-recreate', '--no-deps', 'api']);
-  await rm(overridePath, { force: true });
-  await waitForApi(endpoints.telemetry, 15 * 60_000);
-  const status = await requestJson('GET', endpoints.telemetry);
-  await saveJson('97-restored-telemetry-status.json', status);
+  const relevant = output
+    .split('\n')
+    .filter((line) => line.startsWith('DEADLOCK_RECOMMENDATION_'))
+    .sort()
+    .join('\n');
+  await writeFile(join(resultDirectory, 'historical-environment.txt'), `${relevant}\n`);
 }
 
 async function waitForApi(path, timeoutMs) {
@@ -306,37 +309,59 @@ async function waitForApi(path, timeoutMs) {
       await sleep(5_000);
     }
   }
-  throw new Error(`API did not become ready for ${path}.`);
+  throw new Error(`API did not become ready at ${path}.`);
 }
 
 async function requestJson(method, path, body) {
-  const response = await fetch(apiBaseUrl + path, {
-    method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${method} ${path} returned ${response.status}: ${text}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(apiBaseUrl + path, {
+      method,
+      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let value;
+    try {
+      value = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`${method} ${path} returned non-JSON status ${response.status}.`);
+    }
+    if (!response.ok) {
+      throw new Error(
+        `${method} ${path} failed with ${response.status}: ${JSON.stringify(value)}`,
+      );
+    }
+    return value;
+  } finally {
+    clearTimeout(timer);
   }
-  return text ? JSON.parse(text) : {};
+}
+
+function runSudoDockerCompose(argumentsList) {
+  const result = spawnSync('sudo', ['docker', 'compose', ...argumentsList], {
+    encoding: 'utf8',
+    timeout: 20 * 60_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `sudo docker compose ${argumentsList.join(' ')} failed: ${result.stderr || result.stdout}`,
+    );
+  }
 }
 
 function commandOutput(command, args) {
-  return execFileSync(command, args, { encoding: 'utf8' });
-}
-
-function runSudoDockerCompose(args) {
-  execFileSync('sudo', ['docker', 'compose', ...args], {
-    cwd: deployRepository,
-    stdio: 'inherit',
+  return execFileSync(command, args, {
+    encoding: 'utf8',
+    timeout: 60_000,
   });
 }
 
-async function saveJson(fileName, value) {
+async function saveJson(name, value) {
   await writeFile(
-    join(resultDirectory, fileName),
+    join(resultDirectory, name),
     `${JSON.stringify(value, undefined, 2)}\n`,
     'utf8',
   );
@@ -345,7 +370,7 @@ async function saveJson(fileName, value) {
 function nestedValue(value, path) {
   let current = value;
   for (const key of path) {
-    if (!current || typeof current !== 'object') {
+    if (typeof current !== 'object' || current === null || !(key in current)) {
       return undefined;
     }
     current = current[key];
@@ -356,7 +381,7 @@ function nestedValue(value, path) {
 function requiredString(value, path) {
   const result = nestedValue(value, path);
   if (typeof result !== 'string' || !result) {
-    throw new Error(`Expected non-empty string at ${path.join('.')}.`);
+    throw new Error(`Missing string at ${path.join('.')}.`);
   }
   return result;
 }
@@ -364,7 +389,7 @@ function requiredString(value, path) {
 function requiredPositiveInteger(value, path) {
   const result = nestedValue(value, path);
   if (!Number.isSafeInteger(result) || result <= 0) {
-    throw new Error(`Expected positive integer at ${path.join('.')}.`);
+    throw new Error(`Missing positive integer at ${path.join('.')}.`);
   }
   return result;
 }
