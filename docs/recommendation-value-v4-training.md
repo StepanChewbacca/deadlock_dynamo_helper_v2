@@ -22,7 +22,7 @@ The trainer requires a completed V4 `dataset.ndjson`, `manifest.json`, and `audi
 
 Only rows where both `trainingEligibility.exactAction` and `trainingEligibility.outcome` are true are used. The exact observed action becomes a prospective action feature and `playerWon` is the target.
 
-`playerWon` is a player-perspective label. Outcome consistency is therefore validated per `(matchId, steamId)`, while train and validation splitting remains strictly match-level. Different players from opposing teams in one match are expected to have opposite labels and are not a conflict.
+`playerWon` is a player-and-team-perspective label. Outcome consistency is therefore validated per `(matchId, steamId, teamId)`, while train and validation splitting remains strictly match-level. Historical sources can reuse a player identifier across opposing team perspectives, so opposite labels on different teams are not a conflict. Conflicting labels for the same player and team within one match remain invalid.
 
 ## Interpretation
 
