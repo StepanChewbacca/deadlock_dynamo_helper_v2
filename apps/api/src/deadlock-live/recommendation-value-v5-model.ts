@@ -58,11 +58,51 @@ export interface RecommendationValueV5Metrics {
   matchCount: number;
   decisionCount: number;
   totalWeight: number;
+  positiveWeight: number;
+  negativeWeight: number;
   logLoss: number;
   brierScore: number;
   accuracy: number;
   averagePrediction: number;
   observedWinRate: number;
+}
+
+export interface RecommendationValueV5MetricsAccumulator {
+  matchIds: Set<string>;
+  decisionCount: number;
+  totalWeight: number;
+  positiveWeight: number;
+  negativeWeight: number;
+  logLossSum: number;
+  brierScoreSum: number;
+  correctWeight: number;
+  predictionSum: number;
+  outcomeSum: number;
+}
+
+export function createRecommendationValueV5Model(): RecommendationValueV5Model {
+  return {
+    version: RECOMMENDATION_VALUE_V5_MODEL_VERSION,
+    global: { wins: 0, total: 0 },
+    state: new Map(),
+    action: new Map(),
+  };
+}
+
+export function updateRecommendationValueV5Model(
+  model: RecommendationValueV5Model,
+  row: RecommendationValueV5SourceRow,
+  matchWeight: number,
+): void {
+  validateSourceRow(row);
+  validateWeight(row.decisionId, matchWeight);
+  incrementCount(model.global, row.playerWon, matchWeight);
+  for (const key of uniqueKeys(row.stateKeys)) {
+    incrementTable(model.state, key, row.playerWon, matchWeight);
+  }
+  for (const key of uniqueKeys(row.actionKeys)) {
+    incrementTable(model.action, key, row.playerWon, matchWeight);
+  }
 }
 
 export function buildRecommendationValueV5MatchBalancedRows(
@@ -101,21 +141,10 @@ export function trainRecommendationValueV5Model(
   if (rows.length === 0) {
     throw new Error('Value V5 training requires at least one weighted row.');
   }
-  const model: RecommendationValueV5Model = {
-    version: RECOMMENDATION_VALUE_V5_MODEL_VERSION,
-    global: { wins: 0, total: 0 },
-    state: new Map(),
-    action: new Map(),
-  };
+  const model = createRecommendationValueV5Model();
   for (const row of rows) {
     validateWeightedRow(row);
-    incrementCount(model.global, row.playerWon, row.matchWeight);
-    for (const key of uniqueKeys(row.stateKeys)) {
-      incrementTable(model.state, key, row.playerWon, row.matchWeight);
-    }
-    for (const key of uniqueKeys(row.actionKeys)) {
-      incrementTable(model.action, key, row.playerWon, row.matchWeight);
-    }
+    updateRecommendationValueV5Model(model, row, row.matchWeight);
   }
   return model;
 }
@@ -179,6 +208,68 @@ export function predictRecommendationValueV5(
   };
 }
 
+export function createRecommendationValueV5MetricsAccumulator(): RecommendationValueV5MetricsAccumulator {
+  return {
+    matchIds: new Set(),
+    decisionCount: 0,
+    totalWeight: 0,
+    positiveWeight: 0,
+    negativeWeight: 0,
+    logLossSum: 0,
+    brierScoreSum: 0,
+    correctWeight: 0,
+    predictionSum: 0,
+    outcomeSum: 0,
+  };
+}
+
+export function observeRecommendationValueV5Prediction(
+  accumulator: RecommendationValueV5MetricsAccumulator,
+  row: RecommendationValueV5SourceRow,
+  prediction: number,
+  matchWeight: number,
+): void {
+  validateSourceRow(row);
+  validateWeight(row.decisionId, matchWeight);
+  if (!Number.isFinite(prediction) || prediction <= 0 || prediction >= 1) {
+    throw new Error(`Value V5 decision ${row.decisionId} has invalid prediction.`);
+  }
+  const outcome = row.playerWon ? 1 : 0;
+  accumulator.matchIds.add(row.matchId);
+  accumulator.decisionCount += 1;
+  accumulator.totalWeight += matchWeight;
+  accumulator.positiveWeight += row.playerWon ? matchWeight : 0;
+  accumulator.negativeWeight += row.playerWon ? 0 : matchWeight;
+  accumulator.logLossSum +=
+    matchWeight *
+    -(outcome * Math.log(prediction) + (1 - outcome) * Math.log(1 - prediction));
+  accumulator.brierScoreSum += matchWeight * (prediction - outcome) ** 2;
+  accumulator.correctWeight +=
+    matchWeight * (Number(prediction >= 0.5) === outcome ? 1 : 0);
+  accumulator.predictionSum += matchWeight * prediction;
+  accumulator.outcomeSum += matchWeight * outcome;
+}
+
+export function finalizeRecommendationValueV5Metrics(
+  accumulator: RecommendationValueV5MetricsAccumulator,
+): RecommendationValueV5Metrics {
+  if (accumulator.totalWeight <= 0) {
+    throw new Error('Value V5 evaluation has no positive observation weight.');
+  }
+  return {
+    matchCount: accumulator.matchIds.size,
+    decisionCount: accumulator.decisionCount,
+    totalWeight: accumulator.totalWeight,
+    positiveWeight: accumulator.positiveWeight,
+    negativeWeight: accumulator.negativeWeight,
+    logLoss: accumulator.logLossSum / accumulator.totalWeight,
+    brierScore: accumulator.brierScoreSum / accumulator.totalWeight,
+    accuracy: accumulator.correctWeight / accumulator.totalWeight,
+    averagePrediction: accumulator.predictionSum / accumulator.totalWeight,
+    observedWinRate: accumulator.outcomeSum / accumulator.totalWeight,
+  };
+}
+
 export function tuneRecommendationValueV5ActionResidualScale(
   model: RecommendationValueV5Model,
   tuningRows: readonly RecommendationValueV5WeightedRow[],
@@ -188,13 +279,7 @@ export function tuneRecommendationValueV5ActionResidualScale(
   if (tuningRows.length === 0) {
     throw new Error('Value V5 tuning requires at least one row.');
   }
-  const scales = [...new Set(candidateScales)].sort((left, right) => left - right);
-  if (
-    scales.length === 0 ||
-    scales.some((scale) => !Number.isFinite(scale) || scale < 0)
-  ) {
-    throw new Error('Value V5 action residual scales must be finite non-negative numbers.');
-  }
+  const scales = normalizeScales(candidateScales);
   const candidates = scales.map((actionResidualScale) => ({
     actionResidualScale,
     tuningLogLoss: evaluateRecommendationValueV5(
@@ -204,16 +289,44 @@ export function tuneRecommendationValueV5ActionResidualScale(
       actionResidualScale,
     ).logLoss,
   }));
-  candidates.sort(
+  return selectRecommendationValueV5ActionResidualScale(candidates);
+}
+
+export function selectRecommendationValueV5ActionResidualScale(
+  candidates: readonly {
+    actionResidualScale: number;
+    tuningLogLoss: number;
+  }[],
+): RecommendationValueV5ScaleSelection {
+  if (candidates.length === 0) {
+    throw new Error('Value V5 tuning requires at least one scale candidate.');
+  }
+  const sorted = candidates.map((candidate) => {
+    if (
+      !Number.isFinite(candidate.actionResidualScale) ||
+      candidate.actionResidualScale < 0 ||
+      !Number.isFinite(candidate.tuningLogLoss)
+    ) {
+      throw new Error('Value V5 tuning candidate contains invalid metrics.');
+    }
+    return { ...candidate };
+  });
+  sorted.sort(
     (left, right) =>
       left.tuningLogLoss - right.tuningLogLoss ||
       left.actionResidualScale - right.actionResidualScale,
   );
   return {
-    actionResidualScale: candidates[0].actionResidualScale,
-    tuningLogLoss: candidates[0].tuningLogLoss,
-    candidates,
+    actionResidualScale: sorted[0].actionResidualScale,
+    tuningLogLoss: sorted[0].tuningLogLoss,
+    candidates: sorted,
   };
+}
+
+export function normalizeRecommendationValueV5Scales(
+  candidateScales: readonly number[],
+): number[] {
+  return normalizeScales(candidateScales);
 }
 
 export function evaluateRecommendationValueV5(
@@ -225,45 +338,33 @@ export function evaluateRecommendationValueV5(
   if (rows.length === 0) {
     throw new Error('Value V5 evaluation requires at least one row.');
   }
-  const matches = new Set<string>();
-  let totalWeight = 0;
-  let logLoss = 0;
-  let brierScore = 0;
-  let correctWeight = 0;
-  let predictionSum = 0;
-  let outcomeSum = 0;
+  const accumulator = createRecommendationValueV5MetricsAccumulator();
   for (const row of rows) {
     validateWeightedRow(row);
-    matches.add(row.matchId);
     const prediction = predictRecommendationValueV5(
       model,
       row,
       options,
       actionResidualScale,
     ).actionProbability;
-    const outcome = row.playerWon ? 1 : 0;
-    totalWeight += row.matchWeight;
-    logLoss +=
-      row.matchWeight *
-      -(outcome * Math.log(prediction) + (1 - outcome) * Math.log(1 - prediction));
-    brierScore += row.matchWeight * (prediction - outcome) ** 2;
-    correctWeight +=
-      row.matchWeight * (Number(prediction >= 0.5) === outcome ? 1 : 0);
-    predictionSum += row.matchWeight * prediction;
-    outcomeSum += row.matchWeight * outcome;
+    observeRecommendationValueV5Prediction(
+      accumulator,
+      row,
+      prediction,
+      row.matchWeight,
+    );
   }
-  if (totalWeight <= 0) {
-    throw new Error('Value V5 evaluation has no positive observation weight.');
-  }
+  return finalizeRecommendationValueV5Metrics(accumulator);
+}
+
+export function serializeRecommendationValueV5Model(
+  model: RecommendationValueV5Model,
+): Record<string, unknown> {
   return {
-    matchCount: matches.size,
-    decisionCount: rows.length,
-    totalWeight,
-    logLoss: logLoss / totalWeight,
-    brierScore: brierScore / totalWeight,
-    accuracy: correctWeight / totalWeight,
-    averagePrediction: predictionSum / totalWeight,
-    observedWinRate: outcomeSum / totalWeight,
+    version: model.version,
+    global: { ...model.global },
+    state: serializeTable(model.state),
+    action: serializeTable(model.action),
   };
 }
 
@@ -275,6 +376,17 @@ export function sumRecommendationValueV5WeightsByMatch(
     result.set(row.matchId, (result.get(row.matchId) ?? 0) + row.matchWeight);
   }
   return result;
+}
+
+function normalizeScales(candidateScales: readonly number[]): number[] {
+  const scales = [...new Set(candidateScales)].sort((left, right) => left - right);
+  if (
+    scales.length === 0 ||
+    scales.some((scale) => !Number.isFinite(scale) || scale < 0)
+  ) {
+    throw new Error('Value V5 action residual scales must be finite non-negative numbers.');
+  }
+  return scales;
 }
 
 function supportedDeltas(
@@ -340,6 +452,16 @@ function incrementCount(
   count.wins += won ? weight : 0;
 }
 
+function serializeTable(
+  table: ReadonlyMap<string, RecommendationValueV5WeightedBinaryCount>,
+): Record<string, RecommendationValueV5WeightedBinaryCount> {
+  return Object.fromEntries(
+    [...table.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, count]) => [key, { ...count }]),
+  );
+}
+
 function uniqueKeys(keys: readonly string[]): string[] {
   return [...new Set(keys.map((key) => key.trim()).filter(Boolean))].sort();
 }
@@ -361,8 +483,12 @@ function validateSourceRow(row: RecommendationValueV5SourceRow): void {
 
 function validateWeightedRow(row: RecommendationValueV5WeightedRow): void {
   validateSourceRow(row);
-  if (!Number.isFinite(row.matchWeight) || row.matchWeight <= 0) {
-    throw new Error(`Value V5 decision ${row.decisionId} has invalid match weight.`);
+  validateWeight(row.decisionId, row.matchWeight);
+}
+
+function validateWeight(decisionId: string, weight: number): void {
+  if (!Number.isFinite(weight) || weight <= 0) {
+    throw new Error(`Value V5 decision ${decisionId} has invalid match weight.`);
   }
 }
 
@@ -383,7 +509,12 @@ function probabilityLogit(probability: number): number {
 }
 
 function probabilityFromLogit(logit: number): number {
-  return clampProbability(1 / (1 + Math.exp(-logit)));
+  if (logit >= 0) {
+    const exponent = Math.exp(-logit);
+    return clampProbability(1 / (1 + exponent));
+  }
+  const exponent = Math.exp(logit);
+  return clampProbability(exponent / (1 + exponent));
 }
 
 function clampProbability(value: number): number {
