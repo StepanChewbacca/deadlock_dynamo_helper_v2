@@ -789,20 +789,23 @@ export class RecommendationPolicyV4EvaluationService implements OnModuleInit {
         },
         warnings: evaluation.warnings,
       };
-      await atomicJson(this.paths.evaluation, evaluation);
+      await Promise.all([
+        atomicJson(this.paths.evaluation, evaluation),
+        atomicJson(this.paths.audit, audit),
+      ]);
       const manifest = await buildManifest({
         generatedAt,
         options,
         paths: this.paths,
         sources,
+        datasetDirectory: this.datasetDirectory,
+        behavioralDirectory: this.behavioralDirectory,
+        valueDirectory: this.valueDirectory,
         coverage,
         auditPassed: audit.passed,
         releaseGate,
       });
-      await Promise.all([
-        atomicJson(this.paths.audit, audit),
-        atomicJson(this.paths.manifest, manifest),
-      ]);
+      await atomicJson(this.paths.manifest, manifest);
       this.evaluation = evaluation;
       this.audit = audit;
       this.manifest = manifest;
@@ -1328,7 +1331,7 @@ function buildReleaseGate(input: {
   behavioralReleaseGatePassed: boolean;
   valueReleaseGatePassed: boolean;
 }): Record<string, unknown> {
-  const reasons: string[] = [];
+  const blockers: string[] = [];
   const candidateCoverageRate = input.coverage.candidateCoverageRate ?? 0;
   const behaviorSupportRate = input.coverage.behaviorSupportRate ?? 0;
   const clippedWeightRate = toNumber(input.diagnostics.clippedWeightRate);
@@ -1337,40 +1340,37 @@ function buildReleaseGate(input: {
   );
   const drDeltaInterval = input.bootstrap.intervals.doublyRobustDelta;
   if (input.estimators.decisionCount < 200) {
-    reasons.push('Evaluation contains fewer than 200 supported decisions.');
+    blockers.push('Evaluation contains fewer than 200 supported decisions.');
   }
   if (input.estimators.matchCount < 30) {
-    reasons.push('Evaluation contains fewer than 30 held-out matches.');
+    blockers.push('Evaluation contains fewer than 30 held-out matches.');
   }
   if (candidateCoverageRate < 0.95) {
-    reasons.push('Recorded candidate coverage is below 95%.');
+    blockers.push('Recorded candidate coverage is below 95%.');
   }
   if (behaviorSupportRate < 0.9) {
-    reasons.push('Estimated behavior-policy support is below 90%.');
+    blockers.push('Estimated behavior-policy support is below 90%.');
   }
   if (input.estimators.effectiveSampleSizeRatio < 0.2) {
-    reasons.push('Importance-weight effective sample-size ratio is below 20%.');
+    blockers.push('Importance-weight effective sample-size ratio is below 20%.');
   }
   if (clippedWeightRate > 0.1) {
-    reasons.push('More than 10% of supported decisions require weight clipping.');
+    blockers.push('More than 10% of supported decisions require weight clipping.');
   }
   if (ipsSnipsAbsoluteDifference > 0.05) {
-    reasons.push('IPS and SNIPS estimates differ by more than 0.05.');
+    blockers.push('IPS and SNIPS estimates differ by more than 0.05.');
   }
   if (!drDeltaInterval || drDeltaInterval.lower < 0) {
-    reasons.push(
+    blockers.push(
       'The match-bootstrap 95% lower bound for doubly robust delta is negative.',
     );
   }
   if (!input.behavioralReleaseGatePassed) {
-    reasons.push('Behavioral V4 training release gate did not pass.');
+    blockers.push('Behavioral V4 training release gate did not pass.');
   }
   if (!input.valueReleaseGatePassed) {
-    reasons.push('Value V4 training release gate did not pass.');
+    blockers.push('Value V4 training release gate did not pass.');
   }
-  reasons.push(
-    'Passing this diagnostic gate still does not authorize production rollout because historical propensities are estimated rather than logged.',
-  );
   return {
     name: 'SHADOW_READINESS_DIAGNOSTIC',
     productionRolloutAuthorized: false,
@@ -1384,8 +1384,11 @@ function buildReleaseGate(input: {
     minimumDoublyRobustDeltaLower95: 0,
     behavioralReleaseGatePassed: input.behavioralReleaseGatePassed,
     valueReleaseGatePassed: input.valueReleaseGatePassed,
-    passed: reasons.length === 1,
-    reasons,
+    passed: blockers.length === 0,
+    blockers,
+    warnings: [
+      'Passing this diagnostic gate does not authorize production rollout because historical propensities are estimated rather than logged.',
+    ],
   };
 }
 
@@ -1394,6 +1397,9 @@ async function buildManifest(input: {
   options: RecommendationPolicyV4EvaluationOptions;
   paths: EvaluationArtifacts;
   sources: SourceBundle;
+  datasetDirectory: string;
+  behavioralDirectory: string;
+  valueDirectory: string;
   coverage: Record<string, number>;
   auditPassed: boolean;
   releaseGate: Record<string, unknown>;
@@ -1417,17 +1423,17 @@ async function buildManifest(input: {
     evaluationKind: 'DIAGNOSTIC_OFFLINE_POLICY_EVALUATION',
     source: {
       dataset: {
-        directory: DEFAULT_DATASET_DIRECTORY,
+        directory: input.datasetDirectory,
         sha256: input.sources.hashes.dataset,
       },
       behavioral: {
-        directory: DEFAULT_BEHAVIORAL_DIRECTORY,
+        directory: input.behavioralDirectory,
         validationSha256: input.sources.hashes.behavioralValidation,
         modelSha256: input.sources.hashes.behavioralModel,
         modelVersion: RECOMMENDATION_BEHAVIORAL_V4_MODEL_VERSION,
       },
       value: {
-        directory: DEFAULT_VALUE_DIRECTORY,
+        directory: input.valueDirectory,
         validationSha256: input.sources.hashes.valueValidation,
         modelSha256: input.sources.hashes.valueModel,
         modelVersion: RECOMMENDATION_VALUE_V4_MODEL_VERSION,
@@ -1478,7 +1484,7 @@ function parseBehavioralPreparedRow(
     typeof value.decisionId !== 'string' ||
     typeof value.matchId !== 'string' ||
     typeof value.decisionOccurredAt !== 'string' ||
-    !Number.isSafeInteger(features.heroId) ||
+    !Number.isSafeInteger(Number(features.heroId)) ||
     typeof features.inventoryStateKey !== 'string' ||
     typeof features.previousActionTailKey !== 'string' ||
     !Array.isArray(features.alliedHeroIds) ||
@@ -1504,7 +1510,7 @@ function parseValuePreparedRow(
     typeof value.decisionId !== 'string' ||
     typeof value.matchId !== 'string' ||
     typeof value.decisionOccurredAt !== 'string' ||
-    !Number.isSafeInteger(features.heroId) ||
+    !Number.isSafeInteger(Number(features.heroId)) ||
     typeof features.inventoryStateKey !== 'string' ||
     typeof features.previousActionTailKey !== 'string' ||
     typeof features.actionKey !== 'string' ||
@@ -1872,7 +1878,10 @@ function arraysEqual<T>(left: readonly T[], right: readonly T[]): boolean {
 }
 
 function readReleaseGatePassed(manifest: Record<string, unknown>): boolean {
-  return Boolean(asRecord(manifest.releaseGate).passed);
+  const direct = asRecord(manifest.releaseGate);
+  const evaluationSummary = asRecord(manifest.evaluationSummary);
+  const summarized = asRecord(evaluationSummary.releaseGate);
+  return Boolean(direct.passed ?? summarized.passed);
 }
 
 function readNestedString(
@@ -2151,11 +2160,19 @@ function isPositiveNumber(value: unknown): value is number {
 }
 
 function isPositiveInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) > 0;
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value > 0
+  );
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 0;
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+  );
 }
 
 function toNumber(value: unknown): number {
