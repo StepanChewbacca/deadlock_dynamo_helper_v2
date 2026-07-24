@@ -26,7 +26,9 @@ const DATABASE_RETRY_DELAY_MS_ENV =
 
 export interface HeroBuildOfflineLoadedDescriptors {
   descriptors: HeroBuildOfflineEvaluationMatchDescriptor[];
+  totalAvailableMatchCount: number;
   sourceLastRefreshedAt?: Date;
+  sourceSnapshotCrawledAt?: Date;
 }
 
 export interface HeroBuildOfflineLoadedHeroSample {
@@ -79,15 +81,18 @@ export class HeroBuildOfflineEvaluationDataLoaderService {
   ) {}
 
   async loadMatchDescriptors(
-    maxMatches: number,
+    maxMatches?: number,
   ): Promise<HeroBuildOfflineLoadedDescriptors> {
-    const matches = await this.withDatabaseRetry(
-      'loading match descriptors',
+    const [matches, totalAvailableMatchCount] = await this.withDatabaseRetry(
+      'loading immutable match descriptor snapshot',
       () =>
-        this.matchRepository.find({
-          order: { startTime: 'DESC', matchId: 'DESC' },
-          take: maxMatches,
-        }),
+        Promise.all([
+          this.matchRepository.find({
+            order: { startTime: 'DESC', matchId: 'DESC' },
+            ...(maxMatches === undefined ? {} : { take: maxMatches }),
+          }),
+          this.matchRepository.count(),
+        ]),
     );
     const descriptors = matches
       .map((match) => ({
@@ -104,12 +109,15 @@ export class HeroBuildOfflineEvaluationDataLoaderService {
       .map((match) => match.crawledAt?.getTime())
       .filter((value): value is number => Number.isFinite(value));
 
+    const sourceSnapshotCrawledAt =
+      refreshedTimes.length > 0
+        ? new Date(Math.max(...refreshedTimes))
+        : undefined;
     return {
       descriptors,
-      sourceLastRefreshedAt:
-        refreshedTimes.length > 0
-          ? new Date(Math.max(...refreshedTimes))
-          : undefined,
+      totalAvailableMatchCount,
+      sourceLastRefreshedAt: sourceSnapshotCrawledAt,
+      sourceSnapshotCrawledAt,
     };
   }
 

@@ -11,7 +11,6 @@ import {
 import { HeroBuildDecisionDatasetV3CoordinatorService } from './hero-build-decision-dataset-v3-coordinator.service';
 import {
   HERO_BUILD_DECISION_DATASET_V3_DEFAULT_BATCH_SIZE,
-  HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,
   HERO_BUILD_DECISION_DATASET_V3_MAX_BATCH_SIZE,
   HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES,
   HERO_BUILD_DECISION_DATASET_V3_MIN_BATCH_SIZE,
@@ -85,10 +84,9 @@ function parseRequest(
   dto: StartHeroBuildDecisionDatasetV3Dto,
 ): HeroBuildDecisionDatasetV3StartRequest {
   return {
-    maxMatches: parseInteger(
+    maxMatches: parseOptionalInteger(
       dto.maxMatches,
       'maxMatches',
-      HERO_BUILD_DECISION_DATASET_V3_DEFAULT_MAX_MATCHES,
       1,
       HERO_BUILD_DECISION_DATASET_V3_MAX_MATCHES,
     ),
@@ -105,6 +103,28 @@ function parseRequest(
       false,
     ),
   };
+}
+
+function parseOptionalInteger(
+  value: unknown,
+  fieldName: string,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new BadRequestException(
+      `${fieldName} must be a safe integer from ${minimum} to ${maximum}.`,
+    );
+  }
+  return value;
 }
 
 function parseInteger(
