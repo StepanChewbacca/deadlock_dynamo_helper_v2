@@ -3,7 +3,9 @@ from pathlib import Path
 
 def replace_once(content: str, old: str, new: str, label: str) -> str:
     if content.count(old) != 1:
-        raise RuntimeError(f"Expected exactly one {label} occurrence, found {content.count(old)}")
+        raise RuntimeError(
+            f"Expected exactly one {label} occurrence, found {content.count(old)}"
+        )
     return content.replace(old, new, 1)
 
 
@@ -29,8 +31,8 @@ module = replace_once(
 )
 module = replace_once(
     module,
-    "    RecommendationDecisionTelemetryService,\n    RecommendationDecisionDatasetV4Service,",
-    "    RecommendationDecisionTelemetryService,\n    RecommendationDecisionDatasetV4Service,\n    RecommendationBehavioralV4TrainingService,",
+    "    HeroBuildContextualV3LiveService,\n    RecommendationDecisionTelemetryService,\n    RecommendationDecisionDatasetV4Service,\n    RecommendationOutcomeLinkerService,",
+    "    HeroBuildContextualV3LiveService,\n    RecommendationDecisionTelemetryService,\n    RecommendationDecisionDatasetV4Service,\n    RecommendationBehavioralV4TrainingService,\n    RecommendationOutcomeLinkerService,",
     "provider registration",
 )
 module = replace_once(
