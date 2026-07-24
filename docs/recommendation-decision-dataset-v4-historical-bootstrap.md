@@ -29,6 +29,8 @@ The bootstrap requires:
 - equal validation and candidate row counts
 - lockstep decision IDs and target action keys
 
+Contextual V3 training integrity is read from `audit.json` through `passed`. The training manifest does not expose a separate `auditPassed` field. Candidate readiness additionally requires the candidate-evaluation manifest release gate.
+
 Only the held-out validation split is used. Contextual V3 training rows are excluded from bootstrap rows so candidate construction does not use the same row as both a model-training observation and a bootstrap evaluation observation.
 
 ## Output
