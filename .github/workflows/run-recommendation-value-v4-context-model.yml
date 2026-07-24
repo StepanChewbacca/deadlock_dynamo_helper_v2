@@ -1,0 +1,44 @@
+name: Run recommendation Value V4 context model
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/run-recommendation-value-v4-context-model.yml
+      - scripts/run-recommendation-value-v4-context-model.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-value-v4-context-model-20260724'
+    runs-on: self-hosted
+    timeout-minutes: 360
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Run Value V4 context training and policy evaluation
+        run: node scripts/run-recommendation-value-v4-context-model.mjs
+
+      - name: Restore production API configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          sudo docker compose up -d --force-recreate --no-deps api
+          rm -f /tmp/recommendation-value-v4-context.override.yml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-value-v4-context-${{ github.sha }}
+          path: recommendation-value-v4-context-result
+          if-no-files-found: warn
+          retention-days: 14
