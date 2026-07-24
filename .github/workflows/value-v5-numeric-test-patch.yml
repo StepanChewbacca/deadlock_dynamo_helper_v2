@@ -1,0 +1,51 @@
+name: Apply Value V5 numeric assertion patch
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/value-v5-numeric-test-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'agent/add-recommendation-value-v5-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Patch floating-point assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/test/recommendation-value-v5-training.spec.ts')
+          text = path.read_text()
+          old = """      test: {\n        matchCount: 2,\n        decisionCount: 6,\n        stateOnly: { totalWeight: 2 },\n        actionConditioned: { totalWeight: 2 },\n      },\n      interpretation: { causal: false },\n    });\n\n    const audit = JSON.parse(\n"""
+          new = """      test: {\n        matchCount: 2,\n        decisionCount: 6,\n        stateOnly: { totalWeight: expect.any(Number) },\n        actionConditioned: { totalWeight: expect.any(Number) },\n      },\n      interpretation: { causal: false },\n    });\n    const testEvaluation = evaluation.test as {\n      stateOnly: { totalWeight: number };\n      actionConditioned: { totalWeight: number };\n    };\n    expect(testEvaluation.stateOnly.totalWeight).toBeCloseTo(2);\n    expect(testEvaluation.actionConditioned.totalWeight).toBeCloseTo(2);\n\n    const audit = JSON.parse(\n"""
+          if old not in text:
+              raise SystemExit('Evaluation weight assertion block was not found')
+          text = text.replace(old, new, 1)
+
+          old = """      weighting: {\n        trainTotalWeight: 6,\n        tuningTotalWeight: 2,\n        testTotalWeight: 2,\n      },\n      leakage: {\n"""
+          new = """      weighting: {\n        trainTotalWeight: expect.any(Number),\n        tuningTotalWeight: expect.any(Number),\n        testTotalWeight: expect.any(Number),\n      },\n      leakage: {\n"""
+          if old not in text:
+              raise SystemExit('Audit weight assertion block was not found')
+          text = text.replace(old, new, 1)
+
+          old = """      },\n    });\n\n    const predictions = await readNdjson(\n"""
+          new = """      },\n    });\n    const auditWeighting = audit.weighting as {\n      trainTotalWeight: number;\n      tuningTotalWeight: number;\n      testTotalWeight: number;\n    };\n    expect(auditWeighting.trainTotalWeight).toBeCloseTo(6);\n    expect(auditWeighting.tuningTotalWeight).toBeCloseTo(2);\n    expect(auditWeighting.testTotalWeight).toBeCloseTo(2);\n\n    const predictions = await readNdjson(\n"""
+          if old not in text:
+              raise SystemExit('Audit assertion terminator was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/api/test/recommendation-value-v5-training.spec.ts
+          git commit -m 'test: compare value v5 weights with tolerance'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
