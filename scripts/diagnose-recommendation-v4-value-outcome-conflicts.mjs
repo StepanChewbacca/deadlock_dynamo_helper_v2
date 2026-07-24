@@ -1,16 +1,8 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const datasetPath =
-  '/home/ubuntu/apps/deadlock_dynamo_helper/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap/dataset.ndjson';
-const outputDirectory = join(
-  process.env.GITHUB_WORKSPACE ?? process.cwd(),
-  'recommendation-v4-value-outcome-conflict-result',
-);
-
-await mkdir(outputDirectory, { recursive: true });
+  '/app/apps/api/storage/recommendation-decision-dataset-v4-historical-bootstrap/dataset.ndjson';
 
 const outcomesByMatchSteamTeam = new Map();
 const outcomesByMatchSteam = new Map();
@@ -73,10 +65,6 @@ for await (const line of lines) {
       map.set(key, outcome);
     }
   }
-
-  if (rowCount % 10000 === 0) {
-    console.log(JSON.stringify({ rowCount, eligibleRowCount, conflictCountMatchSteamTeam }));
-  }
 }
 
 const result = {
@@ -95,5 +83,4 @@ const result = {
   conflictSamples,
 };
 
-await writeFile(join(outputDirectory, 'diagnostic.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
-console.log(JSON.stringify(result));
+process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
