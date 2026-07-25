@@ -49,10 +49,25 @@ jobs:
           yarn install --frozen-lockfile
 
       - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/api build 2>&1 | tee "$RUNNER_TEMP/value-v6-build.log"
 
       - name: Test Recommendation Value V6
-        run: yarn workspace @deadlock-live-probe/api test recommendation-value-v6-core.spec.ts recommendation-value-v6-training.spec.ts
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/api test recommendation-value-v6-core.spec.ts recommendation-value-v6-training.spec.ts 2>&1 | tee "$RUNNER_TEMP/value-v6-test.log"
+
+      - name: Upload Value V6 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-value-v6-diagnostics
+          path: ${{ runner.temp }}/value-v6-*.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Commit verified implementation
         shell: bash
