@@ -1,0 +1,39 @@
+name: Inspect Policy V5 context
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-policy-v5-context.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - name: Collect policy context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p policy-context
+          find apps/api/src apps/api/test -type f \( -iname '*policy*' -o -iname '*behavioral*' -o -iname '*value-v5*' \) -print | sort > policy-context/files.txt
+          while IFS= read -r file; do
+            safe=$(printf '%s' "$file" | tr '/' '_')
+            cp "$file" "policy-context/$safe"
+          done < policy-context/files.txt
+          grep -RIl "recommendation-policy\|Policy V4\|PolicyV4" apps/api/src apps/api/test | sort > policy-context/grep-files.txt || true
+          git rev-parse HEAD > policy-context/main-sha.txt
+      - name: Upload context
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-v5-context
+          path: policy-context
+          if-no-files-found: error
+          retention-days: 3
