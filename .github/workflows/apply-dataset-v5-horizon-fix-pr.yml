@@ -36,11 +36,23 @@ jobs:
 
       - name: Verify
         run: |
-          yarn install --frozen-lockfile --ignore-engines
-          yarn workspace @deadlock-live-probe/shared build
-          yarn workspace @deadlock-live-probe/build-domain build
-          yarn workspace @deadlock-live-probe/api build
-          yarn workspace @deadlock-live-probe/api test --runInBand recommendation-decision-dataset-v5.spec.ts match-timeline-collector.spec.ts
+          set -o pipefail
+          {
+            yarn install --frozen-lockfile --ignore-engines
+            yarn workspace @deadlock-live-probe/shared build
+            yarn workspace @deadlock-live-probe/build-domain build
+            yarn workspace @deadlock-live-probe/api build
+            yarn workspace @deadlock-live-probe/api test --runInBand recommendation-decision-dataset-v5.spec.ts match-timeline-collector.spec.ts
+          } 2>&1 | tee verify.log
+
+      - name: Upload verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dataset-v5-horizon-fix-verify
+          path: verify.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Commit correction
         run: |
