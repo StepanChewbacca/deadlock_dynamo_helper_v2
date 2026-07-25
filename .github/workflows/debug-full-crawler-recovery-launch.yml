@@ -1,0 +1,42 @@
+name: Debug full crawler recovery launch
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/debug-full-crawler-recovery-launch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-full-crawler-value-v5-20260725
+      - name: Debug launcher prerequisites
+        shell: bash
+        run: |
+          set +e
+          payload=scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+          decoded="$RUNNER_TEMP/recovery-debug.mjs"
+          echo "payload_exists=$(test -f "$payload"; echo $?)"
+          wc -c "$payload"
+          base64 --decode "$payload" | gzip --decompress > "$decoded"
+          echo "decode_rc=$?"
+          wc -c "$decoded"
+          node --check "$decoded"
+          echo "node_check_rc=$?"
+          sudo mkdir -p /home/ubuntu/deadlock-training-jobs /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          echo "mkdir_rc=$?"
+          sudo chown -R ubuntu:ubuntu /home/ubuntu/deadlock-training-jobs /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          echo "chown_rc=$?"
+          sudo install -o ubuntu -g ubuntu -m 0644 "$decoded" /home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
+          echo "install_rc=$?"
+          sha256sum "$decoded" | sudo tee /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/script.sha256 >/dev/null
+          echo "sha_rc=$?"
+          ls -l /home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/script.sha256
+          exit 0
