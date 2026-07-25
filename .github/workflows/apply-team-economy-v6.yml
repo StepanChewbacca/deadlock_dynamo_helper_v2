@@ -46,23 +46,25 @@ jobs:
               2,
           )
           '''
-          new = '''replace_once(
-              VALUE_SERVICE,
-              """    previousTail,
-              actionKey: observedActionKey,""",
-              """    previousTail,
-              teamEconomyBand,
-              actionKey: observedActionKey,""",
-          )
-
-          replace_once(
-              VALUE_SERVICE,
-              """      previousTail,
-              actionKey,""",
-              """      previousTail,
-              teamEconomyBand,
-              actionKey,""",
-          )
+          new = '''value_path = Path(VALUE_SERVICE)
+          value_lines = value_path.read_text(encoding="utf-8").splitlines()
+          inserted = 0
+          for index in range(len(value_lines) - 1, 0, -1):
+              if (
+                  value_lines[index - 1].strip() == "previousTail,"
+                  and value_lines[index].strip()
+                  in {"actionKey: observedActionKey,", "actionKey,"}
+              ):
+                  indent = value_lines[index][
+                      : len(value_lines[index]) - len(value_lines[index].lstrip())
+                  ]
+                  value_lines.insert(index, f"{indent}teamEconomyBand,")
+                  inserted += 1
+          if inserted != 2:
+              raise RuntimeError(
+                  f"{VALUE_SERVICE}: expected two buildActionKeys calls, found {inserted}"
+              )
+          value_path.write_text("\\n".join(value_lines) + "\\n", encoding="utf-8")
           '''
           if content.count(old) != 1:
               raise RuntimeError('Value V6 patch matcher normalization target is missing.')
