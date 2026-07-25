@@ -1,0 +1,43 @@
+name: Inspect recovery initializing stall
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-recovery-initializing-stall.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture initialization diagnostics
+        shell: bash
+        run: |
+          set +e
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          deploy=/home/ubuntu/apps/deadlock_dynamo_helper
+          mkdir -p init-diagnostics
+          sudo systemctl status --no-pager "$unit" > init-diagnostics/systemd-status.txt 2>&1
+          sudo systemctl show "$unit" -p MainPID -p ActiveEnterTimestamp -p ActiveState -p SubState -p Result -p NRestarts > init-diagnostics/systemd-show.txt 2>&1
+          main_pid=$(sudo systemctl show "$unit" -p MainPID --value)
+          ps -eo pid,ppid,lstart,stat,wchan:32,cmd --forest > init-diagnostics/processes.txt 2>&1
+          [ -n "$main_pid" ] && sudo cat "/proc/$main_pid/stack" > init-diagnostics/main-stack.txt 2>&1 || true
+          sudo journalctl -u "$unit" --since '2026-07-25 07:53:00 UTC' --no-pager > init-diagnostics/journal.txt 2>&1
+          sudo cat "$root/state.json" > init-diagnostics/state.json 2>&1
+          sudo tail -n 300 "$root/service.log" > init-diagnostics/service-tail.log 2>&1
+          sudo test -f /tmp/full-crawler-recovery-v3-20260725.override.yml && sudo cat /tmp/full-crawler-recovery-v3-20260725.override.yml > init-diagnostics/override.yml
+          sudo docker compose -f "$deploy/docker-compose.yml" ps > init-diagnostics/docker-ps.txt 2>&1
+          sudo docker inspect deadlock_dynamo_helper-api-1 --format '{{json .Config.Env}}' > init-diagnostics/api-env.json 2>&1
+          curl -sS --max-time 15 http://127.0.0.1:3000/deadlock/analysis/build-decision-dataset-v3/status > init-diagnostics/dataset-status.json 2>&1
+          curl -sS --max-time 15 http://127.0.0.1:3000/deadlock/analysis/recommendation-value-v4-training/status > init-diagnostics/value-status.json 2>&1
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-initializing-diagnostics
+          path: init-diagnostics
+          if-no-files-found: error
+          retention-days: 3
