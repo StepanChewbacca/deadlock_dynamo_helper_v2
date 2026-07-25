@@ -1,0 +1,141 @@
+name: Patch Value V4 model serialization
+
+on:
+  push:
+    branches:
+      - fix/value-v4-prune-serialized-contexts
+    paths:
+      - '.github/workflows/patch-value-v4-model-serialization.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/value-v4-prune-serialized-contexts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply serialization pruning
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/src/deadlock-live/recommendation-value-v4-training.service.ts')
+          source = path.read_text()
+          source = source.replace(
+              '        counts: serializeModel(model),',
+              '        counts: serializeModel(model, options.minContextObservations),',
+          )
+          old = '''function serializeModel(
+            model: RecommendationValueV4Model,
+          ): Record<string, unknown> {
+            return {
+              global: { ...model.global },
+              hero: serializeBinaryTable(model.hero),
+              heroTime: serializeBinaryTable(model.heroTime),
+              heroTeamTime: serializeBinaryTable(model.heroTeamTime),
+              heroTimeInventory: serializeBinaryTable(model.heroTimeInventory),
+              heroTimePreviousTail: serializeBinaryTable(model.heroTimePreviousTail),
+              ally: serializeBinaryTable(model.ally),
+              enemy: serializeBinaryTable(model.enemy),
+              heroTimeAction: serializeBinaryTable(model.heroTimeAction),
+              heroTimeInventoryAction: serializeBinaryTable(
+                model.heroTimeInventoryAction,
+              ),
+              heroTimePreviousTailAction: serializeBinaryTable(
+                model.heroTimePreviousTailAction,
+              ),
+              allyAction: serializeBinaryTable(model.allyAction),
+              enemyAction: serializeBinaryTable(model.enemyAction),
+            };
+          }
+
+          function serializeBinaryTable(
+            table: BinaryCountTable,
+          ): Record<string, BinaryCount> {
+            return Object.fromEntries(
+              [...table.entries()]
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([key, count]) => [key, { ...count }]),
+            );
+          }
+          '''
+          new = '''function serializeModel(
+            model: RecommendationValueV4Model,
+            minimumObservations: number,
+          ): Record<string, unknown> {
+            return {
+              global: { ...model.global },
+              hero: serializeBinaryTable(model.hero, minimumObservations),
+              heroTime: serializeBinaryTable(model.heroTime, minimumObservations),
+              heroTeamTime: serializeBinaryTable(
+                model.heroTeamTime,
+                minimumObservations,
+              ),
+              heroTimeInventory: serializeBinaryTable(
+                model.heroTimeInventory,
+                minimumObservations,
+              ),
+              heroTimePreviousTail: serializeBinaryTable(
+                model.heroTimePreviousTail,
+                minimumObservations,
+              ),
+              ally: serializeBinaryTable(model.ally, minimumObservations),
+              enemy: serializeBinaryTable(model.enemy, minimumObservations),
+              heroTimeAction: serializeBinaryTable(
+                model.heroTimeAction,
+                minimumObservations,
+              ),
+              heroTimeInventoryAction: serializeBinaryTable(
+                model.heroTimeInventoryAction,
+                minimumObservations,
+              ),
+              heroTimePreviousTailAction: serializeBinaryTable(
+                model.heroTimePreviousTailAction,
+                minimumObservations,
+              ),
+              allyAction: serializeBinaryTable(
+                model.allyAction,
+                minimumObservations,
+              ),
+              enemyAction: serializeBinaryTable(
+                model.enemyAction,
+                minimumObservations,
+              ),
+            };
+          }
+
+          function serializeBinaryTable(
+            table: BinaryCountTable,
+            minimumObservations: number,
+          ): Record<string, BinaryCount> {
+            return Object.fromEntries(
+              [...table.entries()]
+                .filter(([, count]) => count.total >= minimumObservations)
+                .sort(([left], [right]) => left.localeCompare(right))
+                .map(([key, count]) => [key, { ...count }]),
+            );
+          }
+          '''
+          if old not in source:
+              raise SystemExit('Expected serialization block was not found')
+          source = source.replace(old, new)
+          path.write_text(source)
+          PY
+      - name: Verify API build
+        run: npm ci && npm run build --workspace=apps/api
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/api/src/deadlock-live/recommendation-value-v4-training.service.ts
+          git commit -m 'fix: prune unsupported Value V4 contexts before serialization'
+          git push origin HEAD:fix/value-v4-prune-serialized-contexts
