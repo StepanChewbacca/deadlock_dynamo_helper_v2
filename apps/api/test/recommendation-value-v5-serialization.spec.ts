@@ -37,20 +37,20 @@ describe('recommendation value v5 serialization', () => {
     };
 
     expect(serialized.state).toEqual({
-      'STATE:RARE': { wins: 20, total: 20 },
-      'STATE:SUPPORTED': { wins: 20, total: 21 },
+      'STATE:RARE': { wins: 20, total: 20, observations: 1 },
+      'STATE:SUPPORTED': { wins: 20, total: 21, observations: 2 },
     });
     expect(serialized.action).toEqual({
-      'ACTION:RARE': { wins: 20, total: 20 },
-      'ACTION:SUPPORTED': { wins: 20, total: 21 },
+      'ACTION:RARE': { wins: 20, total: 20, observations: 1 },
+      'ACTION:SUPPORTED': { wins: 20, total: 21, observations: 2 },
     });
 
-    expect(serializeRecommendationValueV5Model(model, 21)).toMatchObject({
+    expect(serializeRecommendationValueV5Model(model, 2)).toMatchObject({
       state: {
-        'STATE:SUPPORTED': { wins: 20, total: 21 },
+        'STATE:SUPPORTED': { wins: 20, total: 21, observations: 2 },
       },
       action: {
-        'ACTION:SUPPORTED': { wins: 20, total: 21 },
+        'ACTION:SUPPORTED': { wins: 20, total: 21, observations: 2 },
       },
     });
   });
