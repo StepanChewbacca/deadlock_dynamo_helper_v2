@@ -1,0 +1,32 @@
+name: Inspect recovery after API reset
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-recovery-after-api-reset.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture post-repair status
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          mkdir -p post-repair-status
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts > post-repair-status/systemd.txt
+          sudo cat "$root/state.json" > post-repair-status/state.json
+          sudo tail -n 160 "$root/service.log" > post-repair-status/service-tail.log
+      - name: Upload post-repair status
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-post-api-reset-status
+          path: post-repair-status
+          if-no-files-found: error
+          retention-days: 3
