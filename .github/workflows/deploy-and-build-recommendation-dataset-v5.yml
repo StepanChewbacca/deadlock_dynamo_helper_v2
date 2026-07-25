@@ -19,25 +19,25 @@ jobs:
     runs-on: [self-hosted, linux, ARM64]
     timeout-minutes: 360
     steps:
-      - name: Checkout merged production code
+      - name: Checkout corrected production code
         uses: actions/checkout@v4
         with:
-          ref: 2982ae97f9d7450994076ba3acaa9c5a117bad5d
+          ref: 36192890aac669215f114a81509e5fe14ad5cfbe
           fetch-depth: 1
 
-      - name: Deploy, start timeline collection, and build Dataset V5
+      - name: Deploy, start timeline collection, and build Dataset V5.2
         shell: bash
         run: |
           set -Eeuo pipefail
 
           DEPLOY=/home/ubuntu/apps/deadlock_dynamo_helper
-          TARGET_COMMIT=2982ae97f9d7450994076ba3acaa9c5a117bad5d
+          TARGET_COMMIT=36192890aac669215f114a81509e5fe14ad5cfbe
           SOURCE_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725
           SOURCE_SHA=8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d
-          OUTPUT_DIR=/app/apps/api/storage/recommendation-decision-dataset-v5-full-crawler-20260725
+          OUTPUT_DIR=/app/apps/api/storage/recommendation-decision-dataset-v5-full-crawler-v2-20260725
           TIMELINE_DIR=/app/apps/api/storage/match-timeline-events-v1
           CATALOG_DIR=/app/apps/api/storage/item-catalog-snapshots
-          CATALOG_PATH=$CATALOG_DIR/recommendation-dataset-v5-20260725.json
+          CATALOG_PATH=$CATALOG_DIR/recommendation-dataset-v5-v2-20260725.json
           API=http://127.0.0.1:3000
           RESULTS="$RUNNER_TEMP/recommendation-dataset-v5-results"
           mkdir -p "$RESULTS"
@@ -87,11 +87,10 @@ jobs:
             -d '{}' \
             "$API/deadlock/reference-data/catalogs/import" > "$RESULTS/catalog-import.json"
 
-          set -a
-          . "$DEPLOY/.env"
-          set +a
+          DB_PASSWORD_VALUE=$(grep '^DB_PASSWORD=' "$DEPLOY/.env" | tail -n1 | cut -d= -f2-)
           DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -m1 'aboba-telegramovich-postgres-1' || true)
           test -n "$DB_CONTAINER"
+          test -n "$DB_PASSWORD_VALUE"
 
           SQL=$(cat <<'SQL'
           WITH selected AS (
@@ -141,9 +140,9 @@ jobs:
           SQL
           )
 
-          sudo docker exec -e PGPASSWORD="$DB_PASSWORD" "$DB_CONTAINER" \
+          sudo docker exec -e PGPASSWORD="$DB_PASSWORD_VALUE" "$DB_CONTAINER" \
             psql -U postgres -d deadlock_builds -Atc "$SQL" > "$RESULTS/catalog-snapshot.json"
-          test "$(jq '.items | length' "$RESULTS/catalog-snapshot.json")" -gt 0
+          jq -e '.items | length > 0' "$RESULTS/catalog-snapshot.json"
           CATALOG_SHA=$(sha256sum "$RESULTS/catalog-snapshot.json" | awk '{print $1}')
 
           API_CONTAINER=$(sudo docker compose ps -q api)
@@ -194,14 +193,15 @@ jobs:
 
           jq -e '.passed == true' "$RESULTS/audit.json"
           jq -e --arg sha "$SOURCE_SHA" '.source.sha256 == $sha' "$RESULTS/audit.json"
+          jq -e '.datasetVersion == "RECOMMENDATION_DECISION_DATASET_V5_2"' "$RESULTS/manifest.json"
           jq -e '.artifact.rowCount == 1412843' "$RESULTS/manifest.json"
           jq -e '.artifact.sha256 | length == 64' "$RESULTS/manifest.json"
 
-      - name: Upload Dataset V5 build diagnostics
+      - name: Upload Dataset V5.2 build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-dataset-v5-full-corpus
+          name: recommendation-dataset-v5-v2-full-corpus
           path: ${{ runner.temp }}/recommendation-dataset-v5-results
           if-no-files-found: warn
           retention-days: 14
