@@ -58,12 +58,10 @@ jobs:
           replace_once(
               VALUE_SERVICE,
               """      previousTail,
-              actionKey,
-              feature: featureCandidates.get(actionKey) ?? {},""",
+              actionKey,""",
               """      previousTail,
               teamEconomyBand,
-              actionKey,
-              feature: featureCandidates.get(actionKey) ?? {},""",
+              actionKey,""",
           )
           '''
           if content.count(old) != 1:
