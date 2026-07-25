@@ -139,3 +139,5 @@ jobs:
           git add apps/api/src/deadlock-live/recommendation-value-v4-training.service.ts
           git commit -m 'fix: prune unsupported Value V4 contexts before serialization'
           git push origin HEAD:fix/value-v4-prune-serialized-contexts
+
+# Trigger patch workflow
