@@ -1,0 +1,36 @@
+name: Capture recovery status automation 20260725 1244
+
+on:
+  push:
+    branches:
+      - diagnostics/run-full-crawler-value-v5-20260725
+    paths:
+      - '.github/workflows/capture-recovery-status-automation-20260725-1244.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture service and training state
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          result_root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          output="$RUNNER_TEMP/recovery-status"
+          mkdir -p "$output"
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus -p NRestarts > "$output/systemd.txt" || true
+          sudo systemctl status --no-pager "$unit" > "$output/systemd-status.txt" 2>&1 || true
+          sudo test -f "$result_root/state.json" && sudo cp "$result_root/state.json" "$output/state.json" || true
+          sudo test -f "$result_root/service.log" && sudo tail -n 300 "$result_root/service.log" > "$output/service-tail.log" || true
+          sudo chown -R "$(id -u):$(id -g)" "$output"
+      - name: Upload recovery status
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-status-automation-20260725-1244
+          path: ${{ runner.temp }}/recovery-status
+          retention-days: 3
