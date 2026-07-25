@@ -114,6 +114,11 @@ service_path.write_text(service)
 
 test_path = Path('apps/api/test/recommendation-decision-dataset-v5.spec.ts')
 test = test_path.read_text()
+test = test.replace(
+    '      rowsWithComplete3mOutcomeCount: 2,',
+    '      rowsWithComplete3mOutcomeCount: 1,',
+    1,
+)
 old_expect = """      netWorthDelta: 1700,
       objectiveEventCount: 1,
     });"""
@@ -140,7 +145,7 @@ stale_test = """  it('rejects a stale horizon snapshot instead of treating parti
     await service.onModuleInit();
     await service.start({
       expectedSourceSha256: sourceSha256,
-      partitionCount: 1,
+      partitionCount: 2,
       snapshotStalenessS: 60,
     });
     await service.waitForIdle();
