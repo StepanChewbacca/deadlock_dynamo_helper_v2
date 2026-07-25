@@ -8,6 +8,7 @@ import {
 describe('recommendation value v5 support threshold', () => {
   it('uses raw observation support while preserving match-balanced estimation weights', () => {
     const model = createRecommendationValueV5Model();
+    // Support is counted per decision, while estimation remains match-balanced.
     for (let index = 0; index < 20; index += 1) {
       updateRecommendationValueV5Model(
         model,
