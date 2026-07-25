@@ -5,7 +5,7 @@ import {
 } from '../src/deadlock-live/recommendation-value-v5-model';
 
 describe('recommendation value v5 serialization', () => {
-  it('excludes contexts below the minimum effective observation threshold', () => {
+  it('filters contexts by raw observation support instead of weighted mass', () => {
     const model = createRecommendationValueV5Model();
 
     updateRecommendationValueV5Model(
@@ -31,26 +31,26 @@ describe('recommendation value v5 serialization', () => {
       1,
     );
 
-    const serialized = serializeRecommendationValueV5Model(model, 20) as {
-      state: Record<string, { wins: number; total: number }>;
-      action: Record<string, { wins: number; total: number }>;
+    const serialized = serializeRecommendationValueV5Model(model, 1) as {
+      state: Record<string, { wins: number; total: number; observations: number }>;
+      action: Record<string, { wins: number; total: number; observations: number }>;
     };
 
     expect(serialized.state).toEqual({
-      'STATE:RARE': { wins: 20, total: 20 },
-      'STATE:SUPPORTED': { wins: 20, total: 21 },
+      'STATE:RARE': { wins: 20, total: 20, observations: 1 },
+      'STATE:SUPPORTED': { wins: 20, total: 21, observations: 2 },
     });
     expect(serialized.action).toEqual({
-      'ACTION:RARE': { wins: 20, total: 20 },
-      'ACTION:SUPPORTED': { wins: 20, total: 21 },
+      'ACTION:RARE': { wins: 20, total: 20, observations: 1 },
+      'ACTION:SUPPORTED': { wins: 20, total: 21, observations: 2 },
     });
 
-    expect(serializeRecommendationValueV5Model(model, 21)).toMatchObject({
+    expect(serializeRecommendationValueV5Model(model, 2)).toMatchObject({
       state: {
-        'STATE:SUPPORTED': { wins: 20, total: 21 },
+        'STATE:SUPPORTED': { wins: 20, total: 21, observations: 2 },
       },
       action: {
-        'ACTION:SUPPORTED': { wins: 20, total: 21 },
+        'ACTION:SUPPORTED': { wins: 20, total: 21, observations: 2 },
       },
     });
   });

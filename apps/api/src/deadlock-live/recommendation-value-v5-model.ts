@@ -1,5 +1,5 @@
 export const RECOMMENDATION_VALUE_V5_MODEL_VERSION =
-  'RECOMMENDATION_VALUE_V5_MATCH_BALANCED_STATE_ACTION_RESIDUAL_1' as const;
+  'RECOMMENDATION_VALUE_V5_MATCH_BALANCED_STATE_ACTION_RESIDUAL_2' as const;
 
 const EPSILON = 1e-9;
 
@@ -27,6 +27,7 @@ export interface RecommendationValueV5ModelOptions {
 export interface RecommendationValueV5WeightedBinaryCount {
   wins: number;
   total: number;
+  observations: number;
 }
 
 export interface RecommendationValueV5Model {
@@ -83,7 +84,7 @@ export interface RecommendationValueV5MetricsAccumulator {
 export function createRecommendationValueV5Model(): RecommendationValueV5Model {
   return {
     version: RECOMMENDATION_VALUE_V5_MODEL_VERSION,
-    global: { wins: 0, total: 0 },
+    global: { wins: 0, total: 0, observations: 0 },
     state: new Map(),
     action: new Map(),
   };
@@ -402,7 +403,7 @@ function supportedDeltas(
     .map((key) => table.get(key))
     .filter(
       (count): count is RecommendationValueV5WeightedBinaryCount =>
-        Boolean(count && count.total >= minimumEffectiveObservations),
+        Boolean(count && count.observations >= minimumEffectiveObservations),
     )
     .map(
       (count) =>
@@ -439,7 +440,7 @@ function incrementTable(
   won: boolean,
   weight: number,
 ): void {
-  const count = table.get(key) ?? { wins: 0, total: 0 };
+  const count = table.get(key) ?? { wins: 0, total: 0, observations: 0 };
   incrementCount(count, won, weight);
   table.set(key, count);
 }
@@ -451,6 +452,7 @@ function incrementCount(
 ): void {
   count.total += weight;
   count.wins += won ? weight : 0;
+  count.observations += 1;
 }
 
 function serializeTable(
@@ -459,7 +461,7 @@ function serializeTable(
 ): Record<string, RecommendationValueV5WeightedBinaryCount> {
   return Object.fromEntries(
     [...table.entries()]
-      .filter(([, count]) => count.total >= minimumEffectiveObservations)
+      .filter(([, count]) => count.observations >= minimumEffectiveObservations)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, count]) => [key, { ...count }]),
   );
