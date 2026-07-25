@@ -877,7 +877,7 @@ function itemAndBuildFeatures(
   const observed = actionDescriptor(row.observedLabel.exactActionKey ?? '');
   const progress = recipeProgress(itemIds, catalog);
   const spikeCosts = progress
-    .map((entry) => entry.missingCost)
+    .map((entry) => numeric(entry.missingCost))
     .filter((value) => value > 0);
   return {
     available: true,
