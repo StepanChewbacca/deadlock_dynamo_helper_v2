@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseOptions } from './database/data-source';
 import { DeadlockLiveModule } from './deadlock-live/deadlock-live.module';
+import { RecommendationDatasetV5Module } from './deadlock-live/recommendation-dataset-v5.module';
 import { RecommendationValueV5Module } from './deadlock-live/recommendation-value-v5.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { RecommendationValueV5Module } from './deadlock-live/recommendation-valu
     }),
     DeadlockLiveModule,
     RecommendationValueV5Module,
+    RecommendationDatasetV5Module,
   ],
 })
 export class AppModule {}
