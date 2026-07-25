@@ -1,0 +1,47 @@
+{
+  "jobName": "full-crawler-recovery-v3-20260725",
+  "updatedAt": "2026-07-25T09:46:19.991Z",
+  "resultDirectory": "/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725",
+  "state": "RUNNING",
+  "stage": "07-value-v5",
+  "status": {
+    "state": "RUNNING",
+    "phase": "EVALUATING",
+    "currentPass": 4,
+    "totalPasses": 4,
+    "sourceRowCount": 1412843,
+    "eligibleSourceRowCount": 1412843,
+    "excludedSourceRowCount": 0,
+    "processedRowCount": 1160000,
+    "sourceMatchCount": 6855,
+    "trainMatchCount": 4798,
+    "tuningMatchCount": 1028,
+    "testMatchCount": 1029,
+    "trainRowCount": 993107,
+    "tuningRowCount": 210758,
+    "testRowCount": 0,
+    "outputDirectory": "/app/apps/api/storage/recommendation-value-v5-full-crawler-recovery-v3-20260725",
+    "manifestAvailable": false,
+    "auditAvailable": false,
+    "evaluationAvailable": false,
+    "modelAvailable": false,
+    "startedAt": "2026-07-25T09:11:10.546Z",
+    "options": {
+      "trainFraction": 0.7,
+      "tuningFraction": 0.15,
+      "statePriorStrength": 100,
+      "actionPriorStrength": 100,
+      "minimumEffectiveObservations": 20,
+      "maximumAbsoluteStateLogitResidual": 1.5,
+      "maximumAbsoluteActionLogitResidual": 1.5,
+      "actionResidualScales": [
+        0,
+        0.25,
+        0.5,
+        0.75,
+        1
+      ],
+      "expectedSourceSha256": "8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d"
+    }
+  }
+}
