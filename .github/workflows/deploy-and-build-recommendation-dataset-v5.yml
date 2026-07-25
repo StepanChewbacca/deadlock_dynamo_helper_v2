@@ -69,7 +69,7 @@ jobs:
           cd "$DEPLOY"
           sudo docker compose pull deadlock-live-events
           sudo docker compose build api
-          sudo docker compose run --rm api node apps/api/run-migrations.js
+          sudo docker compose run --rm api node run-migrations.js
           sudo docker compose up -d deadlock-live-events api
 
           for attempt in $(seq 1 80); do
