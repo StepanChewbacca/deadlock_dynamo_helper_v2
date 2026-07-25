@@ -32,13 +32,15 @@ jobs:
             set -euxo pipefail
             unit=deadlock-full-crawler-recovery-v3-20260725.service
             installed=/home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
+            deploy=/home/ubuntu/apps/deadlock_dynamo_helper
             work="$RUNNER_TEMP/recovery-fixed.mjs"
-            already_patched=0
-            sudo grep -q 'API configuration was reset while the stage was running' "$installed" && already_patched=1 || true
+            deployed_commit=$(git -C "$deploy" rev-parse HEAD)
             sudo cp "$installed" "$work"
             sudo chown "$(id -u):$(id -g)" "$work"
-            python3 scripts/patch-full-crawler-recovery-api-reset.py "$work"
+            python3 scripts/patch-full-crawler-recovery-api-reset.py "$work" "$deployed_commit"
             node --check "$work"
+            changed=0
+            sudo cmp -s "$work" "$installed" || changed=1
             sudo install -o ubuntu -g ubuntu -m 0644 "$work" "$installed"
             gzip -9 -c "$work" | base64 -w 0 > scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
             printf '\n' >> scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
@@ -46,10 +48,10 @@ jobs:
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
             if ! git diff --cached --quiet; then
-              git commit -m 'fix: recover when training API configuration resets'
+              git commit -m 'fix: pin recovery to deployed production commit'
               git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
             fi
-            if [ "$already_patched" -eq 0 ]; then
+            if [ "$changed" -eq 1 ]; then
               sudo systemctl restart "$unit"
               sleep 30
             fi
