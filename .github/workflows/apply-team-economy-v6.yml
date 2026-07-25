@@ -46,25 +46,27 @@ jobs:
               2,
           )
           '''
-          new = '''value_path = Path(VALUE_SERVICE)
-          value_lines = value_path.read_text(encoding="utf-8").splitlines()
-          inserted = 0
-          for index in range(len(value_lines) - 1, 0, -1):
-              if (
-                  value_lines[index - 1].strip() == "previousTail,"
-                  and value_lines[index].strip()
-                  in {"actionKey: observedActionKey,", "actionKey,"}
-              ):
-                  indent = value_lines[index][
-                      : len(value_lines[index]) - len(value_lines[index].lstrip())
-                  ]
-                  value_lines.insert(index, f"{indent}teamEconomyBand,")
-                  inserted += 1
-          if inserted != 2:
-              raise RuntimeError(
-                  f"{VALUE_SERVICE}: expected two buildActionKeys calls, found {inserted}"
-              )
-          value_path.write_text("\\n".join(value_lines) + "\\n", encoding="utf-8")
+          new = '''def add_team_economy_band_to_action_calls(path: Path) -> None:
+              lines = path.read_text(encoding="utf-8").splitlines()
+              inserted = 0
+              index = 0
+              while index < len(lines) - 1:
+                  if (
+                      lines[index].strip() == "previousTail,"
+                      and lines[index + 1].strip() in {"actionKey: observedActionKey,", "actionKey,"}
+                  ):
+                      indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+                      lines.insert(index + 1, f"{indent}teamEconomyBand,")
+                      inserted += 1
+                      index += 2
+                  index += 1
+              if inserted != 2:
+                  raise RuntimeError(
+                      f"{path}: expected two buildActionKeys calls, updated {inserted}"
+                  )
+              path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+
+          add_team_economy_band_to_action_calls(VALUE_SERVICE)
           '''
           if content.count(old) != 1:
               raise RuntimeError('Value V6 patch matcher normalization target is missing.')
@@ -107,11 +109,26 @@ jobs:
         run: yarn workspace @deadlock-live-probe/api build
 
       - name: Test team economy and Value V6
-        run: >-
-          yarn workspace @deadlock-live-probe/api test
-          recommendation-decision-dataset-v5.spec.ts
-          recommendation-value-v6-core.spec.ts
-          recommendation-value-v6-training.spec.ts
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test \
+            recommendation-decision-dataset-v5.spec.ts \
+            recommendation-value-v6-core.spec.ts \
+            recommendation-value-v6-training.spec.ts \
+            > "$RUNNER_TEMP/team-economy-tests.log" 2>&1
+          status=$?
+          tail -n 250 "$RUNNER_TEMP/team-economy-tests.log"
+          exit "$status"
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: team-economy-test-diagnostics
+          path: ${{ runner.temp }}/team-economy-tests.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Commit verified implementation
         shell: bash
