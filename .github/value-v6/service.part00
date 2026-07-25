@@ -1,0 +1,220 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import {
+  RECOMMENDATION_DECISION_DATASET_V5_VERSION,
+} from './recommendation-decision-dataset-v5.service';
+import {
+  selectRecommendationOfflineThreeWaySplit,
+  type RecommendationOfflineMatchDescriptor,
+} from './recommendation-offline-split';
+import {
+  RECOMMENDATION_VALUE_V6_MODEL_VERSION,
+  createRecommendationValueV6MetricsAccumulator,
+  createRecommendationValueV6Model,
+  finalizeRecommendationValueV6Metrics,
+  observeRecommendationValueV6Prediction,
+  predictRecommendationValueV6,
+  selectRecommendationValueV6ActionScale,
+  serializeRecommendationValueV6Model,
+  updateRecommendationValueV6Model,
+  type RecommendationValueV6Metrics,
+  type RecommendationValueV6MetricsAccumulator,
+  type RecommendationValueV6Model,
+  type RecommendationValueV6ModelOptions,
+  type RecommendationValueV6Prediction,
+  type RecommendationValueV6SourceRow,
+} from './recommendation-value-v6-model';
+
+export const RECOMMENDATION_VALUE_V6_TRAINING_SCHEMA_VERSION = 1;
+
+const DEFAULT_SOURCE_DIRECTORY =
+  '/app/apps/api/storage/recommendation-decision-dataset-v5';
+const DEFAULT_OUTPUT_DIRECTORY =
+  '/app/apps/api/storage/recommendation-value-v6-training';
+const SOURCE_DIRECTORY_ENV = 'DEADLOCK_RECOMMENDATION_VALUE_V6_SOURCE_DIR';
+const OUTPUT_DIRECTORY_ENV = 'DEADLOCK_RECOMMENDATION_VALUE_V6_TRAINING_DIR';
+const BUFFER_LIMIT_BYTES = 1024 * 1024;
+const WEIGHT_TOLERANCE = 1e-6;
+const HORIZON_WEIGHTS: Record<string, number> = {
+  '3m': 0.5,
+  '5m': 0.3,
+  '10m': 0.2,
+};
+
+export interface RecommendationValueV6TrainingStartRequest {
+  trainFraction?: number;
+  tuningFraction?: number;
+  statePriorStrength?: number;
+  actionPriorStrength?: number;
+  minimumObservations?: number;
+  maximumAbsoluteStateResidual?: number;
+  maximumAbsoluteActionResidual?: number;
+  actionResidualScales?: number[];
+  finalOutcomeWeight?: number;
+  shortHorizonWeight?: number;
+  bootstrapSamples?: number;
+  expectedSourceSha256?: string;
+}
+
+export interface RecommendationValueV6TrainingOptions
+  extends RecommendationValueV6ModelOptions {
+  trainFraction: number;
+  tuningFraction: number;
+  actionResidualScales: number[];
+  finalOutcomeWeight: number;
+  shortHorizonWeight: number;
+  bootstrapSamples: number;
+  expectedSourceSha256?: string;
+}
+
+export type RecommendationValueV6TrainingState =
+  | 'IDLE'
+  | 'RUNNING'
+  | 'COMPLETE'
+  | 'FAILED';
+
+export type RecommendationValueV6TrainingPhase =
+  | 'PREPARING'
+  | 'SPLITTING'
+  | 'TRAINING'
+  | 'TUNING'
+  | 'EVALUATING'
+  | 'FINALIZING'
+  | 'COMPLETE';
+
+export interface RecommendationValueV6TrainingStatus {
+  state: RecommendationValueV6TrainingState;
+  phase: RecommendationValueV6TrainingPhase;
+  currentPass: number;
+  totalPasses: number;
+  sourceRowCount: number;
+  eligibleSourceRowCount: number;
+  excludedSourceRowCount: number;
+  shortHorizonEligibleRowCount: number;
+  processedRowCount: number;
+  sourceMatchCount: number;
+  trainMatchCount: number;
+  tuningMatchCount: number;
+  testMatchCount: number;
+  trainRowCount: number;
+  tuningRowCount: number;
+  testRowCount: number;
+  outputDirectory: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  options?: RecommendationValueV6TrainingOptions;
+  manifestAvailable: boolean;
+  auditAvailable: boolean;
+  evaluationAvailable: boolean;
+  modelAvailable: boolean;
+}
+
+interface SourceArtifacts {
+  datasetPath: string;
+  manifest: Record<string, unknown>;
+  audit: Record<string, unknown>;
+  sha256: string;
+  byteLength: number;
+}
+
+interface SourcePassSummary {
+  sourceRowCount: number;
+  eligibleSourceRowCount: number;
+  excludedSourceRowCount: number;
+  shortHorizonEligibleRowCount: number;
+  duplicateEligibleDecisionCount: number;
+  matches: RecommendationOfflineMatchDescriptor[];
+  eligibleDecisionCountsByMatch: Map<string, number>;
+}
+
+interface SplitRuntime {
+  trainMatchIds: Set<string>;
+  tuningMatchIds: Set<string>;
+  testMatchIds: Set<string>;
+  descriptorSha256: string;
+}
+
+interface PassMetrics {
+  rowCount: number;
+  totalWeight: number;
+}
+
+interface EvaluationPass extends PassMetrics {
+  metrics: RecommendationValueV6Metrics;
+  perHero: Record<string, RecommendationValueV6Metrics>;
+  perMatch: Map<string, RecommendationValueV6MetricsAccumulator>;
+}
+
+interface TrainingArtifacts {
+  predictionEvaluation: string;
+  model: string;
+  evaluation: string;
+  audit: string;
+  manifest: string;
+}
+
+interface ParsedCandidate {
+  actionKey: string;
+  actionKeys: string[];
+}
+
+@Injectable()
+export class RecommendationValueV6TrainingService implements OnModuleInit {
+  private readonly logger = new Logger(
+    RecommendationValueV6TrainingService.name,
+  );
+  private readonly sourceDirectory =
+    process.env[SOURCE_DIRECTORY_ENV]?.trim() || DEFAULT_SOURCE_DIRECTORY;
+  private readonly outputDirectory =
+    process.env[OUTPUT_DIRECTORY_ENV]?.trim() || DEFAULT_OUTPUT_DIRECTORY;
+  private readonly sourceDatasetPath = join(
+    this.sourceDirectory,
+    'dataset.ndjson',
+  );
+  private readonly sourceManifestPath = join(
+    this.sourceDirectory,
+    'manifest.json',
+  );
+  private readonly sourceAuditPath = join(this.sourceDirectory, 'audit.json');
+  private readonly paths: TrainingArtifacts = {
+    predictionEvaluation: join(
+      this.outputDirectory,
+      'prediction-evaluation.ndjson',
+    ),
+    model: join(this.outputDirectory, 'model.json'),
+    evaluation: join(this.outputDirectory, 'evaluation.json'),
+    audit: join(this.outputDirectory, 'audit.json'),
+    manifest: join(this.outputDirectory, 'manifest.json'),
+  };
+  private status = this.createIdleStatus();
+  private manifest?: Record<string, unknown>;
+  private audit?: Record<string, unknown>;
+  private evaluation?: Record<string, unknown>;
+  private modelArtifact?: Record<string, unknown>;
+  private runPromise: Promise<void> = Promise.resolve();
+
+  async onModuleInit(): Promise<void> {
+    await mkdir(this.outputDirectory, { recursive: true });
+    this.manifest = await readJson(this.paths.manifest);
+    this.audit = await readJson(this.paths.audit);
+    this.evaluation = await readJson(this.paths.evaluation);
+    this.modelArtifact = await readJson(this.paths.model);
+    if (this.manifest && this.audit && this.evaluation && this.modelArtifact) {
+      const source = record(this.audit.source);
+      const split = record(this.audit.split);
+      this.status = {
+        ...this.createIdleStatus(),
