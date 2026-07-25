@@ -1,0 +1,34 @@
+name: Inspect full crawler recovery v3
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-full-crawler-recovery-v3.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Inspect recovery service
+        shell: bash
+        run: |
+          set +e
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          result_root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          echo '--- unit file ---'
+          sudo systemctl cat "$unit"
+          echo '--- status ---'
+          sudo systemctl status --no-pager "$unit"
+          echo '--- properties ---'
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus -p NRestarts
+          echo '--- journal ---'
+          sudo journalctl -u "$unit" --no-pager -n 80
+          echo '--- state ---'
+          sudo test -f "$result_root/state.json" && sudo cat "$result_root/state.json"
+          echo '--- service log ---'
+          sudo test -f "$result_root/service.log" && sudo tail -n 120 "$result_root/service.log"
+          exit 0
