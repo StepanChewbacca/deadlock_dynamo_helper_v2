@@ -41,6 +41,7 @@ jobs:
           API=http://127.0.0.1:3000
           RESULTS="$RUNNER_TEMP/recommendation-dataset-v5-results"
           mkdir -p "$RESULTS"
+          exec > >(tee -a "$RESULTS/run.log") 2>&1
 
           set_env() {
             local key="$1"
