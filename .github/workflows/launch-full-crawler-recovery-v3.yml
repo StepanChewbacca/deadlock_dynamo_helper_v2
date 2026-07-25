@@ -23,6 +23,11 @@ jobs:
         with:
           ref: diagnostics/run-full-crawler-value-v5-20260725
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install and start recovery service
         shell: bash
         run: |
@@ -33,9 +38,10 @@ jobs:
           installed_script="$job_root/full-crawler-recovery-v3-20260725.mjs"
           decoded_script="$RUNNER_TEMP/full-crawler-recovery-v3-20260725.mjs"
           payload=scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+          node_path=$(command -v node)
 
           base64 --decode "$payload" | gzip --decompress > "$decoded_script"
-          node --check "$decoded_script"
+          "$node_path" --check "$decoded_script"
 
           sudo mkdir -p "$job_root" "$result_root"
           sudo chown -R ubuntu:ubuntu "$job_root" "$result_root"
@@ -66,7 +72,7 @@ jobs:
           WorkingDirectory=/home/ubuntu/apps/deadlock_dynamo_helper
           Environment=HOME=/home/ubuntu
           Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStart=/usr/bin/node $installed_script
+          ExecStart=$node_path $installed_script
           Restart=on-failure
           RestartSec=60
           TimeoutStopSec=300
