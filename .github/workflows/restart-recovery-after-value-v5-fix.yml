@@ -15,35 +15,167 @@ concurrency:
 jobs:
   restart:
     runs-on: [self-hosted, linux, ARM64]
-    timeout-minutes: 45
+    timeout-minutes: 240
     steps:
-      - name: Wait for production deployment and restart recovery
+      - name: Rerun corrected Value V5 only
         shell: bash
         run: |
           set -euo pipefail
+
           deploy=/home/ubuntu/apps/deadlock_dynamo_helper
           expected=9d0bd5535b5cbb37ee45dfbdb41f96e698d882c9
-          unit=deadlock-full-crawler-recovery-v3-20260725.service
-          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          recovery_unit=deadlock-full-crawler-recovery-v3-20260725.service
+          source_dir=/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725
+          output_dir=/app/apps/api/storage/recommendation-value-v5-full-crawler-recovery-v3-20260725
+          source_sha=8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d
+          api=http://127.0.0.1:3000
+          endpoint=/deadlock/analysis/recommendation-value-v5-training
+          override="$RUNNER_TEMP/value-v5-support-fix.override.yml"
+          result="$RUNNER_TEMP/value-v5-support-fix-result"
+          mkdir -p "$result"
+
+          restore_production() {
+            rc=$?
+            trap - EXIT
+            set +e
+            sudo docker compose -f "$deploy/docker-compose.yml" up -d --force-recreate --no-deps api
+            rm -f "$override"
+            for attempt in $(seq 1 120); do
+              if curl --fail --silent --show-error --max-time 30 \
+                "$api/deadlock/analysis/recommendation-telemetry/status" \
+                > "$result/production-telemetry.json"; then
+                break
+              fi
+              sleep 5
+            done
+            exit "$rc"
+          }
+          trap restore_production EXIT
+
+          current=$(git -C "$deploy" rev-parse HEAD)
+          if [ "$current" != "$expected" ]; then
+            echo "Expected production commit $expected but found $current" >&2
+            exit 1
+          fi
+
+          sudo systemctl stop "$recovery_unit" || true
+
+          volume_root=$(sudo docker volume inspect \
+            deadlock_dynamo_helper_deadlock-storage \
+            --format '{{ .Mountpoint }}')
+          output_host="$volume_root/${output_dir#/app/apps/api/storage/}"
+          sudo rm -rf "$output_host"
+          sudo mkdir -p "$output_host"
+          sudo chown -R 1000:1000 "$output_host"
+
+          cat > "$override" <<EOF
+          services:
+            api:
+              environment:
+                DEADLOCK_RECOMMENDATION_VALUE_V5_SOURCE_DIR: $source_dir
+                DEADLOCK_RECOMMENDATION_VALUE_V5_TRAINING_DIR: $output_dir
+          EOF
+
+          sudo docker compose \
+            -f "$deploy/docker-compose.yml" \
+            -f "$override" \
+            up -d --force-recreate --no-deps api
+
+          api_request() {
+            method=$1
+            path=$2
+            body=${3-}
+            for attempt in $(seq 1 8); do
+              if [ -n "$body" ]; then
+                if curl --fail --silent --show-error --max-time 120 \
+                  -X "$method" \
+                  -H 'content-type: application/json' \
+                  --data "$body" \
+                  "$api$path"; then
+                  return 0
+                fi
+              else
+                if curl --fail --silent --show-error --max-time 120 \
+                  -X "$method" "$api$path"; then
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
 
           for attempt in $(seq 1 120); do
-            current=$(git -C "$deploy" rev-parse HEAD)
-            if git -C "$deploy" merge-base --is-ancestor "$expected" "$current"; then
-              echo "Deployment contains $expected at $current"
+            if api_request GET "$endpoint/status" > "$result/status.json"; then
               break
             fi
             if [ "$attempt" -eq 120 ]; then
-              echo "Production did not deploy $expected" >&2
+              echo 'Value V5 API did not become ready.' >&2
               exit 1
             fi
-            sleep 15
+            sleep 5
           done
 
-          sudo systemctl reset-failed "$unit" || true
-          sudo systemctl restart "$unit"
-          sleep 30
-          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts
-          sudo systemctl status --no-pager "$unit" || true
-          sudo test -f "$root/state.json" && sudo cat "$root/state.json" || true
-          sudo test -f "$root/service.log" && sudo tail -n 120 "$root/service.log" || true
-          sudo systemctl is-active --quiet "$unit"
+          start_body=$(jq -nc \
+            --arg sha "$source_sha" \
+            '{
+              trainFraction: 0.7,
+              tuningFraction: 0.15,
+              statePriorStrength: 100,
+              actionPriorStrength: 100,
+              minimumEffectiveObservations: 20,
+              maximumAbsoluteStateLogitResidual: 1.5,
+              maximumAbsoluteActionLogitResidual: 1.5,
+              actionResidualScales: [0, 0.25, 0.5, 0.75, 1],
+              expectedSourceSha256: $sha
+            }')
+          api_request POST "$endpoint/start" "$start_body" \
+            > "$result/start-response.json"
+
+          started_at=$(date +%s)
+          while true; do
+            api_request GET "$endpoint/status" > "$result/status.json"
+            state=$(jq -r '.state' "$result/status.json")
+            phase=$(jq -r '.phase' "$result/status.json")
+            processed=$(jq -r '.processedRowCount // 0' "$result/status.json")
+            echo "Value V5 state=$state phase=$phase processed=$processed"
+
+            if [ "$state" = COMPLETE ]; then
+              break
+            fi
+            if [ "$state" = FAILED ]; then
+              jq . "$result/status.json"
+              exit 1
+            fi
+            if [ $(( $(date +%s) - started_at )) -gt 10800 ]; then
+              echo 'Value V5 exceeded the three-hour polling timeout.' >&2
+              exit 1
+            fi
+            sleep 30
+          done
+
+          api_request GET "$endpoint/manifest" > "$result/manifest.json"
+          api_request GET "$endpoint/audit" > "$result/audit.json"
+          api_request GET "$endpoint/evaluation" > "$result/evaluation.json"
+
+          jq -e '.passed == true' "$result/audit.json" >/dev/null
+          jq -e '.modelVersion == "RECOMMENDATION_VALUE_V5_MATCH_BALANCED_STATE_ACTION_RESIDUAL_2"' \
+            "$result/evaluation.json" >/dev/null
+          jq '{
+            modelVersion,
+            releaseGate,
+            selectedActionResidualScale: .tuning.selection.actionResidualScale,
+            support: .test.support,
+            deltas: .test.deltas,
+            stateOnly: .test.stateOnly,
+            actionConditioned: .test.actionConditioned
+          }' "$result/evaluation.json"
+
+      - name: Upload corrected Value V5 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-value-v5-full-corpus
+          path: ${{ runner.temp }}/value-v5-support-fix-result
+          if-no-files-found: warn
+          retention-days: 7
