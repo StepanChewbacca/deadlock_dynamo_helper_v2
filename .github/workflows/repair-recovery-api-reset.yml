@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/repair-recovery-api-reset.yml'
+      - 'scripts/patch-full-crawler-recovery-api-reset.py'
 
 permissions:
   contents: write
@@ -31,84 +32,7 @@ jobs:
           work="$RUNNER_TEMP/recovery-fixed.mjs"
           sudo cp "$installed" "$work"
           sudo chown "$(id -u):$(id -g)" "$work"
-          python - "$work" <<'PY'
-          from pathlib import Path
-          import sys
-
-          path = Path(sys.argv[1])
-          source = path.read_text()
-          start_marker = 'async function runStage({ name, endpoint, body, timeoutMs }) {'
-          end_marker = '\nasync function readArtifact'
-          start = source.index(start_marker)
-          end = source.index(end_marker, start)
-          replacement = r'''async function runStage({ name, endpoint, body, timeoutMs }) {
-            await writeState({ state: 'RUNNING', stage: name });
-            const expectedOutputDirectory = {
-              '02-contextual-training': directories.contextualTraining,
-              '03-contextual-candidates': directories.contextualCandidates,
-              '04-bootstrap': directories.bootstrap,
-              '05-behavioral-v4': directories.behavioral,
-              '06-value-v4': directories.valueV4,
-              '07-value-v5': directories.valueV5,
-              '08-policy-v4': directories.policyV4,
-            }[name];
-
-            let status = await requestJson('GET', endpoint + '/status');
-            await saveJson(`${name}-00-before-status.json`, status);
-            if (status.state === 'COMPLETE') {
-              await saveJson(`${name}-02-status.json`, status);
-              return status;
-            }
-            if (
-              expectedOutputDirectory &&
-              typeof status.outputDirectory === 'string' &&
-              status.outputDirectory !== expectedOutputDirectory
-            ) {
-              throw new Error(
-                `${name} API configuration was reset: expected ${expectedOutputDirectory}, received ${status.outputDirectory}.`,
-              );
-            }
-            if (status.state !== 'RUNNING') {
-              status = await requestJson('POST', endpoint + '/start', body);
-              await saveJson(`${name}-01-start-response.json`, status);
-            }
-
-            const startedAt = Date.now();
-            let lastProgressLogAt = 0;
-            while (Date.now() - startedAt <= timeoutMs) {
-              status = await requestJson('GET', endpoint + '/status');
-              await saveJson(`${name}-02-status.json`, status);
-              if (status.state === 'COMPLETE') {
-                await writeState({ state: 'RUNNING', stage: `${name}:COMPLETE`, status });
-                return status;
-              }
-              if (status.state === 'FAILED') {
-                throw new Error(`${name} failed: ${String(status.error ?? 'unknown error')}`);
-              }
-              if (
-                status.state === 'IDLE' ||
-                (expectedOutputDirectory &&
-                  typeof status.outputDirectory === 'string' &&
-                  status.outputDirectory !== expectedOutputDirectory)
-              ) {
-                throw new Error(
-                  `${name} API configuration was reset while the stage was running.`,
-                );
-              }
-              if (Date.now() - lastProgressLogAt >= 60_000) {
-                console.log(`[${name}] ${JSON.stringify(status)}`);
-                await writeState({ state: 'RUNNING', stage: name, status });
-                lastProgressLogAt = Date.now();
-              }
-              await sleep(15_000);
-            }
-            throw new Error(
-              `${name} exceeded its ${Math.round(timeoutMs / 60_000)} minute timeout.`,
-            );
-          }
-          '''
-          path.write_text(source[:start] + replacement + source[end:])
-          PY
+          python scripts/patch-full-crawler-recovery-api-reset.py "$work"
           node --check "$work"
           sudo install -o ubuntu -g ubuntu -m 0644 "$work" "$installed"
           gzip -9 -c "$work" | base64 -w 0 > scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
@@ -124,4 +48,4 @@ jobs:
           sleep 30
           sudo systemctl status --no-pager "$unit"
           sudo cat /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/state.json
-          sudo tail -n 80 /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/service.log
+          sudo tail -n 100 /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/service.log
