@@ -51,8 +51,11 @@ jobs:
               git commit -m 'fix: pin recovery to deployed production commit'
               git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
             fi
-            if [ "$changed" -eq 1 ]; then
-              sudo systemctl restart "$unit"
+            if [ "$changed" -eq 1 ] || ! sudo systemctl is-active --quiet "$unit"; then
+              sudo systemctl reset-failed "$unit" || true
+              sudo systemctl stop "$unit" || true
+              sudo systemctl reset-failed "$unit" || true
+              sudo systemctl start "$unit"
               sleep 30
             fi
             sudo systemctl status --no-pager "$unit"
