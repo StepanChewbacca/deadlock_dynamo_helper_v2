@@ -71,7 +71,31 @@ jobs:
           '''
           if content.count(old) != 1:
               raise RuntimeError('Value V6 patch matcher normalization target is missing.')
-          path.write_text(content.replace(old, new), encoding='utf-8')
+          content = content.replace(old, new)
+
+          extra_horizon_snapshots = '''    createSnapshot(215, 1, 0, 2, 2000),
+              createSnapshot(215, 0, 0, 2, 2600, {
+                steamId: 'ally-1',
+                heroId: 16,
+                teamId: 2,
+              }),
+              createSnapshot(215, 1, 0, 1, 3200, {
+                steamId: 'enemy-1',
+                heroId: 20,
+                teamId: 3,
+              }),
+              createSnapshot(215, 2, 0, 1, 3600, {
+                steamId: 'enemy-2',
+                heroId: 21,
+                teamId: 3,
+              }),
+          '''
+          if content.count(extra_horizon_snapshots) != 1:
+              raise RuntimeError('Unexpected synthetic 215-second snapshot block.')
+          path.write_text(
+              content.replace(extra_horizon_snapshots, ''),
+              encoding='utf-8',
+          )
           PY
 
       - name: Apply team economy implementation
