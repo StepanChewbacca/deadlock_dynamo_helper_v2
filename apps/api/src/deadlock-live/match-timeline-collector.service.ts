@@ -500,9 +500,10 @@ export class MatchTimelineCollectorService
       timelineVersion: MATCH_TIMELINE_VERSION,
       generatedAt,
       passed:
+        session.ended &&
         session.status.eventCount > 0 &&
         session.writeErrorCount === 0 &&
-        session.status.state !== 'FAILED',
+        session.status.state === 'COMPLETE',
       matchId: session.status.matchId,
       stream: {
         ended: session.ended,

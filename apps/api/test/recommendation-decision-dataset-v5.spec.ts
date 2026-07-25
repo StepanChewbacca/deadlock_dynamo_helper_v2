@@ -88,8 +88,14 @@ describe('Recommendation Dataset V5', () => {
     expect(outputRows).toHaveLength(2);
     const first = outputRows.find((row) => row.decisionId === 'decision-1') as any;
     expect(first.datasetVersion).toBe(RECOMMENDATION_DECISION_DATASET_V5_VERSION);
-    expect(first.trajectory.fullPreviousActionKeys).toEqual([]);
+    expect(first.trajectory.fullPreviousActionKeys).toEqual(['BUY:9', 'SELL:9']);
     expect(first.trajectory.nextObservedActionKey).toBe('BUY:2');
+    const second = outputRows.find((row) => row.decisionId === 'decision-2') as any;
+    expect(second.trajectory.fullPreviousActionKeys).toEqual([
+      'BUY:9',
+      'SELL:9',
+      'BUY:1',
+    ]);
     expect(first.stateBeforeAction.playerTimelineSnapshot).toMatchObject({
       available: true,
       gameTimeS: 95,
@@ -145,12 +151,12 @@ describe('Recommendation Dataset V5', () => {
 
 function createRows(): RecommendationDecisionDatasetV4Row[] {
   return [
-    createRow({ decisionId: 'decision-1', gameTimeS: 100, inventoryStateKey: 'EMPTY', exactActionKey: 'BUY:1', candidateActionKeys: ['BUY:1', 'BUY:2'] }),
+    createRow({ decisionId: 'decision-1', gameTimeS: 100, inventoryStateKey: 'EMPTY', exactActionKey: 'BUY:1', candidateActionKeys: ['BUY:1', 'BUY:2'], previousActionKeys: ['BUY:9', 'SELL:9'] }),
     createRow({ decisionId: 'decision-2', gameTimeS: 220, inventoryStateKey: '1x1', exactActionKey: 'BUY:2', candidateActionKeys: ['BUY:2'] }),
   ];
 }
 
-function createRow(input: { decisionId: string; gameTimeS: number; inventoryStateKey: string; exactActionKey: string; candidateActionKeys: string[] }): RecommendationDecisionDatasetV4Row {
+function createRow(input: { decisionId: string; gameTimeS: number; inventoryStateKey: string; exactActionKey: string; candidateActionKeys: string[]; previousActionKeys?: string[] }): RecommendationDecisionDatasetV4Row {
   return {
     schemaVersion: RECOMMENDATION_DECISION_DATASET_V4_SCHEMA_VERSION,
     datasetVersion: RECOMMENDATION_DECISION_DATASET_V4_VERSION,
@@ -163,7 +169,7 @@ function createRow(input: { decisionId: string; gameTimeS: number; inventoryStat
     itemIds: input.inventoryStateKey === 'EMPTY' ? [] : [1],
     alliedHeroIds: [15, 16],
     enemyHeroIds: [20, 21],
-    previousActionKeys: [],
+    previousActionKeys: input.previousActionKeys ?? [],
     inventoryStateKey: input.inventoryStateKey,
     gameTimeS: input.gameTimeS,
     timeBucket: Math.floor(input.gameTimeS / 120),

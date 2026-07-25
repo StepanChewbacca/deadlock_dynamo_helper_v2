@@ -607,9 +607,13 @@ async function processPartition(input: {
         input.timelineDirectory,
         group[0].matchId,
       );
-      const previousActions: string[] = [];
+      let previousActions: string[] = [];
       for (let index = 0; index < group.length; index += 1) {
         const row = group[index];
+        const rowPreviousActions = mergeActionHistories(
+          previousActions,
+          row.previousActionKeys,
+        );
         if (seen.has(row.decisionId)) {
           duplicates.add(row.decisionId);
         } else {
@@ -618,7 +622,7 @@ async function processPartition(input: {
         const result = enrich({
           row,
           nextRow: group[index + 1],
-          previousActions,
+          previousActions: rowPreviousActions,
           timeline,
           snapshotStalenessS: input.snapshotStalenessS,
           catalog: input.catalog,
@@ -630,10 +634,10 @@ async function processPartition(input: {
         stats.complete5m += result.complete5m ? 1 : 0;
         stats.complete10m += result.complete10m ? 1 : 0;
         stats.rowsWithCatalogCount += result.hasCatalog ? 1 : 0;
-        const action = row.observedLabel.exactActionKey;
-        if (action) {
-          previousActions.push(action);
-        }
+        previousActions = mergeActionHistories(
+          rowPreviousActions,
+          row.observedLabel.observedActionKeys,
+        );
       }
       start = end;
     }
@@ -643,6 +647,32 @@ async function processPartition(input: {
   stats.duplicateDecisionIdCount = duplicates.size;
   await rename(`${outputPath}.partial`, outputPath);
   return stats;
+}
+
+
+function mergeActionHistories(
+  accumulated: readonly string[],
+  additional: readonly string[],
+): string[] {
+  const normalizedAdditional = additional.filter(
+    (actionKey) => actionKey.length > 0,
+  );
+  if (normalizedAdditional.length === 0) {
+    return [...accumulated];
+  }
+  const maximumOverlap = Math.min(accumulated.length, normalizedAdditional.length);
+  for (let overlap = maximumOverlap; overlap > 0; overlap -= 1) {
+    const accumulatedSuffix = accumulated.slice(accumulated.length - overlap);
+    const additionalPrefix = normalizedAdditional.slice(0, overlap);
+    if (
+      accumulatedSuffix.every(
+        (actionKey, index) => actionKey === additionalPrefix[index],
+      )
+    ) {
+      return [...accumulated, ...normalizedAdditional.slice(overlap)];
+    }
+  }
+  return [...accumulated, ...normalizedAdditional];
 }
 
 function enrich(input: {
@@ -877,6 +907,7 @@ function itemAndBuildFeatures(
   const observed = actionDescriptor(row.observedLabel.exactActionKey ?? '');
   const progress = recipeProgress(itemIds, catalog);
   const spikeCosts = progress
+    .filter((entry) => entry.complete !== true)
     .map((entry) => numeric(entry.missingCost))
     .filter((value) => value > 0);
   return {
