@@ -1,0 +1,105 @@
+name: Launch full crawler recovery v3
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64'
+      - '.github/workflows/launch-full-crawler-recovery-v3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-crawler-recovery-v3-20260725
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-full-crawler-value-v5-20260725
+
+      - name: Install and start recovery service
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          job_root=/home/ubuntu/deadlock-training-jobs
+          result_root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          installed_script="$job_root/full-crawler-recovery-v3-20260725.mjs"
+          decoded_script="$RUNNER_TEMP/full-crawler-recovery-v3-20260725.mjs"
+          payload=scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+
+          base64 --decode "$payload" | gzip --decompress > "$decoded_script"
+          node --check "$decoded_script"
+
+          sudo mkdir -p "$job_root" "$result_root"
+          sudo chown -R ubuntu:ubuntu "$job_root" "$result_root"
+          sudo install -o ubuntu -g ubuntu -m 0644 "$decoded_script" "$installed_script"
+          sha256sum "$decoded_script" | sudo tee "$result_root/script.sha256" >/dev/null
+          sudo chown ubuntu:ubuntu "$result_root/script.sha256"
+
+          if sudo test -f "$result_root/state.json" && \
+             sudo grep -q '"state": "COMPLETE"' "$result_root/state.json"; then
+            echo 'Recovery already completed successfully.'
+            sudo cat "$result_root/state.json"
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/$unit" <<EOF
+          [Unit]
+          Description=Deadlock full crawler downstream recovery v3
+          Wants=network-online.target
+          After=network-online.target docker.service
+          Requires=docker.service
+          StartLimitIntervalSec=3600
+          StartLimitBurst=3
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/home/ubuntu/apps/deadlock_dynamo_helper
+          Environment=HOME=/home/ubuntu
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart=/usr/bin/node $installed_script
+          Restart=on-failure
+          RestartSec=60
+          TimeoutStopSec=300
+          Nice=5
+          IOSchedulingClass=best-effort
+          IOSchedulingPriority=4
+          StandardOutput=append:$result_root/service.log
+          StandardError=append:$result_root/service.log
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo install -o root -g root -m 0644 "$RUNNER_TEMP/$unit" "/etc/systemd/system/$unit"
+          sudo systemctl daemon-reload
+
+          if sudo systemctl is-active --quiet "$unit"; then
+            echo 'Recovery service is already active.'
+            sudo systemctl status --no-pager "$unit"
+            exit 0
+          fi
+
+          sudo systemctl reset-failed "$unit" || true
+          sudo systemctl enable "$unit"
+          sudo systemctl start "$unit"
+          sleep 20
+          sudo systemctl status --no-pager "$unit" || true
+
+          if ! sudo systemctl is-active --quiet "$unit"; then
+            sudo journalctl -u "$unit" --no-pager -n 200
+            sudo test -f "$result_root/service.log" && sudo tail -n 200 "$result_root/service.log" || true
+            exit 1
+          fi
+
+          echo 'Recovery service started.'
+          sudo test -f "$result_root/state.json" && sudo cat "$result_root/state.json" || true
