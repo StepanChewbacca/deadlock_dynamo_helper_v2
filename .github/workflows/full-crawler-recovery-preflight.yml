@@ -20,16 +20,10 @@ jobs:
           deploy=/home/ubuntu/apps/deadlock_dynamo_helper
           volume=$(sudo docker volume inspect deadlock_dynamo_helper_deadlock-storage --format '{{ .Mountpoint }}')
           echo "DEPLOY_COMMIT=$(git -C "$deploy" rev-parse HEAD)"
-          echo "VOLUME=$volume"
-          echo '--- disk ---'
           sudo df -h "$volume"
-          echo '--- docker compose ---'
-          sudo docker compose -f "$deploy/docker-compose.yml" ps
-          echo '--- training processes ---'
-          ps -eo pid,lstart,cmd | grep -E 'full-crawler|recommendation-cycle|value-v5|node scripts' | grep -v grep || true
-          echo '--- systemd jobs ---'
-          sudo systemctl list-units --type=service --all | grep -E 'deadlock.*(training|crawler|value)' || true
-          echo '--- storage directories ---'
+          echo "API=$(sudo docker compose -f "$deploy/docker-compose.yml" ps --format json api | tr -d '\n')"
+          process_count=$(ps -eo cmd | grep -E 'full-crawler|recommendation-cycle|value-v5|node scripts' | grep -v grep | wc -l)
+          echo "TRAINING_PROCESS_COUNT=$process_count"
           for name in \
             build-decision-dataset-v3-full-crawler-20260724 \
             contextual-v3-training-full-crawler-v2-20260724 \
@@ -39,18 +33,19 @@ jobs:
             recommendation-value-v4-full-crawler-v2-20260724 \
             recommendation-policy-v4-full-crawler-v2-20260724; do
             path="$volume/$name"
-            echo "### $name"
             if sudo test -d "$path"; then
-              sudo du -sh "$path" || true
-              sudo find "$path" -maxdepth 1 -type f -printf '%f %s bytes %TY-%Tm-%TdT%TH:%TM:%TS\n' | sort || true
-              if sudo test -f "$path/manifest.json"; then
-                echo 'manifest:'
-                sudo head -c 4000 "$path/manifest.json"
-                echo
-              fi
+              size=$(sudo du -sh "$path" | awk '{print $1}')
+              files=$(sudo find "$path" -maxdepth 1 -type f | wc -l)
+              manifest=no
+              audit=no
+              evaluation=no
+              model=no
+              sudo test -f "$path/manifest.json" && manifest=yes
+              sudo test -f "$path/audit.json" && audit=yes
+              sudo test -f "$path/evaluation.json" && evaluation=yes
+              sudo test -f "$path/model.json" && model=yes
+              echo "$name size=$size files=$files manifest=$manifest audit=$audit evaluation=$evaluation model=$model"
             else
-              echo MISSING
+              echo "$name MISSING"
             fi
           done
-          echo '--- current API recommendation env ---'
-          sudo docker compose -f "$deploy/docker-compose.yml" exec -T api env | grep '^DEADLOCK_' | sort || true
