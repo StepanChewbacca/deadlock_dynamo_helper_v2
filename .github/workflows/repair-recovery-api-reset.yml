@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Patch recovery script and restart service
+      - name: Patch recovery script and restart service when needed
         shell: bash
         run: |
           set +e
@@ -33,6 +33,8 @@ jobs:
             unit=deadlock-full-crawler-recovery-v3-20260725.service
             installed=/home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
             work="$RUNNER_TEMP/recovery-fixed.mjs"
+            already_patched=0
+            sudo grep -q 'API configuration was reset while the stage was running' "$installed" && already_patched=1 || true
             sudo cp "$installed" "$work"
             sudo chown "$(id -u):$(id -g)" "$work"
             python3 scripts/patch-full-crawler-recovery-api-reset.py "$work"
@@ -47,8 +49,10 @@ jobs:
               git commit -m 'fix: recover when training API configuration resets'
               git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
             fi
-            sudo systemctl restart "$unit"
-            sleep 30
+            if [ "$already_patched" -eq 0 ]; then
+              sudo systemctl restart "$unit"
+              sleep 30
+            fi
             sudo systemctl status --no-pager "$unit"
             sudo cat /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/state.json
             sudo tail -n 100 /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/service.log
