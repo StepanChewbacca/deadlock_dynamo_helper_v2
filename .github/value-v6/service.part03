@@ -1,0 +1,220 @@
+        eligibleDecisionCountsByMatch.set(
+          parsed.row.matchId,
+          (eligibleDecisionCountsByMatch.get(parsed.row.matchId) ?? 0) + 1,
+        );
+        const current = matches.get(parsed.row.matchId);
+        if (
+          !current ||
+          Date.parse(parsed.firstObservedAt) < Date.parse(current.firstObservedAt)
+        ) {
+          matches.set(parsed.row.matchId, {
+            matchId: parsed.row.matchId,
+            firstObservedAt: parsed.firstObservedAt,
+          });
+        }
+      }
+      if (sourceRowCount % 50_000 === 0) {
+        this.status = { ...this.status, processedRowCount: sourceRowCount };
+        await yieldEventLoop();
+      }
+    }
+    return {
+      sourceRowCount,
+      eligibleSourceRowCount,
+      excludedSourceRowCount,
+      shortHorizonEligibleRowCount,
+      duplicateEligibleDecisionCount,
+      matches: [...matches.values()],
+      eligibleDecisionCountsByMatch,
+    };
+  }
+
+  private async trainModel(
+    model: RecommendationValueV6Model,
+    options: RecommendationValueV6TrainingOptions,
+    matchIds: Set<string>,
+    countsByMatch: Map<string, number>,
+  ): Promise<PassMetrics> {
+    let rowCount = 0;
+    let totalWeight = 0;
+    let sourceCount = 0;
+    for await (const value of ndjson(this.sourceDatasetPath)) {
+      sourceCount += 1;
+      const parsed = parseSourceRow(value, options);
+      if (parsed && matchIds.has(parsed.row.matchId)) {
+        const matchWeight = matchRowWeight(parsed.row.matchId, countsByMatch);
+        updateRecommendationValueV6Model(model, parsed.row, matchWeight);
+        rowCount += 1;
+        totalWeight += matchWeight;
+      }
+      if (sourceCount % 50_000 === 0) {
+        this.status = { ...this.status, processedRowCount: sourceCount };
+        await yieldEventLoop();
+      }
+    }
+    return { rowCount, totalWeight };
+  }
+
+  private async tuneActionResidualScale(
+    model: RecommendationValueV6Model,
+    options: RecommendationValueV6TrainingOptions,
+    matchIds: Set<string>,
+    countsByMatch: Map<string, number>,
+  ): Promise<{
+    rowCount: number;
+    totalWeight: number;
+    selection: ReturnType<typeof selectRecommendationValueV6ActionScale>;
+  }> {
+    const accumulators = new Map<
+      number,
+      RecommendationValueV6MetricsAccumulator
+    >(
+      options.actionResidualScales.map((scale) => [
+        scale,
+        createRecommendationValueV6MetricsAccumulator(),
+      ]),
+    );
+    let rowCount = 0;
+    let totalWeight = 0;
+    let sourceCount = 0;
+    for await (const value of ndjson(this.sourceDatasetPath)) {
+      sourceCount += 1;
+      const parsed = parseSourceRow(value, options);
+      if (parsed && matchIds.has(parsed.row.matchId)) {
+        const matchWeight = matchRowWeight(parsed.row.matchId, countsByMatch);
+        for (const [scale, accumulator] of accumulators) {
+          const evaluated = evaluateRow(model, parsed.row, options, scale);
+          observeRecommendationValueV6Prediction(
+            accumulator,
+            parsed.row,
+            evaluated.observed,
+            evaluated.candidates,
+            matchWeight,
+          );
+        }
+        rowCount += 1;
+        totalWeight += matchWeight;
+      }
+      if (sourceCount % 50_000 === 0) {
+        this.status = { ...this.status, processedRowCount: sourceCount };
+        await yieldEventLoop();
+      }
+    }
+    const candidates = [...accumulators.entries()].map(
+      ([actionResidualScale, accumulator]) => {
+        const metrics = finalizeRecommendationValueV6Metrics(accumulator);
+        return {
+          actionResidualScale,
+          tuningLoss:
+            metrics.actionRmse +
+            0.05 * (1 - metrics.observedActionMeanReciprocalRank),
+        };
+      },
+    );
+    return {
+      rowCount,
+      totalWeight,
+      selection: selectRecommendationValueV6ActionScale(candidates),
+    };
+  }
+
+  private async evaluateTest(
+    model: RecommendationValueV6Model,
+    options: RecommendationValueV6TrainingOptions,
+    actionResidualScale: number,
+    matchIds: Set<string>,
+    countsByMatch: Map<string, number>,
+  ): Promise<EvaluationPass> {
+    const accumulator = createRecommendationValueV6MetricsAccumulator();
+    const heroAccumulators = new Map<
+      number,
+      RecommendationValueV6MetricsAccumulator
+    >();
+    const matchAccumulators = new Map<
+      string,
+      RecommendationValueV6MetricsAccumulator
+    >();
+    const output = await open(`${this.paths.predictionEvaluation}.partial`, 'w');
+    let buffer = '';
+    let rowCount = 0;
+    let totalWeight = 0;
+    let sourceCount = 0;
+    try {
+      for await (const value of ndjson(this.sourceDatasetPath)) {
+        sourceCount += 1;
+        const parsed = parseSourceRow(value, options);
+        if (parsed && matchIds.has(parsed.row.matchId)) {
+          const matchWeight = matchRowWeight(parsed.row.matchId, countsByMatch);
+          const evaluated = evaluateRow(
+            model,
+            parsed.row,
+            options,
+            actionResidualScale,
+          );
+          observeRecommendationValueV6Prediction(
+            accumulator,
+            parsed.row,
+            evaluated.observed,
+            evaluated.candidates,
+            matchWeight,
+          );
+          const heroAccumulator =
+            heroAccumulators.get(parsed.row.heroId) ??
+            createRecommendationValueV6MetricsAccumulator();
+          observeRecommendationValueV6Prediction(
+            heroAccumulator,
+            parsed.row,
+            evaluated.observed,
+            evaluated.candidates,
+            matchWeight,
+          );
+          heroAccumulators.set(parsed.row.heroId, heroAccumulator);
+          const matchAccumulator =
+            matchAccumulators.get(parsed.row.matchId) ??
+            createRecommendationValueV6MetricsAccumulator();
+          observeRecommendationValueV6Prediction(
+            matchAccumulator,
+            parsed.row,
+            evaluated.observed,
+            evaluated.candidates,
+            matchWeight,
+          );
+          matchAccumulators.set(parsed.row.matchId, matchAccumulator);
+          buffer += `${JSON.stringify({
+            decisionId: parsed.row.decisionId,
+            matchId: parsed.row.matchId,
+            heroId: parsed.row.heroId,
+            observedActionKey: parsed.row.observedActionKey,
+            targetUtility: parsed.row.targetUtility,
+            targetComponents: parsed.row.targetComponents,
+            matchWeight,
+            stateUtility: evaluated.observed.stateUtility,
+            observedActionUtility: evaluated.observed.actionUtility,
+            observedActionAdvantage: evaluated.observed.actionAdvantage,
+            stateWinProbability: evaluated.observed.stateWinProbability,
+            observedActionWinProbability:
+              evaluated.observed.actionWinProbability,
+            supportedStateKeyCount:
+              evaluated.observed.supportedStateKeyCount,
+            supportedActionKeyCount:
+              evaluated.observed.supportedActionKeyCount,
+            candidateRanking: [...evaluated.candidates]
+              .sort(
+                (left, right) =>
+                  right.prediction.actionAdvantage -
+                    left.prediction.actionAdvantage ||
+                  left.actionKey.localeCompare(right.actionKey),
+              )
+              .map((candidate, index) => ({
+                rank: index + 1,
+                actionKey: candidate.actionKey,
+                actionUtility: candidate.prediction.actionUtility,
+                actionAdvantage: candidate.prediction.actionAdvantage,
+                actionWinProbability:
+                  candidate.prediction.actionWinProbability,
+              })),
+          })}\n`;
+          if (Buffer.byteLength(buffer) >= BUFFER_LIMIT_BYTES) {
+            await output.write(buffer);
+            buffer = '';
+          }
