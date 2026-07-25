@@ -1,0 +1,34 @@
+name: Capture full crawler recovery status 20260725 0646
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/capture-full-crawler-recovery-status-20260725-0646.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture status
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          deploy=/home/ubuntu/apps/deadlock_dynamo_helper
+          mkdir -p recovery-status
+          git -C "$deploy" rev-parse HEAD > recovery-status/deploy-commit.txt
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts > recovery-status/systemd.txt
+          sudo cat "$root/state.json" > recovery-status/state.json
+          sudo tail -n 160 "$root/service.log" > recovery-status/service-tail.log
+      - name: Upload status
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-crawler-recovery-status-20260725-0646
+          path: recovery-status
+          if-no-files-found: error
+          retention-days: 3
