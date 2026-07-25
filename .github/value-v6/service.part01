@@ -1,0 +1,220 @@
+        state: 'COMPLETE',
+        phase: 'COMPLETE',
+        sourceRowCount: numeric(source.sourceRowCount),
+        eligibleSourceRowCount: numeric(source.eligibleSourceRowCount),
+        excludedSourceRowCount: numeric(source.excludedSourceRowCount),
+        shortHorizonEligibleRowCount: numeric(
+          source.shortHorizonEligibleRowCount,
+        ),
+        sourceMatchCount: numeric(source.eligibleMatchCount),
+        trainMatchCount: numeric(split.trainMatchCount),
+        tuningMatchCount: numeric(split.tuningMatchCount),
+        testMatchCount: numeric(split.testMatchCount),
+        trainRowCount: numeric(split.trainRowCount),
+        tuningRowCount: numeric(split.tuningRowCount),
+        testRowCount: numeric(split.testRowCount),
+        completedAt: text(this.manifest.generatedAt),
+        manifestAvailable: true,
+        auditAvailable: true,
+        evaluationAvailable: true,
+        modelAvailable: true,
+      };
+    }
+  }
+
+  async start(
+    request: RecommendationValueV6TrainingStartRequest = {},
+  ): Promise<RecommendationValueV6TrainingStatus> {
+    if (this.status.state === 'RUNNING') {
+      throw new Error('Recommendation Value V6 training is already running.');
+    }
+    const options = normalizeOptions(request);
+    this.status = {
+      ...this.createIdleStatus(),
+      state: 'RUNNING',
+      startedAt: new Date().toISOString(),
+      options,
+      manifestAvailable: this.manifest !== undefined,
+      auditAvailable: this.audit !== undefined,
+      evaluationAvailable: this.evaluation !== undefined,
+      modelAvailable: this.modelArtifact !== undefined,
+    };
+    this.runPromise = this.run(options);
+    return this.getStatus();
+  }
+
+  async waitForIdle(): Promise<void> {
+    await this.runPromise;
+  }
+
+  getStatus(): RecommendationValueV6TrainingStatus {
+    return clone(this.status);
+  }
+
+  getManifest(): Record<string, unknown> | undefined {
+    return this.manifest ? clone(this.manifest) : undefined;
+  }
+
+  getAudit(): Record<string, unknown> | undefined {
+    return this.audit ? clone(this.audit) : undefined;
+  }
+
+  getEvaluation(): Record<string, unknown> | undefined {
+    return this.evaluation ? clone(this.evaluation) : undefined;
+  }
+
+  getModel(): Record<string, unknown> | undefined {
+    return this.modelArtifact ? clone(this.modelArtifact) : undefined;
+  }
+
+  private async run(options: RecommendationValueV6TrainingOptions): Promise<void> {
+    try {
+      const source = await this.loadSourceArtifacts(options);
+      await mkdir(this.outputDirectory, { recursive: true });
+      await this.clearOutputs();
+      this.manifest = undefined;
+      this.audit = undefined;
+      this.evaluation = undefined;
+      this.modelArtifact = undefined;
+      this.status = {
+        ...this.status,
+        manifestAvailable: false,
+        auditAvailable: false,
+        evaluationAvailable: false,
+        modelAvailable: false,
+      };
+
+      this.status = {
+        ...this.status,
+        phase: 'SPLITTING',
+        currentPass: 1,
+        sourceRowCount: numeric(record(source.manifest.artifact).rowCount),
+      };
+      const sourceSummary = await this.collectSourceSummary(options);
+      validateSourceSummary(sourceSummary, source.manifest, source.audit);
+      const split = selectRecommendationOfflineThreeWaySplit(
+        sourceSummary.matches,
+        options,
+      );
+      const splitRuntime: SplitRuntime = {
+        trainMatchIds: new Set(split.train.map((value) => value.matchId)),
+        tuningMatchIds: new Set(split.tuning.map((value) => value.matchId)),
+        testMatchIds: new Set(split.test.map((value) => value.matchId)),
+        descriptorSha256: split.descriptorSha256,
+      };
+      this.status = {
+        ...this.status,
+        sourceRowCount: sourceSummary.sourceRowCount,
+        eligibleSourceRowCount: sourceSummary.eligibleSourceRowCount,
+        excludedSourceRowCount: sourceSummary.excludedSourceRowCount,
+        shortHorizonEligibleRowCount:
+          sourceSummary.shortHorizonEligibleRowCount,
+        processedRowCount: sourceSummary.sourceRowCount,
+        sourceMatchCount: sourceSummary.matches.length,
+        trainMatchCount: splitRuntime.trainMatchIds.size,
+        tuningMatchCount: splitRuntime.tuningMatchIds.size,
+        testMatchCount: splitRuntime.testMatchIds.size,
+      };
+
+      this.status = {
+        ...this.status,
+        phase: 'TRAINING',
+        currentPass: 2,
+        processedRowCount: 0,
+      };
+      const model = createRecommendationValueV6Model();
+      const trainMetrics = await this.trainModel(
+        model,
+        options,
+        splitRuntime.trainMatchIds,
+        sourceSummary.eligibleDecisionCountsByMatch,
+      );
+      assertWeightMatchesSplit(
+        'training',
+        trainMetrics.totalWeight,
+        splitRuntime.trainMatchIds.size,
+      );
+      this.status = { ...this.status, trainRowCount: trainMetrics.rowCount };
+
+      this.status = {
+        ...this.status,
+        phase: 'TUNING',
+        currentPass: 3,
+        processedRowCount: 0,
+      };
+      const tuning = await this.tuneActionResidualScale(
+        model,
+        options,
+        splitRuntime.tuningMatchIds,
+        sourceSummary.eligibleDecisionCountsByMatch,
+      );
+      assertWeightMatchesSplit(
+        'tuning',
+        tuning.totalWeight,
+        splitRuntime.tuningMatchIds.size,
+      );
+      this.status = { ...this.status, tuningRowCount: tuning.rowCount };
+
+      this.status = {
+        ...this.status,
+        phase: 'EVALUATING',
+        currentPass: 4,
+        processedRowCount: 0,
+      };
+      const test = await this.evaluateTest(
+        model,
+        options,
+        tuning.selection.actionResidualScale,
+        splitRuntime.testMatchIds,
+        sourceSummary.eligibleDecisionCountsByMatch,
+      );
+      assertWeightMatchesSplit(
+        'test',
+        test.totalWeight,
+        splitRuntime.testMatchIds.size,
+      );
+      this.status = { ...this.status, testRowCount: test.rowCount };
+
+      this.status = {
+        ...this.status,
+        phase: 'FINALIZING',
+        currentPass: 5,
+        processedRowCount: sourceSummary.sourceRowCount,
+      };
+      const bootstrap = bootstrapEvaluation(
+        test.perMatch,
+        options.bootstrapSamples,
+      );
+      const generatedAt = new Date().toISOString();
+      const serializedModel = {
+        schemaVersion: RECOMMENDATION_VALUE_V6_TRAINING_SCHEMA_VERSION,
+        modelVersion: RECOMMENDATION_VALUE_V6_MODEL_VERSION,
+        generatedAt,
+        selectedActionResidualScale: tuning.selection.actionResidualScale,
+        options,
+        model: serializeRecommendationValueV6Model(
+          model,
+          options.minimumObservations,
+        ),
+      };
+      const evaluation = {
+        schemaVersion: RECOMMENDATION_VALUE_V6_TRAINING_SCHEMA_VERSION,
+        modelVersion: RECOMMENDATION_VALUE_V6_MODEL_VERSION,
+        generatedAt,
+        targetContract: targetContract(options),
+        tuning: tuning.selection,
+        test: {
+          metrics: test.metrics,
+          perHero: test.perHero,
+          bootstrap,
+        },
+        releaseGate: releaseGate(test.metrics, bootstrap),
+        warnings: evaluationWarnings(test.metrics),
+      };
+      const audit = {
+        schemaVersion: RECOMMENDATION_VALUE_V6_TRAINING_SCHEMA_VERSION,
+        modelVersion: RECOMMENDATION_VALUE_V6_MODEL_VERSION,
+        generatedAt,
+        passed:
+          sourceSummary.duplicateEligibleDecisionCount === 0 &&
+          trainMetrics.rowCount > 0 &&
