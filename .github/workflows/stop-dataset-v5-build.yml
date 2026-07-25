@@ -1,0 +1,22 @@
+name: Stop Dataset V5 build
+
+on:
+  push:
+    branches:
+      - ops/deploy-dataset-v5-20260725
+    paths:
+      - .github/workflows/stop-dataset-v5-build.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-and-build-recommendation-dataset-v5
+  cancel-in-progress: true
+
+jobs:
+  stop:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - run: echo 'Previous Dataset V5 build cancelled before schema correction.'
