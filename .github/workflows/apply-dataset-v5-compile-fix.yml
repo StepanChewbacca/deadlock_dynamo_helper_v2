@@ -1,0 +1,52 @@
+name: Apply Dataset V5 compile fix
+
+on:
+  push:
+    branches:
+      - agent/recommendation-dataset-v5
+    paths:
+      - .github/workflows/apply-dataset-v5-compile-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-dataset-v5-compile-fix
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-dataset-v5
+          fetch-depth: 0
+
+      - name: Apply compile fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/src/deadlock-live/recommendation-decision-dataset-v5.service.ts')
+          content = path.read_text()
+          old = """  const spikeCosts = progress
+              .map((entry) => entry.missingCost)
+              .filter((value) => value > 0);"""
+          new = """  const spikeCosts = progress
+              .map((entry) => numeric(entry.missingCost))
+              .filter((value) => value > 0);"""
+          if old not in content:
+              raise SystemExit('Expected spikeCosts block was not found')
+          path.write_text(content.replace(old, new, 1))
+          PY
+          rm .github/workflows/apply-dataset-v5-compile-fix.yml
+
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/api/src/deadlock-live/recommendation-decision-dataset-v5.service.ts .github/workflows/apply-dataset-v5-compile-fix.yml
+          git commit -m "fix: type Dataset V5 power spike costs"
+          git push origin HEAD:agent/recommendation-dataset-v5
