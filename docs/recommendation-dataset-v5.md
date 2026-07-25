@@ -14,6 +14,8 @@ Artifacts are written under `DEADLOCK_TIMELINE_STORAGE_DIR/<matchId>/`:
 - `checkpoint.json` - resumable collector state
 - `manifest.json` and `audit.json` - source and integrity metadata
 
+A timeline passes audit only after the stream emits its terminal `end` event. Stopped, failed, or interrupted streams remain unavailable to Dataset V5.
+
 A short-horizon value is never reconstructed from final match statistics. When no audited timeline exists, the corresponding target remains unavailable.
 
 ## Leakage boundary
