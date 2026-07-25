@@ -1,6 +1,6 @@
 # Recommendation Dataset V5
 
-Recommendation Dataset V5 enriches Recommendation Dataset V4 decisions with build trajectory, item catalog, recipe, and bounded post-decision outcomes.
+`RECOMMENDATION_DECISION_DATASET_V5_2` enriches Recommendation Dataset V4 decisions with build trajectory, item catalog, recipe, and bounded post-decision outcomes.
 
 ## Timeline source
 
@@ -23,7 +23,7 @@ A short-horizon value is never reconstructed from final match statistics. When n
 For a decision at game time `t`:
 
 - input state uses only a player snapshot at or before `t`;
-- the 3, 5, and 10 minute targets use snapshots in `(t, t + horizon]`;
+- the 3, 5, and 10 minute targets use snapshots in `(t, t + horizon]` and require a snapshot no more than `snapshotStalenessS` before the exact horizon boundary;
 - the final match result is an auxiliary target only;
 - future actions are not used to reconstruct the candidate set.
 

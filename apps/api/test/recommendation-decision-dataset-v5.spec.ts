@@ -80,7 +80,7 @@ describe('Recommendation Dataset V5', () => {
       phase: 'COMPLETE',
       outputRowCount: 2,
       rowsWithTimelineCount: 2,
-      rowsWithComplete3mOutcomeCount: 2,
+      rowsWithComplete3mOutcomeCount: 1,
       manifestAvailable: true,
       auditAvailable: true,
     });
@@ -110,6 +110,10 @@ describe('Recommendation Dataset V5', () => {
       assistsDelta: 2,
       netWorthDelta: 1700,
       objectiveEventCount: 1,
+      baselineStalenessS: 5,
+      targetStalenessS: 5,
+      ownObjectiveLossCount: 0,
+      enemyObjectiveLossCount: 1,
     });
     expect(first.stateBeforeAction.playerTimelineSnapshot.netWorth).toBe(1000);
     expect(first.stateBeforeAction.playerTimelineSnapshot.netWorth).not.toBe(2700);
@@ -131,6 +135,34 @@ describe('Recommendation Dataset V5', () => {
     const availability = service.getSourceAvailability() as any;
     expect(availability.fields.shortHorizonKdaAndNetWorth.available).toBe(true);
     expect(availability.fields.historicalCompletedMatchShortHorizonBackfill.available).toBe(false);
+  });
+
+  it('rejects a stale horizon snapshot instead of treating partial coverage as exact', async () => {
+    const rows = [createRows()[0]];
+    const sourceSha256 = await writeSourceArtifacts(rows, sourceDirectory);
+    await writeTimelineArtifacts(timelineDirectory, [
+      createSnapshot(95, 1, 0, 1, 1000),
+      createSnapshot(150, 2, 0, 2, 1800),
+    ]);
+    const service = new RecommendationDecisionDatasetV5Service();
+    await service.onModuleInit();
+    await service.start({
+      expectedSourceSha256: sourceSha256,
+      partitionCount: 2,
+      snapshotStalenessS: 60,
+    });
+    await service.waitForIdle();
+
+    const [row] = await readNdjson(join(outputDirectory, 'dataset.ndjson'));
+    expect(row.shortHorizonOutcomes.windows['3m']).toMatchObject({
+      available: false,
+      baselineFresh: true,
+      targetAvailable: true,
+      targetFresh: false,
+      targetStalenessS: 130,
+      unavailableReason: 'STALE_SNAPSHOT_AT_HORIZON',
+    });
+    expect(row.trainingEligibility.shortHorizon3m).toBe(false);
   });
 
   it('restores a completed build without duplicating rows', async () => {
@@ -206,15 +238,17 @@ async function writeSourceArtifacts(rows: RecommendationDecisionDatasetV4Row[], 
   return sha256;
 }
 
-async function writeTimelineArtifacts(root: string): Promise<void> {
-  const directory = join(root, '100');
-  await mkdir(directory, { recursive: true });
-  const snapshots: MatchTimelinePlayerSnapshot[] = [
+async function writeTimelineArtifacts(
+  root: string,
+  snapshots: MatchTimelinePlayerSnapshot[] = [
     createSnapshot(95, 1, 0, 1, 1000),
     createSnapshot(275, 2, 1, 3, 2700),
     createSnapshot(395, 3, 1, 4, 3900),
     createSnapshot(695, 4, 2, 5, 7000),
-  ];
+  ],
+): Promise<void> {
+  const directory = join(root, '100');
+  await mkdir(directory, { recursive: true });
   const objective: MatchTimelineObjectiveEvent = {
     schemaVersion: MATCH_TIMELINE_SCHEMA_VERSION,
     timelineVersion: MATCH_TIMELINE_VERSION,
