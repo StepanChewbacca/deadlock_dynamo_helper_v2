@@ -1,0 +1,39 @@
+name: Persist recovery status automation 20260725 1244
+
+on:
+  push:
+    branches:
+      - diagnostics/run-full-crawler-value-v5-20260725
+    paths:
+      - '.github/workflows/persist-recovery-status-automation-20260725-1244.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  persist:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-full-crawler-value-v5-20260725
+          fetch-depth: 0
+      - name: Persist service and training state
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          result_root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          output=.automation/recovery-status-20260725-1244
+          mkdir -p "$output"
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainCode -p ExecMainStatus -p NRestarts > "$output/systemd.txt" || true
+          sudo systemctl status --no-pager "$unit" > "$output/systemd-status.txt" 2>&1 || true
+          sudo test -f "$result_root/state.json" && sudo cat "$result_root/state.json" > "$output/state.json" || true
+          sudo test -f "$result_root/service.log" && sudo tail -n 500 "$result_root/service.log" > "$output/service-tail.log" || true
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$output"
+          git commit -m 'chore: persist current recovery status' || exit 0
+          git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
