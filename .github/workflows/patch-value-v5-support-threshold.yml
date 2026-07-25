@@ -44,6 +44,21 @@ jobs:
               text = text.replace(old, new)
           path.write_text(text)
 
+          serialization_path = Path('apps/api/test/recommendation-value-v5-serialization.spec.ts')
+          serialization = serialization_path.read_text()
+          serialization_replacements = [
+              ("'STATE:RARE': { wins: 20, total: 20 },", "'STATE:RARE': { wins: 20, total: 20, observations: 1 },"),
+              ("'STATE:SUPPORTED': { wins: 20, total: 21 },", "'STATE:SUPPORTED': { wins: 20, total: 21, observations: 2 },"),
+              ("'ACTION:RARE': { wins: 20, total: 20 },", "'ACTION:RARE': { wins: 20, total: 20, observations: 1 },"),
+              ("'ACTION:SUPPORTED': { wins: 20, total: 21 },", "'ACTION:SUPPORTED': { wins: 20, total: 21, observations: 2 },"),
+              ("serializeRecommendationValueV5Model(model, 21)", "serializeRecommendationValueV5Model(model, 2)"),
+          ]
+          for old, new in serialization_replacements:
+              if old not in serialization:
+                  raise SystemExit(f'Missing expected serialization test fragment: {old!r}')
+              serialization = serialization.replace(old, new)
+          serialization_path.write_text(serialization)
+
           test_path = Path('apps/api/test/recommendation-value-v5-support.spec.ts')
           test_path.write_text("""import {
             createRecommendationValueV5Model,
@@ -85,11 +100,10 @@ jobs:
                 1,
               );
 
-              expect(model.action.get('ACTION:SUPPORTED')).toEqual({
-                wins: 0.1,
-                total: 0.2,
-                observations: 20,
-              });
+              const actionCount = model.action.get('ACTION:SUPPORTED');
+              expect(actionCount?.observations).toBe(20);
+              expect(actionCount?.wins).toBeCloseTo(0.1);
+              expect(actionCount?.total).toBeCloseTo(0.2);
               expect(prediction.supportedStateKeyCount).toBe(1);
               expect(prediction.supportedActionKeyCount).toBe(1);
               expect(serializeRecommendationValueV5Model(model, 20)).toMatchObject({
@@ -114,6 +128,6 @@ jobs:
           rm .github/workflows/patch-value-v5-support-threshold.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add apps/api/src/deadlock-live/recommendation-value-v5-model.ts apps/api/test/recommendation-value-v5-support.spec.ts .github/workflows/patch-value-v5-support-threshold.yml
+          git add apps/api/src/deadlock-live/recommendation-value-v5-model.ts apps/api/test/recommendation-value-v5-serialization.spec.ts apps/api/test/recommendation-value-v5-support.spec.ts .github/workflows/patch-value-v5-support-threshold.yml
           git commit -m 'fix: separate Value V5 support counts from weights'
           git push origin HEAD:agent/fix-value-v5-support-threshold
