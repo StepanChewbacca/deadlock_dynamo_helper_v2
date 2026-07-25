@@ -1,0 +1,119 @@
+name: Patch Value V5 support threshold
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/patch-value-v5-support-threshold.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'agent/fix-value-v5-support-threshold'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-value-v5-support-threshold
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply support-count fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/src/deadlock-live/recommendation-value-v5-model.ts')
+          text = path.read_text()
+          replacements = [
+              ("'RECOMMENDATION_VALUE_V5_MATCH_BALANCED_STATE_ACTION_RESIDUAL_1'", "'RECOMMENDATION_VALUE_V5_MATCH_BALANCED_STATE_ACTION_RESIDUAL_2'"),
+              ("export interface RecommendationValueV5WeightedBinaryCount {\n  wins: number;\n  total: number;\n}", "export interface RecommendationValueV5WeightedBinaryCount {\n  wins: number;\n  total: number;\n  observations: number;\n}"),
+              ("global: { wins: 0, total: 0 },", "global: { wins: 0, total: 0, observations: 0 },"),
+              ("Boolean(count && count.total >= minimumEffectiveObservations)", "Boolean(count && count.observations >= minimumEffectiveObservations)"),
+              ("const count = table.get(key) ?? { wins: 0, total: 0 };", "const count = table.get(key) ?? { wins: 0, total: 0, observations: 0 };"),
+              ("  count.total += weight;\n  count.wins += won ? weight : 0;", "  count.total += weight;\n  count.wins += won ? weight : 0;\n  count.observations += 1;"),
+              (".filter(([, count]) => count.total >= minimumEffectiveObservations)", ".filter(([, count]) => count.observations >= minimumEffectiveObservations)"),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Missing expected model fragment: {old!r}')
+              text = text.replace(old, new)
+          path.write_text(text)
+
+          test_path = Path('apps/api/test/recommendation-value-v5-support.spec.ts')
+          test_path.write_text("""import {
+            createRecommendationValueV5Model,
+            predictRecommendationValueV5,
+            serializeRecommendationValueV5Model,
+            updateRecommendationValueV5Model,
+          } from '../src/deadlock-live/recommendation-value-v5-model';
+
+          describe('recommendation value v5 support threshold', () => {
+            it('uses raw observation support while preserving match-balanced estimation weights', () => {
+              const model = createRecommendationValueV5Model();
+              for (let index = 0; index < 20; index += 1) {
+                updateRecommendationValueV5Model(
+                  model,
+                  {
+                    decisionId: `decision-${index}`,
+                    matchId: `match-${index}`,
+                    playerWon: index % 2 === 0,
+                    stateKeys: ['STATE:SUPPORTED'],
+                    actionKeys: ['ACTION:SUPPORTED'],
+                  },
+                  0.01,
+                );
+              }
+
+              const prediction = predictRecommendationValueV5(
+                model,
+                {
+                  stateKeys: ['STATE:SUPPORTED'],
+                  actionKeys: ['ACTION:SUPPORTED'],
+                },
+                {
+                  statePriorStrength: 100,
+                  actionPriorStrength: 100,
+                  minimumEffectiveObservations: 20,
+                  maximumAbsoluteStateLogitResidual: 1.5,
+                  maximumAbsoluteActionLogitResidual: 1.5,
+                },
+                1,
+              );
+
+              expect(model.action.get('ACTION:SUPPORTED')).toEqual({
+                wins: 0.1,
+                total: 0.2,
+                observations: 20,
+              });
+              expect(prediction.supportedStateKeyCount).toBe(1);
+              expect(prediction.supportedActionKeyCount).toBe(1);
+              expect(serializeRecommendationValueV5Model(model, 20)).toMatchObject({
+                state: {
+                  'STATE:SUPPORTED': { observations: 20 },
+                },
+                action: {
+                  'ACTION:SUPPORTED': { observations: 20 },
+                },
+              });
+            });
+          });
+          """)
+          PY
+          npm ci
+          npm run build --workspace apps/api
+          npm test --workspace apps/api -- --runInBand
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/patch-value-v5-support-threshold.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/api/src/deadlock-live/recommendation-value-v5-model.ts apps/api/test/recommendation-value-v5-support.spec.ts .github/workflows/patch-value-v5-support-threshold.yml
+          git commit -m 'fix: separate Value V5 support counts from weights'
+          git push origin HEAD:agent/fix-value-v5-support-threshold
