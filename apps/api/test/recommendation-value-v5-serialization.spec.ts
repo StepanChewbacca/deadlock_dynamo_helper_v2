@@ -5,7 +5,7 @@ import {
 } from '../src/deadlock-live/recommendation-value-v5-model';
 
 describe('recommendation value v5 serialization', () => {
-  it('excludes contexts below the minimum effective observation threshold', () => {
+  it('filters contexts by raw observation support instead of weighted mass', () => {
     const model = createRecommendationValueV5Model();
 
     updateRecommendationValueV5Model(
