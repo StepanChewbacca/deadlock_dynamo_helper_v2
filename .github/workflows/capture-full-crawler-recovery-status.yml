@@ -1,0 +1,40 @@
+name: Capture full crawler recovery status
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/capture-full-crawler-recovery-status.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture status
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          mkdir -p recovery-status
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts > recovery-status/systemd.txt
+          if sudo test -f "$root/state.json"; then
+            sudo cat "$root/state.json" > recovery-status/state.json
+          else
+            printf '{"state":"STARTING"}\n' > recovery-status/state.json
+          fi
+          if sudo test -f "$root/service.log"; then
+            sudo tail -n 100 "$root/service.log" > recovery-status/service-tail.log
+          else
+            : > recovery-status/service-tail.log
+          fi
+      - name: Upload status
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-crawler-recovery-status
+          path: recovery-status
+          if-no-files-found: error
+          retention-days: 3
