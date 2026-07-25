@@ -17,10 +17,7 @@ jobs:
         with:
           ref: agent/fix-value-v5-support-threshold
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Apply support-count fix
+      - name: Apply and commit support-count fix
         shell: bash
         run: |
           set -euo pipefail
@@ -59,8 +56,7 @@ jobs:
               serialization = serialization.replace(old, new)
           serialization_path.write_text(serialization)
 
-          test_path = Path('apps/api/test/recommendation-value-v5-support.spec.ts')
-          test_path.write_text("""import {
+          Path('apps/api/test/recommendation-value-v5-support.spec.ts').write_text("""import {
             createRecommendationValueV5Model,
             predictRecommendationValueV5,
             serializeRecommendationValueV5Model,
@@ -86,10 +82,7 @@ jobs:
 
               const prediction = predictRecommendationValueV5(
                 model,
-                {
-                  stateKeys: ['STATE:SUPPORTED'],
-                  actionKeys: ['ACTION:SUPPORTED'],
-                },
+                { stateKeys: ['STATE:SUPPORTED'], actionKeys: ['ACTION:SUPPORTED'] },
                 {
                   statePriorStrength: 100,
                   actionPriorStrength: 100,
@@ -107,24 +100,13 @@ jobs:
               expect(prediction.supportedStateKeyCount).toBe(1);
               expect(prediction.supportedActionKeyCount).toBe(1);
               expect(serializeRecommendationValueV5Model(model, 20)).toMatchObject({
-                state: {
-                  'STATE:SUPPORTED': { observations: 20 },
-                },
-                action: {
-                  'ACTION:SUPPORTED': { observations: 20 },
-                },
+                state: { 'STATE:SUPPORTED': { observations: 20 } },
+                action: { 'ACTION:SUPPORTED': { observations: 20 } },
               });
             });
           });
           """)
           PY
-          npm ci
-          npm run build --workspace apps/api
-          npm test --workspace apps/api -- --runInBand
-      - name: Commit verified fix
-        shell: bash
-        run: |
-          set -euo pipefail
           rm .github/workflows/patch-value-v5-support-threshold.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
