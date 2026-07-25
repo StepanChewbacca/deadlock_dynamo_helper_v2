@@ -17,7 +17,7 @@ jobs:
     runs-on: [self-hosted, linux, ARM64]
     timeout-minutes: 240
     steps:
-      - name: Rerun corrected Value V5 only
+      - name: Sweep extended Value V5 action scales
         shell: bash
         run: |
           set -euo pipefail
@@ -26,12 +26,12 @@ jobs:
           expected=9d0bd5535b5cbb37ee45dfbdb41f96e698d882c9
           recovery_unit=deadlock-full-crawler-recovery-v3-20260725.service
           source_dir=/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725
-          output_dir=/app/apps/api/storage/recommendation-value-v5-full-crawler-recovery-v3-20260725
+          output_dir=/app/apps/api/storage/recommendation-value-v5-scale-sweep-full-crawler-20260725
           source_sha=8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d
           api=http://127.0.0.1:3000
           endpoint=/deadlock/analysis/recommendation-value-v5-training
-          override="$RUNNER_TEMP/value-v5-support-fix.override.yml"
-          result="$RUNNER_TEMP/value-v5-support-fix-result"
+          override="$RUNNER_TEMP/value-v5-scale-sweep.override.yml"
+          result="$RUNNER_TEMP/value-v5-scale-sweep-result"
           mkdir -p "$result"
 
           restore_production() {
@@ -126,7 +126,7 @@ jobs:
               minimumEffectiveObservations: 20,
               maximumAbsoluteStateLogitResidual: 1.5,
               maximumAbsoluteActionLogitResidual: 1.5,
-              actionResidualScales: [0, 0.25, 0.5, 0.75, 1],
+              actionResidualScales: [0, 0.5, 1, 2, 4, 8, 16],
               expectedSourceSha256: $sha
             }')
           api_request POST "$endpoint/start" "$start_body" \
@@ -138,7 +138,7 @@ jobs:
             state=$(jq -r '.state' "$result/status.json")
             phase=$(jq -r '.phase' "$result/status.json")
             processed=$(jq -r '.processedRowCount // 0' "$result/status.json")
-            echo "Value V5 state=$state phase=$phase processed=$processed"
+            echo "Value V5 scale sweep state=$state phase=$phase processed=$processed"
 
             if [ "$state" = COMPLETE ]; then
               break
@@ -148,7 +148,7 @@ jobs:
               exit 1
             fi
             if [ $(( $(date +%s) - started_at )) -gt 10800 ]; then
-              echo 'Value V5 exceeded the three-hour polling timeout.' >&2
+              echo 'Value V5 scale sweep exceeded the three-hour polling timeout.' >&2
               exit 1
             fi
             sleep 30
@@ -165,17 +165,18 @@ jobs:
             modelVersion,
             releaseGate,
             selectedActionResidualScale: .tuning.selection.actionResidualScale,
+            tuningCandidates: .tuning.selection.candidates,
             support: .test.support,
             deltas: .test.deltas,
             stateOnly: .test.stateOnly,
             actionConditioned: .test.actionConditioned
           }' "$result/evaluation.json"
 
-      - name: Upload corrected Value V5 result
+      - name: Upload Value V5 scale sweep result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: corrected-value-v5-full-corpus
-          path: ${{ runner.temp }}/value-v5-support-fix-result
+          name: value-v5-scale-sweep-full-corpus
+          path: ${{ runner.temp }}/value-v5-scale-sweep-result
           if-no-files-found: warn
           retention-days: 7
