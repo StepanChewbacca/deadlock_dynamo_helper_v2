@@ -55,8 +55,8 @@ jobs:
             fi
           }
 
-          git -C "$DEPLOY" fetch origin main
-          git -C "$DEPLOY" reset --hard "$TARGET_COMMIT"
+          git -C "$DEPLOY" fetch "$GITHUB_WORKSPACE" "$TARGET_COMMIT"
+          git -C "$DEPLOY" reset --hard FETCH_HEAD
           test "$(git -C "$DEPLOY" rev-parse HEAD)" = "$TARGET_COMMIT"
 
           set_env DEADLOCK_TIMELINE_COLLECTOR_ENABLED true
