@@ -1,6 +1,6 @@
 # Recommendation Dataset V5
 
-`RECOMMENDATION_DECISION_DATASET_V5_2` enriches Recommendation Dataset V4 decisions with build trajectory, item catalog, recipe, and bounded post-decision outcomes.
+`RECOMMENDATION_DECISION_DATASET_V5_3` enriches Recommendation Dataset V4 decisions with build trajectory, item catalog, recipe, fresh team-economy state, and bounded post-decision outcomes.
 
 ## Timeline source
 
@@ -22,10 +22,23 @@ A short-horizon value is never reconstructed from final match statistics. When n
 
 For a decision at game time `t`:
 
-- input state uses only a player snapshot at or before `t`;
+- input state uses only player snapshots at or before `t`;
+- team economy uses the latest fresh snapshot per player at or before `t`, split into the player's team and the opposing team;
 - the 3, 5, and 10 minute targets use snapshots in `(t, t + horizon]` and require a snapshot no more than `snapshotStalenessS` before the exact horizon boundary;
 - the final match result is an auxiliary target only;
 - future actions are not used to reconstruct the candidate set.
+
+## Team economy
+
+Each row may include `stateBeforeAction.teamEconomy` with:
+
+- own-team and enemy-team total, average, highest, and lowest net worth;
+- absolute and relative team net-worth delta;
+- the player's share of team net worth;
+- the player's net-worth rank inside the team;
+- fresh and stale snapshot counts plus team coverage diagnostics.
+
+The feature is unavailable unless at least one fresh snapshot exists for both teams. Future snapshots are never used.
 
 ## Build
 

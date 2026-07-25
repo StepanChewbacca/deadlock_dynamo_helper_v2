@@ -26,9 +26,9 @@ import {
 import { parseInventoryStateKey } from './inventory-multiset-action-engine';
 import { sha256StableJson } from './stable-json';
 
-export const RECOMMENDATION_DECISION_DATASET_V5_SCHEMA_VERSION = 2;
+export const RECOMMENDATION_DECISION_DATASET_V5_SCHEMA_VERSION = 3;
 export const RECOMMENDATION_DECISION_DATASET_V5_VERSION =
-  'RECOMMENDATION_DECISION_DATASET_V5_2' as const;
+  'RECOMMENDATION_DECISION_DATASET_V5_3' as const;
 
 const DEFAULT_SOURCE_DIR =
   '/app/apps/api/storage/recommendation-decision-dataset-v4';
@@ -367,6 +367,7 @@ export class RecommendationDecisionDatasetV5Service implements OnModuleInit {
         leakage: {
           featureCutoff: 'DECISION_GAME_TIME_INCLUSIVE',
           futureTimelineUsedAsInputFeature: false,
+          teamEconomySnapshotsAtOrBeforeDecisionOnly: true,
           horizonWindowLowerBoundExclusive: true,
           horizonWindowUpperBoundInclusive: true,
           finalOutcomeUsedAsInputFeature: false,
@@ -413,6 +414,12 @@ export class RecommendationDecisionDatasetV5Service implements OnModuleInit {
             'decisionIndex',
             'nextObservedActionKey',
             'timeToNextObservedActionS',
+          ],
+          stateFeatures: [
+            'playerTimelineSnapshot',
+            'teamEconomy',
+            'inventory',
+            'candidateActions',
           ],
           shortHorizonTargets: ['3m', '5m', '10m'],
           finalOutcomeAuxiliaryOnly: true,
@@ -692,6 +699,12 @@ function enrich(input: {
 } {
   const snapshots = playerSnapshots(input.timeline.snapshots, input.row);
   const baseline = atOrBefore(snapshots, input.row.gameTimeS);
+  const teamEconomy = teamEconomyFeature(
+    input.timeline.snapshots,
+    input.row,
+    input.row.gameTimeS,
+    input.snapshotStalenessS,
+  );
   const windows = Object.fromEntries(
     HORIZONS.map((horizon) => [
       horizon.key,
@@ -748,6 +761,7 @@ function enrich(input: {
           input.row.gameTimeS,
           input.snapshotStalenessS,
         ),
+        teamEconomy,
       },
       observedAction: {
         actionKey: input.row.observedLabel.exactActionKey,
@@ -907,6 +921,150 @@ function snapshotFeature(
     health: snapshot.health,
     maxHealth: snapshot.maxHealth,
     level: snapshot.level,
+  };
+}
+
+
+function teamEconomyFeature(
+  snapshots: readonly MatchTimelinePlayerSnapshot[],
+  row: RecommendationDecisionDatasetV4Row,
+  decisionTime: number,
+  staleAfter: number,
+): Record<string, unknown> {
+  const ownTeamId = liveTeam(row.teamId);
+  if (ownTeamId === undefined) {
+    return {
+      available: false,
+      decisionGameTimeS: decisionTime,
+      unavailableReason: 'MISSING_PLAYER_TEAM_ID',
+    };
+  }
+
+  const latest = latestPlayerSnapshotsAtOrBefore(snapshots, decisionTime);
+  const teamSnapshots = latest.filter(
+    (snapshot) => snapshot.teamId !== undefined,
+  );
+  const fresh = teamSnapshots.filter(
+    (snapshot) => decisionTime - snapshot.gameTimeS <= staleAfter,
+  );
+  const own = fresh.filter((snapshot) => snapshot.teamId === ownTeamId);
+  const enemy = fresh.filter((snapshot) => snapshot.teamId !== ownTeamId);
+  const expectedOwnTeamPlayerCount = new Set(row.alliedHeroIds).size;
+  const expectedEnemyTeamPlayerCount = new Set(row.enemyHeroIds).size;
+
+  if (own.length === 0 || enemy.length === 0) {
+    return {
+      available: false,
+      decisionGameTimeS: decisionTime,
+      snapshotStalenessS: staleAfter,
+      ownTeamId,
+      freshPlayerCount: fresh.length,
+      stalePlayerCount: teamSnapshots.length - fresh.length,
+      ownTeamPlayerCount: own.length,
+      enemyTeamPlayerCount: enemy.length,
+      expectedOwnTeamPlayerCount,
+      expectedEnemyTeamPlayerCount,
+      unavailableReason:
+        own.length === 0
+          ? 'MISSING_OWN_TEAM_SNAPSHOT_AT_DECISION'
+          : 'MISSING_ENEMY_TEAM_SNAPSHOT_AT_DECISION',
+    };
+  }
+
+  const ownSummary = teamEconomySummary(own);
+  const enemySummary = teamEconomySummary(enemy);
+  const player =
+    own.find((snapshot) => snapshot.steamId === row.steamId) ??
+    own.find((snapshot) => snapshot.heroId === row.heroId);
+  const sortedOwn = [...own].sort(
+    (left, right) =>
+      right.netWorth - left.netWorth ||
+      left.heroId - right.heroId ||
+      left.steamId.localeCompare(right.steamId),
+  );
+  const playerRank = player
+    ? sortedOwn.findIndex(
+        (snapshot) =>
+          snapshot.steamId === player.steamId &&
+          snapshot.heroId === player.heroId,
+      ) + 1
+    : undefined;
+  const netWorthDelta = ownSummary.netWorth - enemySummary.netWorth;
+  const combinedNetWorth = ownSummary.netWorth + enemySummary.netWorth;
+
+  return {
+    available: true,
+    decisionGameTimeS: decisionTime,
+    snapshotStalenessS: staleAfter,
+    ownTeamId,
+    enemyTeamIds: [
+      ...new Set(
+        enemy
+          .map((snapshot) => snapshot.teamId)
+          .filter((teamId): teamId is number => teamId !== undefined),
+      ),
+    ].sort((left, right) => left - right),
+    freshPlayerCount: fresh.length,
+    stalePlayerCount: teamSnapshots.length - fresh.length,
+    expectedOwnTeamPlayerCount,
+    expectedEnemyTeamPlayerCount,
+    completeOwnTeam:
+      expectedOwnTeamPlayerCount > 0 &&
+      own.length >= expectedOwnTeamPlayerCount,
+    completeEnemyTeam:
+      expectedEnemyTeamPlayerCount > 0 &&
+      enemy.length >= expectedEnemyTeamPlayerCount,
+    ownTeam: ownSummary,
+    enemyTeam: enemySummary,
+    netWorthDelta,
+    relativeNetWorthDelta:
+      combinedNetWorth > 0 ? netWorthDelta / combinedNetWorth : 0,
+    playerNetWorth: player?.netWorth,
+    playerNetWorthShare:
+      player && ownSummary.netWorth > 0
+        ? player.netWorth / ownSummary.netWorth
+        : undefined,
+    playerNetWorthRankInTeam: playerRank && playerRank > 0 ? playerRank : undefined,
+  };
+}
+
+function latestPlayerSnapshotsAtOrBefore(
+  snapshots: readonly MatchTimelinePlayerSnapshot[],
+  decisionTime: number,
+): MatchTimelinePlayerSnapshot[] {
+  const latest = new Map<string, MatchTimelinePlayerSnapshot>();
+  for (const snapshot of snapshots) {
+    if (snapshot.gameTimeS > decisionTime) {
+      break;
+    }
+    const key = snapshot.steamId
+      ? `STEAM:${snapshot.steamId}`
+      : `HERO:${snapshot.teamId ?? 'UNKNOWN'}:${snapshot.heroId}`;
+    const existing = latest.get(key);
+    if (!existing || compareSnapshots(existing, snapshot) <= 0) {
+      latest.set(key, snapshot);
+    }
+  }
+  return [...latest.values()].sort(compareSnapshots);
+}
+
+function teamEconomySummary(
+  snapshots: readonly MatchTimelinePlayerSnapshot[],
+): {
+  playerCount: number;
+  netWorth: number;
+  averageNetWorth: number;
+  highestNetWorth: number;
+  lowestNetWorth: number;
+} {
+  const values = snapshots.map((snapshot) => snapshot.netWorth);
+  const netWorth = values.reduce((sum, value) => sum + value, 0);
+  return {
+    playerCount: snapshots.length,
+    netWorth,
+    averageNetWorth: snapshots.length > 0 ? netWorth / snapshots.length : 0,
+    highestNetWorth: values.length > 0 ? Math.max(...values) : 0,
+    lowestNetWorth: values.length > 0 ? Math.min(...values) : 0,
   };
 }
 
