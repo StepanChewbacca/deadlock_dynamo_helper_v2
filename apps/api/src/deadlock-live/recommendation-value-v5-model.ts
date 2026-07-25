@@ -359,12 +359,13 @@ export function evaluateRecommendationValueV5(
 
 export function serializeRecommendationValueV5Model(
   model: RecommendationValueV5Model,
+  minimumEffectiveObservations = 0,
 ): Record<string, unknown> {
   return {
     version: model.version,
     global: { ...model.global },
-    state: serializeTable(model.state),
-    action: serializeTable(model.action),
+    state: serializeTable(model.state, minimumEffectiveObservations),
+    action: serializeTable(model.action, minimumEffectiveObservations),
   };
 }
 
@@ -454,9 +455,11 @@ function incrementCount(
 
 function serializeTable(
   table: ReadonlyMap<string, RecommendationValueV5WeightedBinaryCount>,
+  minimumEffectiveObservations: number,
 ): Record<string, RecommendationValueV5WeightedBinaryCount> {
   return Object.fromEntries(
     [...table.entries()]
+      .filter(([, count]) => count.total >= minimumEffectiveObservations)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, count]) => [key, { ...count }]),
   );

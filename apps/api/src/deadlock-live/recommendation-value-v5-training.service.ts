@@ -418,7 +418,10 @@ export class RecommendationValueV5TrainingService implements OnModuleInit {
         combination: 'STATE_PLUS_TUNED_ACTION_LOGIT_RESIDUAL',
         actionResidualScale: tuning.selection.actionResidualScale,
         options: modelOptions(options),
-        counts: serializeRecommendationValueV5Model(model),
+        counts: serializeRecommendationValueV5Model(
+          model,
+          options.minimumEffectiveObservations,
+        ),
       };
       const evaluation = {
         schemaVersion: RECOMMENDATION_VALUE_V5_TRAINING_SCHEMA_VERSION,
