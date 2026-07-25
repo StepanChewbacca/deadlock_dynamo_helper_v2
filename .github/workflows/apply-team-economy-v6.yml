@@ -28,6 +28,49 @@ jobs:
           node-version: 22
           cache: yarn
 
+      - name: Normalize patch matcher
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/apply-team-economy-v6.py')
+          content = path.read_text(encoding='utf-8')
+          old = '''replace_count(
+              VALUE_SERVICE,
+              """      previousTail,
+                actionKey:""",
+              """      previousTail,
+                teamEconomyBand,
+                actionKey:""",
+              2,
+          )
+          '''
+          new = '''replace_once(
+              VALUE_SERVICE,
+              """    previousTail,
+              actionKey: observedActionKey,""",
+              """    previousTail,
+              teamEconomyBand,
+              actionKey: observedActionKey,""",
+          )
+
+          replace_once(
+              VALUE_SERVICE,
+              """      previousTail,
+              actionKey,
+              feature: featureCandidates.get(actionKey) ?? {},""",
+              """      previousTail,
+              teamEconomyBand,
+              actionKey,
+              feature: featureCandidates.get(actionKey) ?? {},""",
+          )
+          '''
+          if content.count(old) != 1:
+              raise RuntimeError('Value V6 patch matcher normalization target is missing.')
+          path.write_text(content.replace(old, new), encoding='utf-8')
+          PY
+
       - name: Apply team economy implementation
         shell: bash
         run: |
