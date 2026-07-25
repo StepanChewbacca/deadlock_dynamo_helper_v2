@@ -22,7 +22,7 @@ jobs:
           echo "DEPLOY_COMMIT=$(git -C "$deploy" rev-parse HEAD)"
           sudo df -h "$volume"
           echo "API=$(sudo docker compose -f "$deploy/docker-compose.yml" ps --format json api | tr -d '\n')"
-          process_count=$(ps -eo cmd | grep -E 'full-crawler|recommendation-cycle|value-v5|node scripts' | grep -v grep | wc -l)
+          process_count=$(pgrep -fc 'full-crawler|recommendation-cycle|value-v5|node scripts' || true)
           echo "TRAINING_PROCESS_COUNT=$process_count"
           for name in \
             build-decision-dataset-v3-full-crawler-20260724 \
@@ -40,10 +40,10 @@ jobs:
               audit=no
               evaluation=no
               model=no
-              sudo test -f "$path/manifest.json" && manifest=yes
-              sudo test -f "$path/audit.json" && audit=yes
-              sudo test -f "$path/evaluation.json" && evaluation=yes
-              sudo test -f "$path/model.json" && model=yes
+              sudo test -f "$path/manifest.json" && manifest=yes || true
+              sudo test -f "$path/audit.json" && audit=yes || true
+              sudo test -f "$path/evaluation.json" && evaluation=yes || true
+              sudo test -f "$path/model.json" && model=yes || true
               echo "$name size=$size files=$files manifest=$manifest audit=$audit evaluation=$evaluation model=$model"
             else
               echo "$name MISSING"
