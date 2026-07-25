@@ -38,3 +38,4 @@ jobs:
           path: recovery-status
           if-no-files-found: error
           retention-days: 3
+          overwrite: true
