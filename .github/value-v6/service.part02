@@ -1,0 +1,220 @@
+          tuning.rowCount > 0 &&
+          test.rowCount > 0 &&
+          Number.isFinite(tuning.selection.actionResidualScale),
+        source: {
+          datasetVersion: text(source.manifest.datasetVersion),
+          directory: this.sourceDirectory,
+          fileName: 'dataset.ndjson',
+          sha256: source.sha256,
+          byteLength: source.byteLength,
+          sourceRowCount: sourceSummary.sourceRowCount,
+          eligibleSourceRowCount: sourceSummary.eligibleSourceRowCount,
+          excludedSourceRowCount: sourceSummary.excludedSourceRowCount,
+          shortHorizonEligibleRowCount:
+            sourceSummary.shortHorizonEligibleRowCount,
+          eligibleMatchCount: sourceSummary.matches.length,
+          sourceAuditPassed: source.audit.passed === true,
+        },
+        split: {
+          strategy: 'CHRONOLOGICAL_MATCH_LEVEL_70_15_15',
+          descriptorSha256: splitRuntime.descriptorSha256,
+          trainMatchCount: splitRuntime.trainMatchIds.size,
+          tuningMatchCount: splitRuntime.tuningMatchIds.size,
+          testMatchCount: splitRuntime.testMatchIds.size,
+          trainRowCount: trainMetrics.rowCount,
+          tuningRowCount: tuning.rowCount,
+          testRowCount: test.rowCount,
+          overlapCount: 0,
+          equalTotalWeightPerMatch: true,
+        },
+        integrity: {
+          duplicateEligibleDecisionCount:
+            sourceSummary.duplicateEligibleDecisionCount,
+          trainingWeight: trainMetrics.totalWeight,
+          tuningWeight: tuning.totalWeight,
+          testWeight: test.totalWeight,
+        },
+        leakage: {
+          sourceFeatureCutoff: 'DECISION_GAME_TIME_INCLUSIVE',
+          splitUnit: 'MATCH',
+          tuningUsedForScaleSelectionOnly: true,
+          testUsedForModelSelection: false,
+          finalOutcomeUsedAsInputFeature: false,
+          shortHorizonTargetsUsedOnlyWhenAvailable: true,
+        },
+        causalSafety: {
+          observationalOnly: true,
+          productionRolloutAllowed: false,
+          freshChronologicalHoldoutRequired: true,
+          randomizedEvaluationRequiredBeforeRollout: true,
+        },
+      };
+      const modelContent = `${JSON.stringify(serializedModel)}\n`;
+      const evaluationContent = `${JSON.stringify(evaluation)}\n`;
+      const auditContent = `${JSON.stringify(audit)}\n`;
+      await Promise.all([
+        atomicWrite(this.paths.model, modelContent),
+        atomicWrite(this.paths.evaluation, evaluationContent),
+        atomicWrite(this.paths.audit, auditContent),
+      ]);
+      const [
+        modelStat,
+        evaluationStat,
+        predictionStat,
+        modelSha256,
+        evaluationSha256,
+        predictionSha256,
+        auditSha256,
+      ] = await Promise.all([
+        stat(this.paths.model),
+        stat(this.paths.evaluation),
+        stat(this.paths.predictionEvaluation),
+        hashFile(this.paths.model),
+        hashFile(this.paths.evaluation),
+        hashFile(this.paths.predictionEvaluation),
+        hashFile(this.paths.audit),
+      ]);
+      const manifest = {
+        schemaVersion: RECOMMENDATION_VALUE_V6_TRAINING_SCHEMA_VERSION,
+        modelVersion: RECOMMENDATION_VALUE_V6_MODEL_VERSION,
+        generatedAt,
+        source: {
+          datasetVersion: text(source.manifest.datasetVersion),
+          directory: this.sourceDirectory,
+          fileName: 'dataset.ndjson',
+          sha256: source.sha256,
+          byteLength: source.byteLength,
+          rowCount: sourceSummary.sourceRowCount,
+        },
+        options,
+        selectedActionResidualScale: tuning.selection.actionResidualScale,
+        split: {
+          descriptorSha256: splitRuntime.descriptorSha256,
+          trainMatchCount: splitRuntime.trainMatchIds.size,
+          tuningMatchCount: splitRuntime.tuningMatchIds.size,
+          testMatchCount: splitRuntime.testMatchIds.size,
+        },
+        artifacts: {
+          model: artifactDescriptor(
+            this.paths.model,
+            modelStat.size,
+            modelSha256,
+          ),
+          evaluation: artifactDescriptor(
+            this.paths.evaluation,
+            evaluationStat.size,
+            evaluationSha256,
+          ),
+          predictionEvaluation: artifactDescriptor(
+            this.paths.predictionEvaluation,
+            predictionStat.size,
+            predictionSha256,
+          ),
+          audit: artifactDescriptor(
+            this.paths.audit,
+            Buffer.byteLength(auditContent),
+            auditSha256,
+          ),
+        },
+        auditPassed: audit.passed,
+        productionRolloutAllowed: false,
+      };
+      await atomicWrite(this.paths.manifest, `${JSON.stringify(manifest)}\n`);
+      this.manifest = manifest;
+      this.audit = audit;
+      this.evaluation = evaluation;
+      this.modelArtifact = serializedModel;
+      this.status = {
+        ...this.status,
+        state: 'COMPLETE',
+        phase: 'COMPLETE',
+        currentPass: 5,
+        completedAt: generatedAt,
+        manifestAvailable: true,
+        auditAvailable: true,
+        evaluationAvailable: true,
+        modelAvailable: true,
+      };
+      this.logger.log(
+        `Recommendation Value V6 completed with ${test.rowCount} test rows and scale ${tuning.selection.actionResidualScale}.`,
+      );
+    } catch (error) {
+      const message = errorMessage(error);
+      this.status = {
+        ...this.status,
+        state: 'FAILED',
+        completedAt: new Date().toISOString(),
+        error: message,
+      };
+      this.logger.error(`Recommendation Value V6 failed: ${message}`);
+    }
+  }
+
+  private async loadSourceArtifacts(
+    options: RecommendationValueV6TrainingOptions,
+  ): Promise<SourceArtifacts> {
+    const manifest = await requiredJson<Record<string, unknown>>(
+      this.sourceManifestPath,
+      'Recommendation Dataset V5 manifest',
+    );
+    const audit = await requiredJson<Record<string, unknown>>(
+      this.sourceAuditPath,
+      'Recommendation Dataset V5 audit',
+    );
+    if (manifest.auditPassed !== true || audit.passed !== true) {
+      throw new Error('Recommendation Dataset V5 source did not pass audit.');
+    }
+    if (manifest.datasetVersion !== RECOMMENDATION_DECISION_DATASET_V5_VERSION) {
+      throw new Error(
+        `Recommendation Value V6 requires ${RECOMMENDATION_DECISION_DATASET_V5_VERSION}, received ${text(manifest.datasetVersion)}.`,
+      );
+    }
+    const expectedSha256 = requiredSha(record(manifest.artifact).sha256);
+    const actualSha256 = await hashFile(this.sourceDatasetPath);
+    if (expectedSha256 !== actualSha256) {
+      throw new Error(
+        `Recommendation Dataset V5 SHA-256 mismatch: ${actualSha256} versus ${expectedSha256}.`,
+      );
+    }
+    if (
+      options.expectedSourceSha256 &&
+      options.expectedSourceSha256 !== actualSha256
+    ) {
+      throw new Error(
+        `Source SHA-256 mismatch: expected ${options.expectedSourceSha256}, received ${actualSha256}.`,
+      );
+    }
+    return {
+      datasetPath: this.sourceDatasetPath,
+      manifest,
+      audit,
+      sha256: actualSha256,
+      byteLength: (await stat(this.sourceDatasetPath)).size,
+    };
+  }
+
+  private async collectSourceSummary(
+    options: RecommendationValueV6TrainingOptions,
+  ): Promise<SourcePassSummary> {
+    const matches = new Map<string, RecommendationOfflineMatchDescriptor>();
+    const eligibleDecisionCountsByMatch = new Map<string, number>();
+    const eligibleDecisionIds = new Set<string>();
+    let sourceRowCount = 0;
+    let eligibleSourceRowCount = 0;
+    let excludedSourceRowCount = 0;
+    let shortHorizonEligibleRowCount = 0;
+    let duplicateEligibleDecisionCount = 0;
+    for await (const value of ndjson(this.sourceDatasetPath)) {
+      sourceRowCount += 1;
+      const parsed = parseSourceRow(value, options);
+      if (!parsed) {
+        excludedSourceRowCount += 1;
+      } else {
+        eligibleSourceRowCount += 1;
+        shortHorizonEligibleRowCount +=
+          parsed.row.targetComponents.shortHorizonCount > 0 ? 1 : 0;
+        if (eligibleDecisionIds.has(parsed.row.decisionId)) {
+          duplicateEligibleDecisionCount += 1;
+        } else {
+          eligibleDecisionIds.add(parsed.row.decisionId);
+        }
