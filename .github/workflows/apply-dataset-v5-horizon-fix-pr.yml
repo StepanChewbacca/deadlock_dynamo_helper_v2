@@ -1,0 +1,54 @@
+name: Apply Dataset V5 horizon fix PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-dataset-v5-horizon-fix-pr.yml
+      - .github/scripts/apply-dataset-v5-horizon-fix.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-dataset-v5-horizon-fix-pr
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Apply correction
+        run: python3 .github/scripts/apply-dataset-v5-horizon-fix.py
+
+      - name: Verify
+        run: |
+          yarn install --frozen-lockfile --ignore-engines
+          yarn workspace @deadlock-live-probe/shared build
+          yarn workspace @deadlock-live-probe/build-domain build
+          yarn workspace @deadlock-live-probe/api build
+          yarn workspace @deadlock-live-probe/api test --runInBand recommendation-decision-dataset-v5.spec.ts match-timeline-collector.spec.ts
+
+      - name: Commit correction
+        run: |
+          rm -f .github/workflows/apply-dataset-v5-horizon-fix.yml
+          rm -f .github/workflows/apply-dataset-v5-horizon-fix-pr.yml
+          rm -f .github/scripts/apply-dataset-v5-horizon-fix.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: require fresh Dataset V5 horizon snapshots'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
