@@ -26,9 +26,9 @@ import {
 import { parseInventoryStateKey } from './inventory-multiset-action-engine';
 import { sha256StableJson } from './stable-json';
 
-export const RECOMMENDATION_DECISION_DATASET_V5_SCHEMA_VERSION = 1;
+export const RECOMMENDATION_DECISION_DATASET_V5_SCHEMA_VERSION = 2;
 export const RECOMMENDATION_DECISION_DATASET_V5_VERSION =
-  'RECOMMENDATION_DECISION_DATASET_V5_1' as const;
+  'RECOMMENDATION_DECISION_DATASET_V5_2' as const;
 
 const DEFAULT_SOURCE_DIR =
   '/app/apps/api/storage/recommendation-decision-dataset-v4';
@@ -702,6 +702,7 @@ function enrich(input: {
         snapshots,
         input.timeline.objectives,
         liveTeam(input.row.teamId),
+        input.snapshotStalenessS,
       ),
     ]),
   ) as Record<string, Record<string, unknown>>;
@@ -802,32 +803,68 @@ function horizonOutcome(
   snapshots: readonly MatchTimelinePlayerSnapshot[],
   objectives: readonly MatchTimelineObjectiveEvent[],
   teamId: number | undefined,
+  snapshotStalenessS: number,
 ): Record<string, unknown> {
   const upper = decisionTime + seconds;
   const target = latestInWindow(snapshots, decisionTime, upper);
+  const baselineStalenessS = baseline
+    ? Math.max(0, decisionTime - baseline.gameTimeS)
+    : undefined;
+  const targetStalenessS = target
+    ? Math.max(0, upper - target.gameTimeS)
+    : undefined;
+  const baselineFresh =
+    baseline !== undefined &&
+    baselineStalenessS !== undefined &&
+    baselineStalenessS <= snapshotStalenessS;
+  const targetFresh =
+    target !== undefined &&
+    targetStalenessS !== undefined &&
+    targetStalenessS <= snapshotStalenessS;
   const events = objectives.filter(
     (event) => event.gameTimeS > decisionTime && event.gameTimeS <= upper,
   );
-  if (!baseline || !target) {
+  if (!baselineFresh || !targetFresh || !baseline || !target) {
     return {
       available: false,
       horizonS: seconds,
       lowerBoundGameTimeS: decisionTime,
       upperBoundGameTimeS: upper,
       baselineAvailable: Boolean(baseline),
+      baselineFresh,
+      baselineStalenessS,
       targetAvailable: Boolean(target),
+      targetFresh,
+      targetStalenessS,
       objectiveEventCount: events.length,
       unavailableReason: !baseline
         ? 'MISSING_SNAPSHOT_AT_OR_BEFORE_DECISION'
-        : 'MISSING_SNAPSHOT_IN_HORIZON_WINDOW',
+        : !baselineFresh
+          ? 'STALE_SNAPSHOT_AT_DECISION'
+          : !target
+            ? 'MISSING_SNAPSHOT_IN_HORIZON_WINDOW'
+            : 'STALE_SNAPSHOT_AT_HORIZON',
     };
   }
+  const ownObjectiveLossCount =
+    teamId === undefined
+      ? undefined
+      : events.filter((event) => event.teamId === teamId).length;
+  const enemyObjectiveLossCount =
+    teamId === undefined
+      ? undefined
+      : events.filter(
+          (event) => event.teamId !== undefined && event.teamId !== teamId,
+        ).length;
   return {
     available: true,
     horizonS: seconds,
     lowerBoundGameTimeS: decisionTime,
     upperBoundGameTimeS: upper,
+    baselineSnapshotGameTimeS: baseline.gameTimeS,
+    baselineStalenessS,
     targetSnapshotGameTimeS: target.gameTimeS,
+    targetStalenessS,
     killsDelta: target.kills - baseline.kills,
     deathsDelta: target.deaths - baseline.deaths,
     assistsDelta: target.assists - baseline.assists,
@@ -837,16 +874,8 @@ function horizonOutcome(
       target.kills + target.assists - baseline.kills - baseline.assists,
     survived: target.deaths === baseline.deaths,
     objectiveEventCount: events.length,
-    teamObjectiveEventCount:
-      teamId === undefined
-        ? undefined
-        : events.filter((event) => event.teamId === teamId).length,
-    enemyObjectiveEventCount:
-      teamId === undefined
-        ? undefined
-        : events.filter(
-            (event) => event.teamId !== undefined && event.teamId !== teamId,
-          ).length,
+    ownObjectiveLossCount,
+    enemyObjectiveLossCount,
   };
 }
 
