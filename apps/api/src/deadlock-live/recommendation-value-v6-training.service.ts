@@ -999,6 +999,13 @@ export function prepareRecommendationValueV6Row(
   const teamId = text(identity.teamId) ?? String(numeric(identity.teamId));
   const inventory = record(features.inventory);
   const timeline = record(state.playerTimelineSnapshot);
+  const teamEconomy = record(state.teamEconomy);
+  const teamEconomyBand =
+    teamEconomy.available === true
+      ? classifyRecommendationValueV6TeamEconomy(
+          numeric(teamEconomy.relativeNetWorthDelta),
+        )
+      : undefined;
   const stateKeys = uniqueStrings([
     `HERO:${heroId}`,
     `HERO_TIME:${baseKey}`,
@@ -1016,6 +1023,32 @@ export function prepareRecommendationValueV6Row(
           2,
         )}`
       : undefined,
+    teamEconomyBand
+      ? `TEAM_ECONOMY_BAND:${heroId}|${teamEconomyBand}`
+      : undefined,
+    teamEconomy.available === true
+      ? `TEAM_NET_WORTH_DELTA:${heroId}|${bucket(
+          numeric(teamEconomy.netWorthDelta),
+          5_000,
+        )}`
+      : undefined,
+    teamEconomy.available === true
+      ? `TEAM_RELATIVE_NET_WORTH_DELTA:${heroId}|${bucket(
+          numeric(teamEconomy.relativeNetWorthDelta) * 100,
+          5,
+        )}`
+      : undefined,
+    numeric(teamEconomy.playerNetWorthRankInTeam) > 0
+      ? `PLAYER_TEAM_NET_WORTH_RANK:${heroId}|${numeric(
+          teamEconomy.playerNetWorthRankInTeam,
+        )}`
+      : undefined,
+    teamEconomy.available === true
+      ? `PLAYER_TEAM_NET_WORTH_SHARE:${heroId}|${bucket(
+          numeric(teamEconomy.playerNetWorthShare) * 100,
+          10,
+        )}`
+      : undefined,
     ...numbers(state.alliedHeroIds).map(
       (allyHeroId) => `ALLY:${baseKey}|${allyHeroId}`,
     ),
@@ -1030,6 +1063,7 @@ export function prepareRecommendationValueV6Row(
     timeBucket,
     inventoryStateKey,
     previousTail,
+    teamEconomyBand,
     actionKey: observedActionKey,
     feature: observedFeature,
   });
@@ -1040,6 +1074,7 @@ export function prepareRecommendationValueV6Row(
       timeBucket,
       inventoryStateKey,
       previousTail,
+      teamEconomyBand,
       actionKey,
       feature: featureCandidates.get(actionKey) ?? {},
     }),
@@ -1114,6 +1149,7 @@ function buildActionKeys(input: {
   timeBucket: number;
   inventoryStateKey: string;
   previousTail: string;
+  teamEconomyBand?: string;
   actionKey: string;
   feature: Record<string, unknown>;
 }): string[] {
@@ -1122,6 +1158,14 @@ function buildActionKeys(input: {
     `HERO_TIME_ACTION:${input.heroId}|${input.timeBucket}|${input.actionKey}`,
     `HERO_TIME_INVENTORY_ACTION:${input.heroId}|${input.timeBucket}|${input.inventoryStateKey}|${input.actionKey}`,
     `HERO_TIME_PREVIOUS_ACTION:${input.heroId}|${input.timeBucket}|${input.previousTail}|${input.actionKey}`,
+    input.teamEconomyBand
+      ? `HERO_TEAM_ECONOMY_ACTION:${input.heroId}|${input.teamEconomyBand}|${input.actionKey}`
+      : undefined,
+    input.teamEconomyBand && text(item.slotType)
+      ? `HERO_TEAM_ECONOMY_SLOT:${input.heroId}|${input.teamEconomyBand}|${text(
+          item.slotType,
+        )}`
+      : undefined,
     text(item.slotType)
       ? `HERO_SLOT:${input.heroId}|${text(item.slotType)}`
       : undefined,
@@ -1139,6 +1183,28 @@ function buildActionKeys(input: {
       (key) => `INTERACTION:${key}`,
     ),
   ]);
+}
+
+
+export function classifyRecommendationValueV6TeamEconomy(
+  relativeNetWorthDelta: number,
+): 'FAR_BEHIND' | 'BEHIND' | 'EVEN' | 'AHEAD' | 'FAR_AHEAD' {
+  if (!Number.isFinite(relativeNetWorthDelta)) {
+    throw new Error('Team relative net-worth delta must be finite.');
+  }
+  if (relativeNetWorthDelta <= -0.15) {
+    return 'FAR_BEHIND';
+  }
+  if (relativeNetWorthDelta < -0.05) {
+    return 'BEHIND';
+  }
+  if (relativeNetWorthDelta <= 0.05) {
+    return 'EVEN';
+  }
+  if (relativeNetWorthDelta < 0.15) {
+    return 'AHEAD';
+  }
+  return 'FAR_AHEAD';
 }
 
 function predictCandidates(

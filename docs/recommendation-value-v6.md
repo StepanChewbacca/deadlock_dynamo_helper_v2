@@ -1,6 +1,6 @@
 # Recommendation Value V6
 
-Recommendation Value V6 is an offline-only state/action advantage ranker built from immutable Recommendation Dataset V5.2 artifacts.
+Recommendation Value V6 is an offline-only state/action advantage ranker built from immutable Recommendation Dataset V5.3 artifacts.
 
 It changes the modelling question from "did this purchase independently change final win probability?" to "which available purchase is better in this exact state?".
 
@@ -13,7 +13,7 @@ Value V6 provides:
 - a state utility estimate;
 - an action-conditioned utility estimate;
 - action advantage as the difference between action and state utility;
-- item, trajectory, inventory, matchup, and timeline state keys;
+- item, trajectory, inventory, matchup, timeline, and team-economy state keys;
 - a bounded target combining short-horizon utility with final outcome as an auxiliary target;
 - tuning-only action-advantage scale selection;
 - candidate ranking diagnostics;
@@ -23,7 +23,7 @@ Value V6 remains observational. Training completion never changes live serving a
 
 ## Source contract
 
-The source directory must contain a completed Dataset V5.2 build:
+The source directory must contain a completed Dataset V5.3 build:
 
 ```text
 /app/apps/api/storage/recommendation-decision-dataset-v5/
@@ -34,7 +34,7 @@ The source directory must contain a completed Dataset V5.2 build:
 
 The trainer verifies:
 
-- `datasetVersion` equals `RECOMMENDATION_DECISION_DATASET_V5_2`;
+- `datasetVersion` equals `RECOMMENDATION_DECISION_DATASET_V5_3`;
 - the source audit passed;
 - the manifest SHA-256 matches `dataset.ndjson`;
 - an optional operator-provided expected SHA-256 matches;
@@ -65,6 +65,8 @@ Available 3, 5, and 10 minute windows contribute a bounded local utility from:
 - own and enemy objective losses.
 
 The default target uses 25% final outcome and 75% short-horizon utility. If no short-horizon target is available, final outcome is used alone. Future timeline values are targets only and are never state or action features.
+
+Fresh decision-time team economy is used as context. Value V6 buckets relative team net-worth delta into `FAR_BEHIND`, `BEHIND`, `EVEN`, `AHEAD`, and `FAR_AHEAD`, and learns both state effects and economy-conditioned action/category effects.
 
 ## API
 

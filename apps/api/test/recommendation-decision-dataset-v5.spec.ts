@@ -103,6 +103,33 @@ describe('Recommendation Dataset V5', () => {
       deaths: 0,
       netWorth: 1000,
     });
+    expect(first.stateBeforeAction.teamEconomy).toMatchObject({
+      available: true,
+      ownTeamId: 2,
+      ownTeam: {
+        playerCount: 2,
+        netWorth: 2500,
+        averageNetWorth: 1250,
+        highestNetWorth: 1500,
+        lowestNetWorth: 1000,
+      },
+      enemyTeam: {
+        playerCount: 2,
+        netWorth: 4500,
+        averageNetWorth: 2250,
+        highestNetWorth: 2500,
+        lowestNetWorth: 2000,
+      },
+      netWorthDelta: -2000,
+      playerNetWorth: 1000,
+      playerNetWorthShare: 0.4,
+      playerNetWorthRankInTeam: 2,
+      completeOwnTeam: true,
+      completeEnemyTeam: true,
+    });
+    expect(first.stateBeforeAction.teamEconomy.relativeNetWorthDelta).toBeCloseTo(
+      -2000 / 7000,
+    );
     expect(first.shortHorizonOutcomes.windows['3m']).toMatchObject({
       available: true,
       killsDelta: 1,
@@ -128,6 +155,7 @@ describe('Recommendation Dataset V5', () => {
       passed: true,
       leakage: {
         futureTimelineUsedAsInputFeature: false,
+        teamEconomySnapshotsAtOrBeforeDecisionOnly: true,
         horizonWindowLowerBoundExclusive: true,
         horizonWindowUpperBoundInclusive: true,
       },
@@ -242,6 +270,21 @@ async function writeTimelineArtifacts(
   root: string,
   snapshots: MatchTimelinePlayerSnapshot[] = [
     createSnapshot(95, 1, 0, 1, 1000),
+    createSnapshot(95, 0, 0, 1, 1500, {
+      steamId: 'ally-1',
+      heroId: 16,
+      teamId: 2,
+    }),
+    createSnapshot(95, 1, 0, 0, 2000, {
+      steamId: 'enemy-1',
+      heroId: 20,
+      teamId: 3,
+    }),
+    createSnapshot(95, 2, 0, 0, 2500, {
+      steamId: 'enemy-2',
+      heroId: 21,
+      teamId: 3,
+    }),
     createSnapshot(275, 2, 1, 3, 2700),
     createSnapshot(395, 3, 1, 4, 3900),
     createSnapshot(695, 4, 2, 5, 7000),
@@ -270,24 +313,41 @@ async function writeTimelineArtifacts(
   await writeFile(join(directory, 'audit.json'), `${JSON.stringify({ passed: true })}\n`, 'utf8');
 }
 
-function createSnapshot(gameTimeS: number, kills: number, deaths: number, assists: number, netWorth: number): MatchTimelinePlayerSnapshot {
+function createSnapshot(
+  gameTimeS: number,
+  kills: number,
+  deaths: number,
+  assists: number,
+  netWorth: number,
+  overrides: {
+    steamId?: string;
+    heroId?: number;
+    teamId?: number;
+  } = {},
+): MatchTimelinePlayerSnapshot {
+  const steamId = overrides.steamId ?? '7656119';
+  const heroId = overrides.heroId ?? 15;
+  const teamId = overrides.teamId ?? 2;
+  const identity = `${gameTimeS}:${steamId}:${heroId}:${teamId}`;
   return {
     schemaVersion: MATCH_TIMELINE_SCHEMA_VERSION,
     timelineVersion: MATCH_TIMELINE_VERSION,
-    snapshotId: `${gameTimeS}`.padEnd(64, '0'),
-    sourceEventId: `${gameTimeS}`.padEnd(64, '1'),
+    snapshotId: createHash('sha256').update(`snapshot:${identity}`).digest('hex'),
+    sourceEventId: createHash('sha256').update(`event:${identity}`).digest('hex'),
     matchId: 100,
     gameTimeS,
     tick: gameTimeS,
-    steamId: '7656119',
-    heroId: 15,
-    teamId: 2,
+    steamId,
+    heroId,
+    teamId,
     kills,
     deaths,
     assists,
     netWorth,
     heroDamage: netWorth * 2,
-    receivedAt: new Date(Date.parse('2026-01-01T00:00:00.000Z') + gameTimeS * 1000).toISOString(),
+    receivedAt: new Date(
+      Date.parse('2026-01-01T00:00:00.000Z') + gameTimeS * 1000,
+    ).toISOString(),
   };
 }
 

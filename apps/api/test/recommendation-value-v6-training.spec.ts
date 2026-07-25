@@ -3,7 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RECOMMENDATION_DECISION_DATASET_V5_VERSION } from '../src/deadlock-live/recommendation-decision-dataset-v5.service';
-import { RecommendationValueV6TrainingService } from '../src/deadlock-live/recommendation-value-v6-training.service';
+import {
+  RecommendationValueV6TrainingService,
+  prepareRecommendationValueV6Row,
+} from '../src/deadlock-live/recommendation-value-v6-training.service';
 
 jest.setTimeout(30_000);
 
@@ -90,6 +93,26 @@ describe('Recommendation Value V6 training', () => {
     });
   });
 
+  it('adds team-economy state and action interactions', () => {
+    const prepared = prepareRecommendationValueV6Row(
+      datasetRow(100, 'BUY:GOOD'),
+      { finalOutcomeWeight: 0.25 },
+    );
+
+    expect(prepared?.stateKeys).toContain('TEAM_ECONOMY_BAND:15|AHEAD');
+    expect(prepared?.stateKeys).toContain('PLAYER_TEAM_NET_WORTH_RANK:15|1');
+    expect(
+      prepared?.candidateActions.find(
+        (candidate) => candidate.actionKey === 'BUY:GOOD',
+      )?.actionKeys,
+    ).toContain('HERO_TEAM_ECONOMY_ACTION:15|AHEAD|BUY:GOOD');
+    expect(
+      prepared?.candidateActions.find(
+        (candidate) => candidate.actionKey === 'BUY:GOOD',
+      )?.actionKeys,
+    ).toContain('HERO_TEAM_ECONOMY_SLOT:15|AHEAD|vitality');
+  });
+
   async function writeSource(rows: Record<string, unknown>[]): Promise<string> {
     const content = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
     const sha256 = createHash('sha256').update(content).digest('hex');
@@ -97,7 +120,7 @@ describe('Recommendation Value V6 training', () => {
     await writeFile(
       join(sourceDirectory, 'manifest.json'),
       `${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,
         auditPassed: true,
         artifact: {
@@ -121,7 +144,7 @@ describe('Recommendation Value V6 training', () => {
 function datasetRow(index: number, observedActionKey: string): Record<string, unknown> {
   const positive = observedActionKey === 'BUY:GOOD';
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,
     decisionId: `decision-${index}`,
     identity: {
@@ -151,6 +174,13 @@ function datasetRow(index: number, observedActionKey: string): Record<string, un
         deaths: 1,
         assists: 3,
         netWorth: 5000,
+      },
+      teamEconomy: {
+        available: true,
+        netWorthDelta: positive ? 5000 : -5000,
+        relativeNetWorthDelta: positive ? 0.1 : -0.1,
+        playerNetWorthShare: 0.25,
+        playerNetWorthRankInTeam: positive ? 1 : 4,
       },
     },
     observedAction: { actionKey: observedActionKey },
