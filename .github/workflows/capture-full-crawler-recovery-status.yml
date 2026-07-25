@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Scheduled status refresh: 2026-07-25T11:47:14Z
+          # Scheduled status refresh: 2026-07-25T12:05:00Z
           unit=deadlock-full-crawler-recovery-v3-20260725.service
           root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
           mkdir -p recovery-status
