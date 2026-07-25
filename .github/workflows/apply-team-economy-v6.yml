@@ -29,7 +29,22 @@ jobs:
           cache: yarn
 
       - name: Apply team economy implementation
-        run: python .github/scripts/apply-team-economy-v6.py
+        shell: bash
+        run: |
+          set +e
+          python .github/scripts/apply-team-economy-v6.py > "$RUNNER_TEMP/team-economy-patch.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/team-economy-patch.log"
+          exit "$status"
+
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: team-economy-patch-diagnostics
+          path: ${{ runner.temp }}/team-economy-patch.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Remove temporary patch transport
         run: |
