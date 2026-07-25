@@ -31,9 +31,9 @@ describe('recommendation value v5 serialization', () => {
       1,
     );
 
-    const serialized = serializeRecommendationValueV5Model(model, 20) as {
-      state: Record<string, { wins: number; total: number }>;
-      action: Record<string, { wins: number; total: number }>;
+    const serialized = serializeRecommendationValueV5Model(model, 1) as {
+      state: Record<string, { wins: number; total: number; observations: number }>;
+      action: Record<string, { wins: number; total: number; observations: number }>;
     };
 
     expect(serialized.state).toEqual({
