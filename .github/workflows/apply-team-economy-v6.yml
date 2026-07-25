@@ -46,8 +46,9 @@ jobs:
               2,
           )
           '''
-          new = '''def add_team_economy_band_to_action_calls(path: Path) -> None:
-              lines = path.read_text(encoding="utf-8").splitlines()
+          new = '''def add_team_economy_band_to_action_calls(path: str | Path) -> None:
+              file_path = Path(path)
+              lines = file_path.read_text(encoding="utf-8").splitlines()
               inserted = 0
               index = 0
               while index < len(lines) - 1:
@@ -62,9 +63,9 @@ jobs:
                   index += 1
               if inserted != 2:
                   raise RuntimeError(
-                      f"{path}: expected two buildActionKeys calls, updated {inserted}"
+                      f"{file_path}: expected two buildActionKeys calls, updated {inserted}"
                   )
-              path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+              file_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
 
           add_team_economy_band_to_action_calls(VALUE_SERVICE)
           '''
