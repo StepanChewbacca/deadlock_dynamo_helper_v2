@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: restart-recovery-after-value-v5-fix
+  cancel-in-progress: true
+
 jobs:
   restart:
     runs-on: [self-hosted, linux, ARM64]
