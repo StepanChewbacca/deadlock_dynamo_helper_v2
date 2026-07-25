@@ -26,26 +26,41 @@ jobs:
       - name: Patch recovery script and restart service
         shell: bash
         run: |
-          set -euo pipefail
-          unit=deadlock-full-crawler-recovery-v3-20260725.service
-          installed=/home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
-          work="$RUNNER_TEMP/recovery-fixed.mjs"
-          sudo cp "$installed" "$work"
-          sudo chown "$(id -u):$(id -g)" "$work"
-          python scripts/patch-full-crawler-recovery-api-reset.py "$work"
-          node --check "$work"
-          sudo install -o ubuntu -g ubuntu -m 0644 "$work" "$installed"
-          gzip -9 -c "$work" | base64 -w 0 > scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
-          printf '\n' >> scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
-          if ! git diff --cached --quiet; then
-            git commit -m 'fix: recover when training API configuration resets'
-            git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
-          fi
-          sudo systemctl restart "$unit"
-          sleep 30
-          sudo systemctl status --no-pager "$unit"
-          sudo cat /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/state.json
-          sudo tail -n 100 /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/service.log
+          set +e
+          mkdir -p repair-output
+          {
+            set -euxo pipefail
+            unit=deadlock-full-crawler-recovery-v3-20260725.service
+            installed=/home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
+            work="$RUNNER_TEMP/recovery-fixed.mjs"
+            sudo cp "$installed" "$work"
+            sudo chown "$(id -u):$(id -g)" "$work"
+            python scripts/patch-full-crawler-recovery-api-reset.py "$work"
+            node --check "$work"
+            sudo install -o ubuntu -g ubuntu -m 0644 "$work" "$installed"
+            gzip -9 -c "$work" | base64 -w 0 > scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+            printf '\n' >> scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+            if ! git diff --cached --quiet; then
+              git commit -m 'fix: recover when training API configuration resets'
+              git push origin HEAD:diagnostics/run-full-crawler-value-v5-20260725
+            fi
+            sudo systemctl restart "$unit"
+            sleep 30
+            sudo systemctl status --no-pager "$unit"
+            sudo cat /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/state.json
+            sudo tail -n 100 /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/service.log
+          } > repair-output/repair.log 2>&1
+          rc=$?
+          cat repair-output/repair.log
+          exit "$rc"
+      - name: Upload repair diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-api-reset-repair
+          path: repair-output
+          if-no-files-found: error
+          retention-days: 3
