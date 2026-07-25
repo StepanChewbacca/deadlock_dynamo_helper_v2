@@ -550,7 +550,7 @@ export class RecommendationValueV4TrainingService implements OnModuleInit {
           alliedRosterActionAverage: 0.05,
           enemyRosterActionAverage: 0.08,
         },
-        counts: serializeModel(model),
+        counts: serializeModel(model, options.minContextObservations),
       };
       const evaluation = buildEvaluation({
         globalObservations,
@@ -1151,33 +1151,56 @@ function incrementBinaryCount(count: BinaryCount, won: boolean): void {
 
 function serializeModel(
   model: RecommendationValueV4Model,
+  minimumObservations: number,
 ): Record<string, unknown> {
   return {
     global: { ...model.global },
-    hero: serializeBinaryTable(model.hero),
-    heroTime: serializeBinaryTable(model.heroTime),
-    heroTeamTime: serializeBinaryTable(model.heroTeamTime),
-    heroTimeInventory: serializeBinaryTable(model.heroTimeInventory),
-    heroTimePreviousTail: serializeBinaryTable(model.heroTimePreviousTail),
-    ally: serializeBinaryTable(model.ally),
-    enemy: serializeBinaryTable(model.enemy),
-    heroTimeAction: serializeBinaryTable(model.heroTimeAction),
+    hero: serializeBinaryTable(model.hero, minimumObservations),
+    heroTime: serializeBinaryTable(model.heroTime, minimumObservations),
+    heroTeamTime: serializeBinaryTable(
+      model.heroTeamTime,
+      minimumObservations,
+    ),
+    heroTimeInventory: serializeBinaryTable(
+      model.heroTimeInventory,
+      minimumObservations,
+    ),
+    heroTimePreviousTail: serializeBinaryTable(
+      model.heroTimePreviousTail,
+      minimumObservations,
+    ),
+    ally: serializeBinaryTable(model.ally, minimumObservations),
+    enemy: serializeBinaryTable(model.enemy, minimumObservations),
+    heroTimeAction: serializeBinaryTable(
+      model.heroTimeAction,
+      minimumObservations,
+    ),
     heroTimeInventoryAction: serializeBinaryTable(
       model.heroTimeInventoryAction,
+      minimumObservations,
     ),
     heroTimePreviousTailAction: serializeBinaryTable(
       model.heroTimePreviousTailAction,
+      minimumObservations,
     ),
-    allyAction: serializeBinaryTable(model.allyAction),
-    enemyAction: serializeBinaryTable(model.enemyAction),
+    allyAction: serializeBinaryTable(
+      model.allyAction,
+      minimumObservations,
+    ),
+    enemyAction: serializeBinaryTable(
+      model.enemyAction,
+      minimumObservations,
+    ),
   };
 }
 
 function serializeBinaryTable(
   table: BinaryCountTable,
+  minimumObservations: number,
 ): Record<string, BinaryCount> {
   return Object.fromEntries(
     [...table.entries()]
+      .filter(([, count]) => count.total >= minimumObservations)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, count]) => [key, { ...count }]),
   );
