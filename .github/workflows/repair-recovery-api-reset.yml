@@ -35,7 +35,7 @@ jobs:
             work="$RUNNER_TEMP/recovery-fixed.mjs"
             sudo cp "$installed" "$work"
             sudo chown "$(id -u):$(id -g)" "$work"
-            python scripts/patch-full-crawler-recovery-api-reset.py "$work"
+            python3 scripts/patch-full-crawler-recovery-api-reset.py "$work"
             node --check "$work"
             sudo install -o ubuntu -g ubuntu -m 0644 "$work" "$installed"
             gzip -9 -c "$work" | base64 -w 0 > scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
