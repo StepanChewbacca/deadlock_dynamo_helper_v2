@@ -1,0 +1,206 @@
+name: Deploy and build Recommendation Dataset V5
+
+on:
+  push:
+    branches:
+      - ops/deploy-dataset-v5-20260725
+    paths:
+      - .github/workflows/deploy-and-build-recommendation-dataset-v5.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-and-build-recommendation-dataset-v5
+  cancel-in-progress: false
+
+jobs:
+  deploy-build:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 360
+    steps:
+      - name: Checkout merged production code
+        uses: actions/checkout@v4
+        with:
+          ref: 2982ae97f9d7450994076ba3acaa9c5a117bad5d
+          fetch-depth: 1
+
+      - name: Deploy, start timeline collection, and build Dataset V5
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          DEPLOY=/home/ubuntu/apps/deadlock_dynamo_helper
+          TARGET_COMMIT=2982ae97f9d7450994076ba3acaa9c5a117bad5d
+          SOURCE_DIR=/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725
+          SOURCE_SHA=8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d
+          OUTPUT_DIR=/app/apps/api/storage/recommendation-decision-dataset-v5-full-crawler-20260725
+          TIMELINE_DIR=/app/apps/api/storage/match-timeline-events-v1
+          CATALOG_DIR=/app/apps/api/storage/item-catalog-snapshots
+          CATALOG_PATH=$CATALOG_DIR/recommendation-dataset-v5-20260725.json
+          API=http://127.0.0.1:3000
+          RESULTS="$RUNNER_TEMP/recommendation-dataset-v5-results"
+          mkdir -p "$RESULTS"
+
+          set_env() {
+            local key="$1"
+            local value="$2"
+            local file="$DEPLOY/.env"
+            touch "$file"
+            if grep -q "^${key}=" "$file"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$file"
+            fi
+          }
+
+          git -C "$DEPLOY" fetch origin main
+          git -C "$DEPLOY" reset --hard "$TARGET_COMMIT"
+          test "$(git -C "$DEPLOY" rev-parse HEAD)" = "$TARGET_COMMIT"
+
+          set_env DEADLOCK_TIMELINE_COLLECTOR_ENABLED true
+          set_env DEADLOCK_TIMELINE_MAX_CONCURRENT_MATCHES 2
+          set_env DEADLOCK_TIMELINE_STORAGE_DIR "$TIMELINE_DIR"
+          set_env DEADLOCK_LIVE_EVENTS_BASE_URL http://deadlock-live-events:3000
+          set_env DEADLOCK_RECOMMENDATION_DECISION_DATASET_V5_SOURCE_DIR "$SOURCE_DIR"
+          set_env DEADLOCK_RECOMMENDATION_DECISION_DATASET_V5_DIR "$OUTPUT_DIR"
+
+          cd "$DEPLOY"
+          sudo docker compose pull deadlock-live-events
+          sudo docker compose build api
+          sudo docker compose run --rm api node apps/api/run-migrations.js
+          sudo docker compose up -d deadlock-live-events api
+
+          for attempt in $(seq 1 80); do
+            if curl -fsS "$API/deadlock/analysis/contextual-v3-live/status" > "$RESULTS/api-health.json"; then
+              break
+            fi
+            sleep 5
+          done
+          curl -fsS "$API/deadlock/analysis/contextual-v3-live/status" > "$RESULTS/api-health.json"
+          curl -fsS "$API/deadlock/analysis/match-timeline-collector/status" > "$RESULTS/timeline-status-initial.json"
+          curl -fsS -X POST "$API/deadlock/analysis/match-timeline-collector/poll-active" > "$RESULTS/timeline-poll.json" || true
+
+          curl -fsS -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{}' \
+            "$API/deadlock/reference-data/catalogs/import" > "$RESULTS/catalog-import.json"
+
+          set -a
+          . "$DEPLOY/.env"
+          set +a
+          DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' | grep -m1 'aboba-telegramovich-postgres-1' || true)
+          test -n "$DB_CONTAINER"
+
+          SQL=$(cat <<'SQL'
+          WITH selected AS (
+            SELECT
+              id,
+              "clientVersion",
+              COALESCE("contentCatalogVersionId", id) AS content_id
+            FROM item_catalog_versions
+            ORDER BY "isCurrent" DESC, "clientVersion" DESC
+            LIMIT 1
+          ), items AS (
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'itemId', i."itemId",
+                'name', i.name,
+                'cost', i.cost,
+                'tier', i.tier,
+                'slotType', i."slotType",
+                'itemType', i."itemType",
+                'isActiveItem', i."isActiveItem",
+                'activationType', i."activationType"
+              ) ORDER BY i."itemId"
+            ) AS value
+            FROM item_catalog_items i, selected s
+            WHERE i."catalogVersionId" = s.content_id
+          ), recipes AS (
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'parentItemId', r."parentItemId",
+                'componentItemId', r."componentItemId",
+                'componentOrder', r."componentOrder"
+              ) ORDER BY r."parentItemId", r."componentOrder"
+            ) AS value
+            FROM item_catalog_recipes r, selected s
+            WHERE r."catalogVersionId" = s.content_id
+          )
+          SELECT jsonb_build_object(
+            'catalogVersionId', s.id,
+            'clientVersion', s."clientVersion",
+            'contentCatalogVersionId', s.content_id,
+            'items', COALESCE(i.value, '[]'::jsonb),
+            'recipes', COALESCE(r.value, '[]'::jsonb)
+          )
+          FROM selected s
+          CROSS JOIN items i
+          CROSS JOIN recipes r;
+          SQL
+          )
+
+          sudo docker exec -e PGPASSWORD="$DB_PASSWORD" "$DB_CONTAINER" \
+            psql -U postgres -d deadlock_builds -Atc "$SQL" > "$RESULTS/catalog-snapshot.json"
+          test "$(jq '.items | length' "$RESULTS/catalog-snapshot.json")" -gt 0
+          CATALOG_SHA=$(sha256sum "$RESULTS/catalog-snapshot.json" | awk '{print $1}')
+
+          API_CONTAINER=$(sudo docker compose ps -q api)
+          test -n "$API_CONTAINER"
+          sudo docker exec "$API_CONTAINER" mkdir -p "$CATALOG_DIR"
+          sudo docker cp "$RESULTS/catalog-snapshot.json" "$API_CONTAINER:$CATALOG_PATH"
+
+          sudo docker exec "$API_CONTAINER" test -f "$SOURCE_DIR/dataset.ndjson"
+          ACTUAL_SOURCE_SHA=$(sudo docker exec "$API_CONTAINER" sha256sum "$SOURCE_DIR/dataset.ndjson" | awk '{print $1}')
+          test "$ACTUAL_SOURCE_SHA" = "$SOURCE_SHA"
+
+          jq -n \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg catalogPath "$CATALOG_PATH" \
+            --arg catalogSha "$CATALOG_SHA" \
+            '{expectedSourceSha256:$sourceSha,partitionCount:64,snapshotStalenessS:60,catalogSnapshotPath:$catalogPath,expectedCatalogSha256:$catalogSha,resume:true}' \
+            > "$RESULTS/start-request.json"
+
+          curl -fsS -X POST \
+            -H 'Content-Type: application/json' \
+            --data-binary @"$RESULTS/start-request.json" \
+            "$API/deadlock/analysis/recommendation-decision-dataset-v5/start" \
+            > "$RESULTS/start-response.json"
+
+          deadline=$((SECONDS + 19000))
+          while true; do
+            curl -fsS "$API/deadlock/analysis/recommendation-decision-dataset-v5/status" > "$RESULTS/status.json"
+            state=$(jq -r '.state' "$RESULTS/status.json")
+            if [ "$state" = COMPLETE ]; then
+              break
+            fi
+            if [ "$state" = FAILED ]; then
+              cat "$RESULTS/status.json"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              cat "$RESULTS/status.json"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          curl -fsS "$API/deadlock/analysis/recommendation-decision-dataset-v5/manifest" > "$RESULTS/manifest.json"
+          curl -fsS "$API/deadlock/analysis/recommendation-decision-dataset-v5/audit" > "$RESULTS/audit.json"
+          curl -fsS "$API/deadlock/analysis/recommendation-decision-dataset-v5/source-availability" > "$RESULTS/source-availability.json"
+          curl -fsS "$API/deadlock/analysis/match-timeline-collector/status" > "$RESULTS/timeline-status-final.json"
+          sudo docker compose ps --format json > "$RESULTS/compose-ps.json" || sudo docker compose ps > "$RESULTS/compose-ps.txt"
+
+          jq -e '.passed == true' "$RESULTS/audit.json"
+          jq -e --arg sha "$SOURCE_SHA" '.source.sha256 == $sha' "$RESULTS/audit.json"
+          jq -e '.artifact.rowCount == 1412843' "$RESULTS/manifest.json"
+          jq -e '.artifact.sha256 | length == 64' "$RESULTS/manifest.json"
+
+      - name: Upload Dataset V5 build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-dataset-v5-full-corpus
+          path: ${{ runner.temp }}/recommendation-dataset-v5-results
+          if-no-files-found: warn
+          retention-days: 14
