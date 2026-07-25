@@ -1,0 +1,30 @@
+name: Capture deployed recovery script
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/capture-deployed-recovery-script.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Capture deployed script
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deployed-recovery
+          sudo cp /home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs deployed-recovery/recovery.mjs
+          sudo chown "$(id -u):$(id -g)" deployed-recovery/recovery.mjs
+          node --check deployed-recovery/recovery.mjs
+      - name: Upload script
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-recovery-script
+          path: deployed-recovery/recovery.mjs
+          if-no-files-found: error
+          retention-days: 3
