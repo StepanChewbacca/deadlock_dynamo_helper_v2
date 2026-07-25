@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           deploy=/home/ubuntu/apps/deadlock_dynamo_helper
-          expected=dfbe45280eccac2e518213b1da466576bedf8bf0
+          expected=9d0bd5535b5cbb37ee45dfbdb41f96e698d882c9
           unit=deadlock-full-crawler-recovery-v3-20260725.service
           root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
 
