@@ -1,18 +1,28 @@
 from pathlib import Path
+import re
 import sys
 
 
 def main() -> None:
     path = Path(sys.argv[1])
-    source = path.read_text()
-    if 'API configuration was reset while the stage was running' in source:
-        return
+    deployed_commit = sys.argv[2]
+    if not re.fullmatch(r'[a-f0-9]{40}', deployed_commit):
+        raise ValueError('deployed commit must be a 40-character hexadecimal SHA')
 
-    start_marker = 'async function runStage({ name, endpoint, body, timeoutMs }) {'
-    end_marker = '\nasync function readArtifact'
-    start = source.index(start_marker)
-    end = source.index(end_marker, start)
-    replacement = r'''async function runStage({ name, endpoint, body, timeoutMs }) {
+    source = path.read_text()
+    source = re.sub(
+        r"const expectedCommit = '[a-f0-9]{40}';",
+        f"const expectedCommit = '{deployed_commit}';",
+        source,
+        count=1,
+    )
+
+    if 'API configuration was reset while the stage was running' not in source:
+        start_marker = 'async function runStage({ name, endpoint, body, timeoutMs }) {'
+        end_marker = '\nasync function readArtifact'
+        start = source.index(start_marker)
+        end = source.index(end_marker, start)
+        replacement = r'''async function runStage({ name, endpoint, body, timeoutMs }) {
   await writeState({ state: 'RUNNING', stage: name });
   const expectedOutputDirectory = {
     '02-contextual-training': directories.contextualTraining,
@@ -78,7 +88,9 @@ def main() -> None:
   );
 }
 '''
-    path.write_text(source[:start] + replacement + source[end:])
+        source = source[:start] + replacement + source[end:]
+
+    path.write_text(source)
 
 
 if __name__ == '__main__':
