@@ -40,13 +40,20 @@ jobs:
           rm -rf .github/value-v6-patch
           rm -f .github/workflows/apply-recommendation-value-v6.yml
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
       - name: Install dependencies
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          corepack enable
-          corepack prepare yarn@1.22.22 --activate
-          yarn install --frozen-lockfile
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
 
       - name: Build API
         shell: bash
