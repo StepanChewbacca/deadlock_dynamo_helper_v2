@@ -1,0 +1,52 @@
+name: Debug full crawler recovery artifact
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/debug-full-crawler-recovery-artifact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-full-crawler-value-v5-20260725
+      - name: Collect launcher diagnostics
+        shell: bash
+        run: |
+          set +e
+          payload=scripts/full-crawler-recovery-v3-20260725.mjs.gz.b64
+          decoded="$RUNNER_TEMP/recovery-debug.mjs"
+          result="$RUNNER_TEMP/recovery-debug.txt"
+          : > "$result"
+          run() {
+            name="$1"
+            shift
+            "$@" >/tmp/recovery-debug.out 2>&1
+            rc=$?
+            printf '%s_rc=%s\n' "$name" "$rc" >> "$result"
+            sed -n '1,20p' /tmp/recovery-debug.out >> "$result"
+          }
+          run payload_test test -f "$payload"
+          base64 --decode "$payload" | gzip --decompress > "$decoded"
+          printf 'decode_rc=%s\n' "$?" >> "$result"
+          run node_check node --check "$decoded"
+          run mkdir sudo mkdir -p /home/ubuntu/deadlock-training-jobs /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          run chown sudo chown -R ubuntu:ubuntu /home/ubuntu/deadlock-training-jobs /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+          run install sudo install -o ubuntu -g ubuntu -m 0644 "$decoded" /home/ubuntu/deadlock-training-jobs/full-crawler-recovery-v3-20260725.mjs
+          run sha bash -lc "sha256sum '$decoded' | sudo tee /home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725/script.sha256 >/dev/null"
+          cp "$result" recovery-debug.txt
+          cat recovery-debug.txt
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-launch-debug
+          path: recovery-debug.txt
+          if-no-files-found: error
+          retention-days: 3
