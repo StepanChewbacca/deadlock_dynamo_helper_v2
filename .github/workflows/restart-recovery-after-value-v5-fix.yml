@@ -1,0 +1,45 @@
+name: Restart recovery after Value V5 fix
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/restart-recovery-after-value-v5-fix.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  restart:
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 45
+    steps:
+      - name: Wait for production deployment and restart recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy=/home/ubuntu/apps/deadlock_dynamo_helper
+          expected=dfbe45280eccac2e518213b1da466576bedf8bf0
+          unit=deadlock-full-crawler-recovery-v3-20260725.service
+          root=/home/ubuntu/deadlock-training-results/full-crawler-recovery-v3-20260725
+
+          for attempt in $(seq 1 120); do
+            current=$(git -C "$deploy" rev-parse HEAD)
+            if git -C "$deploy" merge-base --is-ancestor "$expected" "$current"; then
+              echo "Deployment contains $expected at $current"
+              break
+            fi
+            if [ "$attempt" -eq 120 ]; then
+              echo "Production did not deploy $expected" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
+          sudo systemctl reset-failed "$unit" || true
+          sudo systemctl restart "$unit"
+          sleep 30
+          sudo systemctl show "$unit" -p ActiveState -p SubState -p Result -p ExecMainStatus -p NRestarts
+          sudo systemctl status --no-pager "$unit" || true
+          sudo test -f "$root/state.json" && sudo cat "$root/state.json" || true
+          sudo test -f "$root/service.log" && sudo tail -n 120 "$root/service.log" || true
+          sudo systemctl is-active --quiet "$unit"
