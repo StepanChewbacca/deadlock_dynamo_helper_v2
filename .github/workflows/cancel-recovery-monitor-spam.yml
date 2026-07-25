@@ -1,0 +1,27 @@
+name: Cancel recovery monitor spam
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/cancel-recovery-monitor-spam.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel redundant queued self-hosted runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=queued&per_page=100" \
+            --jq '.workflow_runs[] | select(.name != "Capture deployed recovery script" and .name != "CI" and .name != "Cancel recovery monitor spam") | .id' \
+            | while read -r run_id; do
+                [ -n "$run_id" ] || continue
+                gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+              done
