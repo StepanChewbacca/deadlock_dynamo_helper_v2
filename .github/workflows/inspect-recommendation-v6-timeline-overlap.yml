@@ -55,28 +55,18 @@ jobs:
           echo
           echo '=== MATCH ID OVERLAP WITH DATASET V5 ==='
           sudo test -f "$DATASET_PATH"
-          sudo node - "$DATASET_PATH" "$TIMELINE_ROOT" <<'NODE'
-          const { createReadStream, readdirSync, statSync } = require('node:fs');
+          TIMELINE_IDS=$(sudo find "$TIMELINE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | paste -sd, -)
+          OVERLAP_SCRIPT="$RUNNER_TEMP/inspect-recommendation-v6-overlap.cjs"
+          cat > "$OVERLAP_SCRIPT" <<'NODE'
+          const { createReadStream } = require('node:fs');
           const { createGunzip } = require('node:zlib');
           const { createInterface } = require('node:readline');
 
-          const datasetPath = process.argv[2];
-          const timelineRoot = process.argv[3];
-          const timelineIds = new Set(
-            readdirSync(timelineRoot)
-              .filter((name) => {
-                try {
-                  return statSync(`${timelineRoot}/${name}`).isDirectory();
-                } catch {
-                  return false;
-                }
-              })
-              .map(String),
-          );
+          const timelineIds = new Set((process.argv[2] ?? '').split(',').filter(Boolean));
           const matched = new Set();
           const datasetIds = new Set();
           let rowCount = 0;
-          const input = createReadStream(datasetPath).pipe(createGunzip());
+          const input = createReadStream('/dev/stdin').pipe(createGunzip());
           const lines = createInterface({ input, crlfDelay: Infinity });
           (async () => {
             for await (const line of lines) {
@@ -103,6 +93,7 @@ jobs:
             process.exitCode = 1;
           });
           NODE
+          sudo cat "$DATASET_PATH" | node "$OVERLAP_SCRIPT" "$TIMELINE_IDS"
 
       - name: Upload timeline overlap report
         if: always()
