@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   reset-backfill-queue:
-    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -41,7 +41,7 @@ jobs:
 
   backfill-historical-timeline:
     needs: reset-backfill-queue
-    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    if: ${{ false }}
     runs-on: self-hosted
     timeout-minutes: 360
     steps:
