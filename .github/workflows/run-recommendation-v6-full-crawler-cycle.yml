@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: recommendation-v6-full-crawler-cycle
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   train-and-evaluate:
