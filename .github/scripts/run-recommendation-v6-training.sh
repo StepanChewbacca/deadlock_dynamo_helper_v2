@@ -56,7 +56,7 @@ SOURCE_DIR="$VOLUME_ROOT/recommendation-decision-dataset-v4-full-crawler-recover
 BEHAVIORAL_DIR="$VOLUME_ROOT/recommendation-behavioral-v4-full-crawler-recovery-v3-20260725"
 
 echo '=== STORAGE BEFORE TRAINING ==='
-df -h "$VOLUME_ROOT"
+sudo df -h "$VOLUME_ROOT"
 sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
   | grep -E '^(recommendation|contextual-v3)' \
   | sort \
@@ -77,7 +77,7 @@ for path in \
   sudo stat -c '%n %s bytes' "$path"
 done
 
-available_kb=$(df -Pk "$VOLUME_ROOT" | awk 'NR == 2 { print $4 }')
+available_kb=$(sudo df -Pk "$VOLUME_ROOT" | awk 'NR == 2 { print $4 }')
 minimum_kb=$((50 * 1024 * 1024))
 if [ "$available_kb" -lt "$minimum_kb" ]; then
   echo "At least 50 GiB free is required after cleanup; available KB: $available_kb"
@@ -156,4 +156,4 @@ echo '=== VALIDATE RECOMMENDATION V6 CYCLE ==='
 node scripts/validate-recommendation-v6-full-crawler-result.mjs
 
 echo '=== STORAGE AFTER TRAINING ==='
-df -h "$VOLUME_ROOT"
+sudo df -h "$VOLUME_ROOT"
