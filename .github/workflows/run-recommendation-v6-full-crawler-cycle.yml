@@ -8,6 +8,7 @@ on:
       - .github/workflows/run-recommendation-v6-full-crawler-cycle.yml
       - .github/scripts/patch-recommendation-v5-gzip.cjs
       - .github/scripts/patch-recommendation-v6-validator-gzip.cjs
+      - .github/scripts/patch-recommendation-v6-db-timeline-training.cjs
       - .github/scripts/run-recommendation-v6-training.sh
       - scripts/run-recommendation-v6-full-crawler-cycle.mjs
       - scripts/validate-recommendation-v6-full-crawler-result.mjs
@@ -54,6 +55,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Configure historical DB timeline training
+        shell: bash
+        run: |
+          node .github/scripts/patch-recommendation-v6-db-timeline-training.cjs
+          bash -n .github/scripts/run-recommendation-v6-training.sh
 
       - name: Build, train, evaluate, and restore production
         shell: bash
