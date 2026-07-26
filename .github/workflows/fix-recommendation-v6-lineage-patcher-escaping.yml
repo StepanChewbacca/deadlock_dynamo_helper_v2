@@ -1,0 +1,54 @@
+name: Fix Recommendation V6 lineage patcher escaping
+
+on:
+  push:
+    branches:
+      - agent/recommendation-v6-lineage
+    paths:
+      - .github/workflows/fix-recommendation-v6-lineage-patcher-escaping.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout lineage branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-v6-lineage
+          fetch-depth: 0
+
+      - name: Fix nested template interpolation
+        run: |
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = '.github/scripts/apply-recommendation-v6-lineage.cjs';
+          const source = readFileSync(path, 'utf8');
+          const nonEmptyBefore = 'throw new Error(\\`${name} must be a non-empty string.\\`);';
+          const nonEmptyAfter = 'throw new Error(\\`\\${name} must be a non-empty string.\\`);';
+          const shaBefore = 'throw new Error(\\`${name} must be a SHA-256 digest.\\`);';
+          const shaAfter = 'throw new Error(\\`\\${name} must be a SHA-256 digest.\\`);';
+          const nonEmptyCount = source.split(nonEmptyBefore).length - 1;
+          const shaCount = source.split(shaBefore).length - 1;
+          if (nonEmptyCount !== 2 || shaCount !== 1) {
+            throw new Error(`Unexpected interpolation targets: nonEmpty=${nonEmptyCount}, sha=${shaCount}`);
+          }
+          writeFileSync(
+            path,
+            source.replaceAll(nonEmptyBefore, nonEmptyAfter).replace(shaBefore, shaAfter),
+            'utf8',
+          );
+          NODE
+          node --check .github/scripts/apply-recommendation-v6-lineage.cjs
+
+      - name: Commit patcher fix
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/scripts/apply-recommendation-v6-lineage.cjs
+          git commit -m "ci: escape Recommendation V6 lineage templates"
+          git push origin HEAD:agent/recommendation-v6-lineage
