@@ -23,12 +23,34 @@ jobs:
           fetch-depth: 0
 
       - name: Apply unified diff
+        shell: bash
         run: |
-          set -euo pipefail
-          git apply --check .github/patches/recommendation-v6-lineage.patch
-          git apply .github/patches/recommendation-v6-lineage.patch
-          rm -f .github/patches/recommendation-v6-lineage.patch
-          rm -f .github/workflows/apply-recommendation-v6-lineage.yml
+          set +e
+          {
+            git apply --check --verbose .github/patches/recommendation-v6-lineage.patch
+            check_status=$?
+            if [ "$check_status" -eq 0 ]; then
+              git apply --verbose .github/patches/recommendation-v6-lineage.patch
+              check_status=$?
+            fi
+            exit "$check_status"
+          } > "$RUNNER_TEMP/recommendation-v6-lineage-patch.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/recommendation-v6-lineage-patch.log"
+          if [ "$status" -eq 0 ]; then
+            rm -f .github/patches/recommendation-v6-lineage.patch
+            rm -f .github/workflows/apply-recommendation-v6-lineage.yml
+          fi
+          exit "$status"
+
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-lineage-patch-diagnostics
+          path: ${{ runner.temp }}/recommendation-v6-lineage-patch.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
