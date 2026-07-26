@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: recommendation-v6-full-crawler-cycle
+  cancel-in-progress: false
+
 jobs:
   train-and-evaluate:
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
