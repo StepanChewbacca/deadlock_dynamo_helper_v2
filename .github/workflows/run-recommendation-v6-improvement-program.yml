@@ -12,6 +12,7 @@ on:
       - .github/scripts/patch-recommendation-policy-v6-accept-v7.cjs
       - .github/scripts/patch-recommendation-v6-sweep-target-ablation.cjs
       - .github/scripts/patch-recommendation-v7-short-match-split.cjs
+      - .github/scripts/patch-recommendation-v6-v7-comparator-schema.cjs
       - scripts/analyze-recommendation-v6-shrinkage.mjs
       - scripts/run-recommendation-v6-prior-sweep.mjs
       - scripts/train_recommendation_v7_catboost.py
