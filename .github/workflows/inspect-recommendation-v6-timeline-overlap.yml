@@ -1,9 +1,9 @@
 name: Inspect Recommendation V6 timeline overlap
 
 on:
-  push:
+  pull_request:
     branches:
-      - diagnostics/run-recommendation-v6-cycle-20260726
+      - main
     paths:
       - .github/workflows/inspect-recommendation-v6-timeline-overlap.yml
 
@@ -12,13 +12,14 @@ permissions:
 
 jobs:
   inspect-timeline-overlap:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 45
     steps:
       - name: Checkout diagnostic branch
         uses: actions/checkout@v4
         with:
-          ref: diagnostics/run-recommendation-v6-cycle-20260726
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Inspect timeline roots and Dataset V5 overlap
         shell: bash
