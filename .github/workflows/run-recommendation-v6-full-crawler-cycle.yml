@@ -32,82 +32,58 @@ jobs:
               --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
           )
           for run_id in "${run_ids[@]}"; do
-            echo "Cancelling older Recommendation V6 run ${run_id}"
             gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
           done
 
-  inspect-storage:
+  inspect-v5-storage:
     needs: reset-training-queue
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 20
     steps:
-      - name: Inspect production and training storage
+      - name: Inspect V5 storage candidates
         shell: bash
         run: |
           set -euo pipefail
-          REPORT="$GITHUB_WORKSPACE/recommendation-storage-report.txt"
+          REPORT="$GITHUB_WORKSPACE/recommendation-v5-storage-report.txt"
           VOLUME_NAME="$(sudo docker volume ls --format '{{.Name}}' | grep 'deadlock-storage' | head -n 1)"
           VOLUME_ROOT="$(sudo docker volume inspect -f '{{.Mountpoint}}' "$VOLUME_NAME")"
-          cd /home/ubuntu/apps/deadlock_dynamo_helper
-          API_CONTAINER="$(sudo docker compose ps -q api)"
           {
-            echo '=== DISK ==='
-            df -h
-            echo "VOLUME_NAME=$VOLUME_NAME"
-            echo "VOLUME_ROOT=$VOLUME_ROOT"
-            echo "API_CONTAINER=$API_CONTAINER"
-            echo
-            echo '=== PRODUCTION API ENV ==='
-            sudo docker inspect "$API_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' \
-              | grep -E 'DEADLOCK_(CONTEXTUAL|RECOMMENDATION|BUILD_EVALUATION)' \
-              | sort || true
-            echo
-            echo '=== LIVE STATUS ==='
-            curl --max-time 15 --silent --show-error http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status || true
-            echo
-            curl --max-time 15 --silent --show-error http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status || true
-            echo
-            echo '=== TARGET DIRECTORIES ==='
+            echo '=== LIVE V5 STATUS ==='
+            for suffix in status manifest audit source-availability; do
+              echo "[$suffix]"
+              curl --max-time 20 --silent --show-error "http://127.0.0.1:3000/deadlock/analysis/recommendation-decision-dataset-v5/$suffix" || true
+              echo
+            done
             for name in \
               recommendation-decision-dataset-v5-full-crawler-20260725 \
-              recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725 \
-              recommendation-decision-dataset-v4-historical-bootstrap \
-              recommendation-decision-dataset-v4-full-crawler-20260724 \
-              contextual-v3-training-full-crawler-recovery-v3-20260725 \
-              recommendation-behavioral-v4-full-crawler-recovery-v3-20260725; do
+              recommendation-decision-dataset-v5-full-crawler-v2-20260725; do
               dir="$VOLUME_ROOT/$name"
               echo
-              echo "--- $name ---"
-              if ! sudo test -d "$dir"; then
-                echo 'MISSING'
-                continue
-              fi
-              sudo du -sh "$dir"
-              sudo find "$dir" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-              for json in manifest.json audit.json evaluation.json model.json; do
+              echo "=== $name ==="
+              sudo du -sh "$dir" || true
+              echo '[TOP LEVEL]'
+              sudo find "$dir" -maxdepth 1 -printf '%y %f %s bytes\n' | sort || true
+              echo '[DEPTH 2 LARGE FILES]'
+              sudo find "$dir" -maxdepth 2 -type f -printf '%s %p\n' | sort -nr | head -n 100 || true
+              echo '[DIRECTORY SIZES]'
+              sudo du -h --max-depth=2 "$dir" 2>/dev/null | sort -h | tail -n 100 || true
+              for json in manifest.json audit.json source-availability.json progress.json status.json; do
                 if sudo test -f "$dir/$json"; then
                   echo "[$json]"
-                  sudo jq '{datasetVersion,modelVersion,schemaVersion,passed,releaseGatePassed,releaseGate,artifact,artifacts,source,createdAt,completedAt}' "$dir/$json" 2>/dev/null || sudo head -c 6000 "$dir/$json"
+                  sudo cat "$dir/$json"
                   echo
                 fi
               done
             done
-            echo
-            echo '=== ALL RECOMMENDATION/CONTEXTUAL DIRECTORIES ==='
-            sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
-              | grep -E '^(recommendation|contextual-v3)' \
-              | sort \
-              | while read -r name; do sudo du -sh "$VOLUME_ROOT/$name"; done
-            echo
-            echo '=== FINAL DISK ==='
-            df -h
+            echo '=== DISK ==='
+            df -h /
           } | tee "$REPORT"
 
-      - name: Upload storage report
+      - name: Upload V5 storage report
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-storage-report-${{ github.sha }}
-          path: recommendation-storage-report.txt
+          name: recommendation-v5-storage-report-${{ github.sha }}
+          path: recommendation-v5-storage-report.txt
           if-no-files-found: error
           retention-days: 3
