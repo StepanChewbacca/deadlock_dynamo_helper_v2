@@ -27,34 +27,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gate:
-    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.commit.outputs.should_run }}
-    steps:
-      - name: Checkout execution branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 1
-
-      - name: Check execution marker
-        id: commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          message=$(git log -1 --pretty=%B)
-          if grep -Fq '[run-v6-improvement]' <<<"$message"; then
-            echo 'should_run=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'should_run=false' >> "$GITHUB_OUTPUT"
-            echo 'Latest commit does not contain the execution marker.'
-          fi
-
   improve-and-evaluate:
-    needs: gate
-    if: needs.gate.outputs.should_run == 'true'
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 2400
     steps:
