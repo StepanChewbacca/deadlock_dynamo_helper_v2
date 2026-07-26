@@ -1,110 +1,11 @@
 name: Inspect Recommendation V6 timeline overlap
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - .github/workflows/inspect-recommendation-v6-timeline-overlap.yml
-
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
-  inspect-timeline-overlap:
-    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
-    runs-on: self-hosted
-    timeout-minutes: 45
+  disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout diagnostic branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Inspect timeline roots and Dataset V5 overlap
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          REPORT="$GITHUB_WORKSPACE/recommendation-v6-timeline-overlap.txt"
-          exec > >(tee "$REPORT") 2>&1
-
-          VOLUME_ROOT=$(sudo docker volume inspect \
-            deadlock_dynamo_helper_deadlock-storage \
-            --format '{{ .Mountpoint }}')
-          TIMELINE_ROOT="$VOLUME_ROOT/match-timeline-events-v1"
-          DATASET_ROOT="$VOLUME_ROOT/recommendation-decision-dataset-v5-full-crawler-20260726"
-          DATASET_PATH="$DATASET_ROOT/dataset.ndjson.gz"
-
-          echo '=== DISK ==='
-          sudo df -h "$VOLUME_ROOT"
-          echo
-          echo '=== POSSIBLE TIMELINE OR REPLAY ROOTS ==='
-          sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 3 -type d \
-            \( -iname '*timeline*' -o -iname '*replay*' -o -iname '*demo*' -o -iname '*event*' \) \
-            -printf '%p\n' | sort
-          echo
-          echo '=== TIMELINE ROOT CONTENTS ==='
-          sudo find "$TIMELINE_ROOT" -mindepth 1 -maxdepth 2 -printf '%y %p %s bytes\n' | sort
-          echo
-          echo '=== TIMELINE AUDITS ==='
-          while IFS= read -r audit; do
-            echo "--- $audit"
-            sudo cat "$audit"
-            echo
-          done < <(sudo find "$TIMELINE_ROOT" -mindepth 2 -maxdepth 2 -type f -name audit.json | sort)
-          echo
-          echo '=== MATCH ID OVERLAP WITH DATASET V5 ==='
-          sudo test -f "$DATASET_PATH"
-          TIMELINE_IDS=$(sudo find "$TIMELINE_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | paste -sd, -)
-          OVERLAP_SCRIPT="$RUNNER_TEMP/inspect-recommendation-v6-overlap.cjs"
-          cat > "$OVERLAP_SCRIPT" <<'NODE'
-          const { createReadStream } = require('node:fs');
-          const { createGunzip } = require('node:zlib');
-          const { createInterface } = require('node:readline');
-
-          const timelineIds = new Set((process.argv[2] ?? '').split(',').filter(Boolean));
-          const matched = new Set();
-          const datasetIds = new Set();
-          let rowCount = 0;
-          const input = createReadStream('/dev/stdin').pipe(createGunzip());
-          const lines = createInterface({ input, crlfDelay: Infinity });
-          (async () => {
-            for await (const line of lines) {
-              if (!line.trim()) continue;
-              const row = JSON.parse(line);
-              const matchId = String(row?.identity?.matchId ?? '');
-              if (matchId) datasetIds.add(matchId);
-              if (timelineIds.has(matchId)) matched.add(matchId);
-              rowCount += 1;
-              if (rowCount % 100000 === 0) {
-                console.log(JSON.stringify({ rowCount, uniqueDatasetMatchCount: datasetIds.size, matched: [...matched] }));
-              }
-            }
-            console.log(JSON.stringify({
-              rowCount,
-              uniqueDatasetMatchCount: datasetIds.size,
-              timelineDirectoryCount: timelineIds.size,
-              timelineMatchIds: [...timelineIds].sort(),
-              overlappingMatchIds: [...matched].sort(),
-              overlapCount: matched.size,
-            }, null, 2));
-          })().catch((error) => {
-            console.error(error);
-            process.exitCode = 1;
-          });
-          NODE
-          sudo cat "$DATASET_PATH" | node "$OVERLAP_SCRIPT" "$TIMELINE_IDS"
-
-      - name: Upload timeline overlap report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: recommendation-v6-timeline-overlap-${{ github.sha }}
-          path: recommendation-v6-timeline-overlap.txt
-          if-no-files-found: warn
-          retention-days: 14
+      - run: echo 'Timeline overlap diagnostic is complete.'
