@@ -120,10 +120,11 @@ rm -rf "$YARN_PREFIX"
 npm install --global --prefix "$YARN_PREFIX" yarn@1.22.22
 export PATH="$YARN_PREFIX/bin:$PATH"
 
+sudo apt-get update
+sudo apt-get install -y python3-venv
 PYTHON_ENV="$RUNNER_TEMP/recommendation-v7-python"
-if [ ! -x "$PYTHON_ENV/bin/python" ]; then
-  python3 -m venv "$PYTHON_ENV"
-fi
+rm -rf "$PYTHON_ENV"
+python3 -m venv "$PYTHON_ENV"
 "$PYTHON_ENV/bin/python" -m pip install --disable-pip-version-check --upgrade pip
 "$PYTHON_ENV/bin/python" -m pip install --disable-pip-version-check catboost==1.2.10
 
