@@ -1,0 +1,56 @@
+name: Run Recommendation V6 full-crawler cycle
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/run-recommendation-v6-full-crawler-cycle.yml
+      - scripts/run-recommendation-v6-full-crawler-cycle.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  train-and-evaluate:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: self-hosted
+    timeout-minutes: 720
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Dataset V5.3, Value V6, and Policy V6 cycle
+        run: node scripts/run-recommendation-v6-full-crawler-cycle.mjs
+
+      - name: Restore production API configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/apps/deadlock_dynamo_helper
+          sudo docker compose up -d --force-recreate --no-deps api
+          rm -f /tmp/recommendation-v6-full-crawler.override.yml
+          for attempt in $(seq 1 180); do
+            if curl --max-time 10 --fail --silent http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Upload Recommendation V6 cycle results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-full-crawler-${{ github.sha }}
+          path: recommendation-v6-full-crawler-result
+          if-no-files-found: warn
+          retention-days: 14
