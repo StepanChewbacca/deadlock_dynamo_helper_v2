@@ -1,0 +1,78 @@
+name: Reset Recommendation V6 training queue
+
+on:
+  push:
+    branches:
+      - diagnostics/run-recommendation-v6-cycle-20260726
+    paths:
+      - .github/workflows/reset-recommendation-v6-training-queue.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  reset-and-launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRAINING_WORKFLOW_ID: '320515287'
+      TRAINING_BRANCH: diagnostics/run-recommendation-v6-cycle-20260726
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-recommendation-v6-cycle-20260726
+          fetch-depth: 0
+
+      - name: Cancel queued and running Recommendation V6 runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t run_ids < <(
+            gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
+              --jq '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending") | .id'
+          )
+
+          for run_id in "${run_ids[@]}"; do
+            echo "Cancelling Recommendation V6 run ${run_id}"
+            gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
+
+          for attempt in $(seq 1 60); do
+            active_count=$(gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
+              --jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending")] | length' \
+              | awk '{ total += $1 } END { print total + 0 }')
+            if [ "${active_count}" -eq 0 ]; then
+              echo 'Recommendation V6 queue is clear.'
+              exit 0
+            fi
+            echo "Waiting for ${active_count} active Recommendation V6 run(s) to stop."
+            sleep 5
+          done
+
+          echo 'Recommendation V6 runs did not stop within five minutes.' >&2
+          exit 1
+
+      - name: Create one fresh training launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = '.github/workflows/run-recommendation-v6-full-crawler-cycle.yml';
+          let content = readFileSync(path, 'utf8');
+          content = content.replace('timeout-minutes: 720', 'timeout-minutes: 1200');
+          content = content.replace(/\n# launch-token:.*\n?$/u, '\n');
+          content = `${content.trimEnd()}\n\n# launch-token: ${process.env.GITHUB_RUN_ID}\n`;
+          writeFileSync(path, content, 'utf8');
+          NODE
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/run-recommendation-v6-full-crawler-cycle.yml
+          git commit -m "ci: launch Recommendation V6 training"
+          git push origin HEAD:${TRAINING_BRANCH}
