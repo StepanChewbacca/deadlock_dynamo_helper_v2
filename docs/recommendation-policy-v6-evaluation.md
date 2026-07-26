@@ -15,6 +15,8 @@ Behavioral V4 supplies an estimated player-action policy. Value V6 supplies boun
 
 All source hashes are checked against their manifests before evaluation starts.
 
+The evaluator also requires Behavioral V4 and Value V6 to carry the same upstream Dataset V4 SHA-256 lineage. A corpus mismatch fails before any policy estimate is produced.
+
 ## Policies
 
 The estimated behavior policy is:

@@ -181,6 +181,7 @@ interface SourceArtifacts {
   manifest: Record<string, unknown>;
   audit: Record<string, unknown>;
   sha256: string;
+  upstreamDatasetV4Sha256: string;
   rowCount: number;
 }
 
@@ -476,6 +477,7 @@ export class RecommendationValueV6TrainingService implements OnModuleInit {
         passed: true,
         source: {
           datasetVersion: source.manifest.datasetVersion,
+          upstreamDatasetV4Sha256: source.upstreamDatasetV4Sha256,
           expectedSha256: options.expectedSourceSha256,
           actualSha256: source.sha256,
           sourceRowCount: sourceSummary.sourceRowCount,
@@ -538,6 +540,7 @@ export class RecommendationValueV6TrainingService implements OnModuleInit {
         source: {
           datasetVersion: source.manifest.datasetVersion,
           artifactSha256: source.sha256,
+          upstreamDatasetV4Sha256: source.upstreamDatasetV4Sha256,
           sourceRowCount: sourceSummary.sourceRowCount,
           eligibleRowCount: sourceSummary.eligibleSourceRowCount,
         },
@@ -631,17 +634,20 @@ export class RecommendationValueV6TrainingService implements OnModuleInit {
     const manifest = await requiredJson(this.sourceManifestPath);
     const audit = await requiredJson(this.sourceAuditPath);
     if (manifest.datasetVersion !== RECOMMENDATION_DECISION_DATASET_V5_VERSION) {
-      throw new Error('Recommendation Value V6 requires Dataset V5.2.');
+      throw new Error('Recommendation Value V6 requires Dataset V5.3.');
     }
     if (audit.passed !== true) {
-      throw new Error('Recommendation Dataset V5.2 did not pass its audit.');
+      throw new Error('Recommendation Dataset V5.3 did not pass its audit.');
     }
+    const upstreamDatasetV4Sha256 = requiredSha(
+      record(manifest.source).sha256,
+    );
     const artifact = record(manifest.artifact);
     const expectedSha256 = requiredSha(artifact.sha256);
     const actualSha256 = await hashFile(this.sourceDatasetPath);
     if (expectedSha256 !== actualSha256) {
       throw new Error(
-        `Recommendation Dataset V5.2 artifact hash mismatch: ${actualSha256} versus ${expectedSha256}.`,
+        `Recommendation Dataset V5.3 artifact hash mismatch: ${actualSha256} versus ${expectedSha256}.`,
       );
     }
     if (
@@ -656,6 +662,7 @@ export class RecommendationValueV6TrainingService implements OnModuleInit {
       manifest,
       audit,
       sha256: actualSha256,
+      upstreamDatasetV4Sha256,
       rowCount: numeric(artifact.rowCount),
     };
   }
@@ -1430,7 +1437,7 @@ function validateSourceSummary(
   expectedRowCount: number,
 ): void {
   if (summary.sourceRowCount !== expectedRowCount) {
-    throw new Error('Recommendation Dataset V5.2 row count does not match manifest.');
+    throw new Error('Recommendation Dataset V5.3 row count does not match manifest.');
   }
   if (summary.duplicateEligibleDecisionCount > 0) {
     throw new Error('Value V6 source contains duplicate eligible decision IDs.');
