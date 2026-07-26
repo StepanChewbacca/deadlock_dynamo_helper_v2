@@ -1,0 +1,113 @@
+name: Inspect Recommendation V6 timeline overlap
+
+on:
+  push:
+    branches:
+      - diagnostics/run-recommendation-v6-cycle-20260726
+    paths:
+      - .github/workflows/inspect-recommendation-v6-timeline-overlap.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-timeline-overlap:
+    runs-on: self-hosted
+    timeout-minutes: 45
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-recommendation-v6-cycle-20260726
+
+      - name: Inspect timeline roots and Dataset V5 overlap
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          REPORT="$GITHUB_WORKSPACE/recommendation-v6-timeline-overlap.txt"
+          exec > >(tee "$REPORT") 2>&1
+
+          VOLUME_ROOT=$(sudo docker volume inspect \
+            deadlock_dynamo_helper_deadlock-storage \
+            --format '{{ .Mountpoint }}')
+          TIMELINE_ROOT="$VOLUME_ROOT/match-timeline-events-v1"
+          DATASET_ROOT="$VOLUME_ROOT/recommendation-decision-dataset-v5-full-crawler-20260726"
+          DATASET_PATH="$DATASET_ROOT/dataset.ndjson.gz"
+
+          echo '=== DISK ==='
+          sudo df -h "$VOLUME_ROOT"
+          echo
+          echo '=== POSSIBLE TIMELINE OR REPLAY ROOTS ==='
+          sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 3 -type d \
+            \( -iname '*timeline*' -o -iname '*replay*' -o -iname '*demo*' -o -iname '*event*' \) \
+            -printf '%p\n' | sort
+          echo
+          echo '=== TIMELINE ROOT CONTENTS ==='
+          sudo find "$TIMELINE_ROOT" -mindepth 1 -maxdepth 2 -printf '%y %p %s bytes\n' | sort
+          echo
+          echo '=== TIMELINE AUDITS ==='
+          while IFS= read -r audit; do
+            echo "--- $audit"
+            sudo cat "$audit"
+            echo
+          done < <(sudo find "$TIMELINE_ROOT" -mindepth 2 -maxdepth 2 -type f -name audit.json | sort)
+          echo
+          echo '=== MATCH ID OVERLAP WITH DATASET V5 ==='
+          sudo test -f "$DATASET_PATH"
+          sudo node - "$DATASET_PATH" "$TIMELINE_ROOT" <<'NODE'
+          const { createReadStream, readdirSync, statSync } = require('node:fs');
+          const { createGunzip } = require('node:zlib');
+          const { createInterface } = require('node:readline');
+
+          const datasetPath = process.argv[2];
+          const timelineRoot = process.argv[3];
+          const timelineIds = new Set(
+            readdirSync(timelineRoot)
+              .filter((name) => {
+                try {
+                  return statSync(`${timelineRoot}/${name}`).isDirectory();
+                } catch {
+                  return false;
+                }
+              })
+              .map(String),
+          );
+          const matched = new Set();
+          const datasetIds = new Set();
+          let rowCount = 0;
+          const input = createReadStream(datasetPath).pipe(createGunzip());
+          const lines = createInterface({ input, crlfDelay: Infinity });
+          (async () => {
+            for await (const line of lines) {
+              if (!line.trim()) continue;
+              const row = JSON.parse(line);
+              const matchId = String(row?.identity?.matchId ?? '');
+              if (matchId) datasetIds.add(matchId);
+              if (timelineIds.has(matchId)) matched.add(matchId);
+              rowCount += 1;
+              if (rowCount % 100000 === 0) {
+                console.log(JSON.stringify({ rowCount, uniqueDatasetMatchCount: datasetIds.size, matched: [...matched] }));
+              }
+            }
+            console.log(JSON.stringify({
+              rowCount,
+              uniqueDatasetMatchCount: datasetIds.size,
+              timelineDirectoryCount: timelineIds.size,
+              timelineMatchIds: [...timelineIds].sort(),
+              overlappingMatchIds: [...matched].sort(),
+              overlapCount: matched.size,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Upload timeline overlap report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-timeline-overlap-${{ github.sha }}
+          path: recommendation-v6-timeline-overlap.txt
+          if-no-files-found: warn
+          retention-days: 14
