@@ -1,0 +1,71 @@
+name: Diagnose Recommendation V6 lineage targets
+
+on:
+  push:
+    branches:
+      - agent/recommendation-v6-lineage
+    paths:
+      - .github/workflows/diagnose-recommendation-v6-lineage-targets.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout lineage branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-v6-lineage
+
+      - name: Count replacement targets
+        shell: bash
+        run: |
+          node <<'NODE' > "$RUNNER_TEMP/lineage-target-counts.json"
+          const { readFileSync } = require('node:fs');
+          const lines = (...values) => values.join('\n');
+          const files = new Map();
+          const count = (path, target) => {
+            const content = files.get(path) ?? readFileSync(path, 'utf8');
+            files.set(path, content);
+            return content.split(target).length - 1;
+          };
+          const valuePath = 'apps/api/src/deadlock-live/recommendation-value-v6-training.service.ts';
+          const policyPath = 'apps/api/src/deadlock-live/recommendation-policy-v6-evaluation.service.ts';
+          const valueTestPath = 'apps/api/test/recommendation-value-v6-training.spec.ts';
+          const policyTestPath = 'apps/api/test/recommendation-policy-v6-evaluation-integration.spec.ts';
+          const checks = {
+            valueSourceArtifacts: count(valuePath, lines('interface SourceArtifacts {','  manifest: Record<string, unknown>;','  audit: Record<string, unknown>;','  sha256: string;','  rowCount: number;','}')),
+            valueAuditSource: count(valuePath, lines('          datasetVersion: source.manifest.datasetVersion,','          expectedSha256: options.expectedSourceSha256,')),
+            valueManifestSource: count(valuePath, lines('          datasetVersion: source.manifest.datasetVersion,','          artifactSha256: source.sha256,','          sourceRowCount: sourceSummary.sourceRowCount,')),
+            valueLoadSource: count(valuePath, lines('    const audit = await requiredJson(this.sourceAuditPath);','    if (manifest.datasetVersion !== RECOMMENDATION_DECISION_DATASET_V5_VERSION) {',"      throw new Error('Recommendation Value V6 requires Dataset V5.2.');",'    }','    if (audit.passed !== true) {',"      throw new Error('Recommendation Dataset V5.2 did not pass its audit.');",'    }','    const artifact = record(manifest.artifact);')),
+            valueHashMessage: count(valuePath, '`Recommendation Dataset V5.2 artifact hash mismatch: ${actualSha256} versus ${expectedSha256}.`'),
+            valueReturnSource: count(valuePath, lines('      manifest,','      audit,','      sha256: actualSha256,','      rowCount: numeric(artifact.rowCount),')),
+            valueRowCountMessage: count(valuePath, "    throw new Error('Recommendation Dataset V5.2 row count does not match manifest.');"),
+            policySourceBundle: count(policyPath, lines('  hashes: {','    behavioralValidation: string;','    behavioralModel: string;','    valuePrediction: string;','    valueModel: string;','  };','}')),
+            policyAuditSource: count(policyPath, lines('          valueDatasetVersion: readNestedString(','            sources.valueManifest,',"            ['source', 'datasetVersion'],",'          ),','          hashes: sources.hashes,')),
+            policyLineageInsertion: count(policyPath, lines('    ) {',"      throw new Error('Recommendation Policy V6 requires Dataset V5.3 lineage.');",'    }','    const behavioralModel = parseBehavioralModel(behavioralModelValue);')),
+            policyReturnSource: count(policyPath, lines('      valueAudit,','      hashes,','    };')),
+            policyManifestSource: count(policyPath, lines('      valueDatasetVersion: readNestedString(','        input.sources.valueManifest,',"        ['source', 'datasetVersion'],",'      ),','      hashes: input.sources.hashes,')),
+            policyRequiredText: count(policyPath, lines('function requiredText(value: unknown, name: string): string {','  const result = text(value);','  if (!result) {','    throw new Error(`${name} must be a non-empty string.`);','  }','  return result;','}','','function requiredBoolean(value: unknown, name: string): boolean {')),
+            valueTestAudit: count(valueTestPath, lines('        datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,','        actualSha256: sourceSha256,')),
+            valueTestManifest: count(valueTestPath, lines('        datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,','        auditPassed: true,','        artifact: {')),
+            policyTestStart: count(policyTestPath, "  it('joins held-out artifacts and persists match-balanced OPE results', async () => {\n    const behavioralRows = ["),
+            policyTestBehavioralManifest: count(policyTestPath, lines('        auditPassed: true,','        releaseGatePassed: true,','        artifacts: {')),
+            policyTestValueManifest: count(policyTestPath, lines('        source: {','          datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,','        },')),
+            policyTestAudit: count(policyTestPath, lines('    expect(service.getAudit()).toMatchObject({','      passed: true,','      leakage: {')),
+            valueDocs: count('docs/recommendation-value-v6.md', '- an optional caller-supplied source SHA-256 to match.\n\nTraining uses a chronological match-level 70/15/15 split by default.'),
+            policyDocs: count('docs/recommendation-policy-v6-evaluation.md', 'All source hashes are checked against their manifests before evaluation starts.\n\n## Policies'),
+          };
+          console.log(JSON.stringify(checks, undefined, 2));
+          NODE
+          cat "$RUNNER_TEMP/lineage-target-counts.json"
+
+      - name: Upload target diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-lineage-target-counts
+          path: ${{ runner.temp }}/lineage-target-counts.json
+          retention-days: 3
