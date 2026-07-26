@@ -8,6 +8,7 @@ on:
       - .github/workflows/run-recommendation-v6-full-crawler-cycle.yml
       - .github/scripts/patch-recommendation-v5-gzip.cjs
       - .github/scripts/patch-recommendation-v6-validator-gzip.cjs
+      - .github/scripts/run-recommendation-v6-training.sh
       - scripts/run-recommendation-v6-full-crawler-cycle.mjs
       - scripts/validate-recommendation-v6-full-crawler-result.mjs
 
@@ -43,9 +44,6 @@ jobs:
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 1200
-    env:
-      DEPLOY_REPOSITORY: /home/ubuntu/apps/deadlock_dynamo_helper
-      EXPECTED_COMMIT: 251660fc3dd541925b8ade9c55d216a91a975d85
     steps:
       - name: Checkout diagnostic branch
         uses: actions/checkout@v4
@@ -57,139 +55,9 @@ jobs:
         with:
           node-version: 22
 
-      - name: Prepare storage-safe Recommendation V6 runtime
+      - name: Build, train, evaluate, and restore production
         shell: bash
-        run: |
-          set -euo pipefail
-
-          current_commit=$(git -C "$DEPLOY_REPOSITORY" rev-parse HEAD)
-          if [ "$current_commit" != "$EXPECTED_COMMIT" ]; then
-            echo "Expected deployment commit $EXPECTED_COMMIT, found $current_commit"
-            exit 1
-          fi
-          if ! git -C "$DEPLOY_REPOSITORY" diff --quiet || ! git -C "$DEPLOY_REPOSITORY" diff --cached --quiet; then
-            echo 'Deployment repository contains tracked changes before the temporary patch.'
-            git -C "$DEPLOY_REPOSITORY" status --short
-            exit 1
-          fi
-
-          VOLUME_ROOT=$(sudo docker volume inspect \
-            deadlock_dynamo_helper_deadlock-storage \
-            --format '{{ .Mountpoint }}')
-          SOURCE_DIR="$VOLUME_ROOT/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725"
-          BEHAVIORAL_DIR="$VOLUME_ROOT/recommendation-behavioral-v4-full-crawler-recovery-v3-20260725"
-
-          for path in \
-            "$SOURCE_DIR/dataset.ndjson" \
-            "$SOURCE_DIR/manifest.json" \
-            "$SOURCE_DIR/audit.json" \
-            "$BEHAVIORAL_DIR/validation.ndjson" \
-            "$BEHAVIORAL_DIR/model.json" \
-            "$BEHAVIORAL_DIR/manifest.json" \
-            "$BEHAVIORAL_DIR/audit.json"; do
-            sudo test -f "$path" || { echo "Missing required artifact: $path"; exit 1; }
-          done
-
-          available_kb=$(df -Pk "$VOLUME_ROOT" | awk 'NR == 2 { print $4 }')
-          minimum_kb=$((50 * 1024 * 1024))
-          df -h "$VOLUME_ROOT"
-          if [ "$available_kb" -lt "$minimum_kb" ]; then
-            echo "At least 50 GiB free is required after cleanup; available KB: $available_kb"
-            exit 1
-          fi
-
-          rm -rf /tmp/recommendation-v6-full-crawler.lock
-          rm -f /tmp/recommendation-v6-full-crawler.completed
-
-          node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v5-gzip.cjs" \
-            "$DEPLOY_REPOSITORY"
-          node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-validator-gzip.cjs" \
-            "$GITHUB_WORKSPACE/scripts/validate-recommendation-v6-full-crawler-result.mjs"
-
-          node <<'NODE'
-          const { readFileSync, writeFileSync } = require('node:fs');
-          const path = 'scripts/run-recommendation-v6-full-crawler-cycle.mjs';
-          let content = readFileSync(path, 'utf8');
-          const replacements = [
-            [
-              '/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-v2-20260724',
-              '/app/apps/api/storage/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725',
-              'Dataset V4 source path',
-            ],
-            [
-              '/app/apps/api/storage/recommendation-behavioral-v4-full-crawler-v2-20260724',
-              '/app/apps/api/storage/recommendation-behavioral-v4-full-crawler-recovery-v3-20260725',
-              'Behavioral V4 source path',
-            ],
-            ['resume: false', 'resume: true', 'Dataset V5 resume option'],
-            [
-              `  const outputDirectories = [\n    directories.datasetV5,\n    directories.valueV6,\n    directories.policyV6,\n  ];`,
-              `  const outputDirectories = [directories.valueV6, directories.policyV6];\n  const datasetV5HostPath = storageHostPath(volumeRoot, directories.datasetV5);\n  commandOutput('sudo', ['mkdir', '-p', datasetV5HostPath]);`,
-              'resumable output cleanup',
-            ],
-            [
-              `  assertTrue(\n    status.state !== 'COMPLETE',\n    \`${'${name}'} unexpectedly started with a completed artifact in a clean directory.\`,\n  );\n  if (status.state !== 'RUNNING') {`,
-              `  if (status.state === 'COMPLETE') {\n    console.log(\`[${'${name}'}] reusing completed artifact\`);\n    return status;\n  }\n  if (status.state !== 'RUNNING') {`,
-              'completed stage reuse',
-            ],
-          ];
-          for (const [before, after, name] of replacements) {
-            const count = content.split(before).length - 1;
-            if (count !== 1) {
-              throw new Error(`${name}: expected one target, found ${count}.`);
-            }
-            content = content.replace(before, after);
-          }
-          writeFileSync(path, content, 'utf8');
-          NODE
-
-          node --check .github/scripts/patch-recommendation-v5-gzip.cjs
-          node --check .github/scripts/patch-recommendation-v6-validator-gzip.cjs
-          node --check scripts/run-recommendation-v6-full-crawler-cycle.mjs
-          node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
-          git -C "$DEPLOY_REPOSITORY" diff --check
-
-      - name: Build and test storage-safe API
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$DEPLOY_REPOSITORY"
-          yarn install --frozen-lockfile --ignore-engines
-          yarn workspace @deadlock-live-probe/shared build
-          yarn workspace @deadlock-live-probe/build-domain build
-          yarn workspace @deadlock-live-probe/api build
-          yarn workspace @deadlock-live-probe/api jest --runInBand \
-            recommendation-decision-dataset-v5.spec.ts \
-            recommendation-value-v6-training.spec.ts \
-            recommendation-policy-v6-evaluation.spec.ts \
-            recommendation-policy-v6-evaluation-integration.spec.ts
-          sudo docker compose build api
-
-      - name: Run Dataset V5.3, Value V6, and Policy V6 cycle
-        run: node scripts/run-recommendation-v6-full-crawler-cycle.mjs
-
-      - name: Validate timeline, economy, and lineage
-        run: node scripts/validate-recommendation-v6-full-crawler-result.mjs
-
-      - name: Restore clean production API
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$DEPLOY_REPOSITORY"
-          git reset --hard "$EXPECTED_COMMIT"
-          sudo docker compose build api
-          sudo docker compose up -d --force-recreate --no-deps api
-          rm -f /tmp/recommendation-v6-full-crawler.override.yml
-          for attempt in $(seq 1 180); do
-            if curl --max-time 10 --fail --silent \
-              http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status \
-              >/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
+        run: bash .github/scripts/run-recommendation-v6-training.sh
 
       - name: Upload Recommendation V6 cycle results
         if: always()
