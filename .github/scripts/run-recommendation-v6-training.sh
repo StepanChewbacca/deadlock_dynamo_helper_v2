@@ -136,6 +136,12 @@ node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
 git -C "$DEPLOY_REPOSITORY" diff --check
 
 echo '=== BUILD AND TARGETED TESTS ==='
+YARN_PREFIX="$RUNNER_TEMP/recommendation-v6-yarn"
+rm -rf "$YARN_PREFIX"
+npm install --global --prefix "$YARN_PREFIX" yarn@1.22.22
+export PATH="$YARN_PREFIX/bin:$PATH"
+yarn --version
+
 cd "$DEPLOY_REPOSITORY"
 yarn install --frozen-lockfile --ignore-engines
 yarn workspace @deadlock-live-probe/shared build
