@@ -34,6 +34,12 @@ content = replaceOnce(
 );
 content = replaceOnce(
   content,
+  "  commandOutput('sudo', [\n    'node',\n    '-e',",
+  "  commandOutput('sudo', [\n    process.execPath,\n    '-e',",
+  'validator-sudo-node-path',
+);
+content = replaceOnce(
+  content,
   "const datasetManifest = readJson(datasetManifestPath);\nconst datasetAudit = readJson(datasetAuditPath);",
   'const datasetAudit = readJson(datasetAuditPath);',
   'validator-duplicate-manifest-read',
