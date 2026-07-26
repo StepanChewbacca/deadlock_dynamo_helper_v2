@@ -42,11 +42,15 @@ if [ "$current_commit" != "$EXPECTED_COMMIT" ]; then
   echo "Expected deployment commit $EXPECTED_COMMIT, found $current_commit"
   exit 1
 fi
+
+# A cancelled or interrupted diagnostic run may leave only the temporary gzip
+# patch in the deployment worktree. The deployment commit is immutable, so
+# restore it before applying the patch again instead of blocking the resume.
 if ! git -C "$DEPLOY_REPOSITORY" diff --quiet || \
   ! git -C "$DEPLOY_REPOSITORY" diff --cached --quiet; then
-  echo 'Deployment repository contains tracked changes before the temporary patch.'
+  echo 'Resetting temporary changes left by an interrupted Recommendation V6 run.'
   git -C "$DEPLOY_REPOSITORY" status --short
-  exit 1
+  git -C "$DEPLOY_REPOSITORY" reset --hard "$EXPECTED_COMMIT"
 fi
 
 VOLUME_ROOT=$(sudo docker volume inspect \
