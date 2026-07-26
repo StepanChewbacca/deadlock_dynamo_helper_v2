@@ -235,7 +235,7 @@ replaceOnce(
   `function requiredText(value: unknown, name: string): string {
   const result = text(value);
   if (!result) {
-    throw new Error(\`${name} must be a non-empty string.\`);
+    throw new Error(\`\${name} must be a non-empty string.\`);
   }
   return result;
 }
@@ -244,7 +244,7 @@ function requiredBoolean(value: unknown, name: string): boolean {`,
   `function requiredText(value: unknown, name: string): string {
   const result = text(value);
   if (!result) {
-    throw new Error(\`${name} must be a non-empty string.\`);
+    throw new Error(\`\${name} must be a non-empty string.\`);
   }
   return result;
 }
@@ -252,7 +252,7 @@ function requiredBoolean(value: unknown, name: string): boolean {`,
 function requiredSha(value: unknown, name: string): string {
   const result = requiredText(value, name).toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(result)) {
-    throw new Error(\`${name} must be a SHA-256 digest.\`);
+    throw new Error(\`\${name} must be a SHA-256 digest.\`);
   }
   return result;
 }
