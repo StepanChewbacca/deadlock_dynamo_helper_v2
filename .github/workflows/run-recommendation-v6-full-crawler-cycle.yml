@@ -41,7 +41,7 @@ jobs:
 
   train-and-evaluate:
     needs: reset-training-queue
-    if: ${{ false }}
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 1200
     steps:
