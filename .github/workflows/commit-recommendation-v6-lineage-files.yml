@@ -1,0 +1,94 @@
+name: Commit Recommendation V6 lineage files
+
+on:
+  push:
+    branches:
+      - agent/recommendation-v6-lineage
+    paths:
+      - .github/workflows/commit-recommendation-v6-lineage-files.yml
+
+permissions:
+  contents: write
+
+jobs:
+  commit-files:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout lineage branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-v6-lineage
+          fetch-depth: 0
+
+      - name: Extract and apply verified edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+            /node <<'"'"'NODE'"'"'/ { capture=1; next }
+            capture && /^          NODE$/ { capture=0; exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/apply-recommendation-v6-lineage.yml > /tmp/apply-lineage.cjs
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = '/tmp/apply-lineage.cjs';
+          const source = readFileSync(path, 'utf8');
+          const before = `            if (count !== 1) {
+              throw new Error(\`${'${path}'}: expected one replacement target, found ${'${count}'}\`);
+            }
+            writeFileSync(path, content.replace(before, after), 'utf8');`;
+          const after = `            if (count === 0 && content.includes(after)) {
+              return;
+            }
+            if (count !== 1) {
+              throw new Error(\`${'${path}'}: expected one replacement target, found ${'${count}'}\`);
+            }
+            writeFileSync(path, content.replace(before, after), 'utf8');`;
+          if (!source.includes(before)) {
+            throw new Error('Unable to make lineage replacements idempotent.');
+          }
+          writeFileSync(path, source.replace(before, after), 'utf8');
+          NODE
+          node /tmp/apply-lineage.cjs
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Run lineage tests
+        run: >-
+          yarn workspace @deadlock-live-probe/api test --runInBand
+          recommendation-value-v6-training.spec.ts
+          recommendation-policy-v6-evaluation.spec.ts
+          recommendation-policy-v6-evaluation-integration.spec.ts
+
+      - name: Commit lineage files only
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/api/src/deadlock-live/recommendation-value-v6-training.service.ts \
+            apps/api/src/deadlock-live/recommendation-policy-v6-evaluation.service.ts \
+            apps/api/test/recommendation-value-v6-training.spec.ts \
+            apps/api/test/recommendation-policy-v6-evaluation-integration.spec.ts \
+            docs/recommendation-value-v6.md \
+            docs/recommendation-policy-v6-evaluation.md
+          git diff --cached --exit-code && { echo 'No lineage changes to commit'; exit 1; } || true
+          git commit -m "fix: verify Recommendation V6 dataset lineage"
+          git push origin HEAD:agent/recommendation-v6-lineage
