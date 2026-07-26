@@ -19,61 +19,15 @@ permissions:
 
 jobs:
   reset-training-queue:
-    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      GH_TOKEN: ${{ github.token }}
-      ACTIVE_TRAINING_WORKFLOW_ID: '320515287'
-      OBSOLETE_WORKFLOW_IDS: '320730715 320712618 320719923'
     steps:
-      - name: Cancel obsolete Recommendation runs
-        shell: bash
-        run: |
-          set -euo pipefail
-          for workflow_id in $ACTIVE_TRAINING_WORKFLOW_ID $OBSOLETE_WORKFLOW_IDS; do
-            mapfile -t run_ids < <(
-              gh api --paginate \
-                "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
-                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
-            )
-            for run_id in "${run_ids[@]}"; do
-              echo "Cancelling workflow ${workflow_id} run ${run_id}"
-              gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
-            done
-          done
+      - run: echo 'Obsolete execution workflow is disabled.'
 
   train-and-evaluate:
-    needs: reset-training-queue
     if: ${{ false }}
     runs-on: self-hosted
     timeout-minutes: 1200
     steps:
-      - name: Checkout diagnostic branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Configure historical DB timeline training
-        shell: bash
-        run: |
-          node .github/scripts/patch-recommendation-v6-db-timeline-training.cjs
-          bash -n .github/scripts/run-recommendation-v6-training.sh
-
-      - name: Build, train, evaluate, and restore production
-        shell: bash
-        run: bash .github/scripts/run-recommendation-v6-training.sh
-
-      - name: Upload Recommendation V6 cycle results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: recommendation-v6-full-crawler-${{ github.sha }}
-          path: recommendation-v6-full-crawler-result
-          if-no-files-found: warn
-          retention-days: 14
+      - run: echo 'Obsolete execution workflow is disabled.'
