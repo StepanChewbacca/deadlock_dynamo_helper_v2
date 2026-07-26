@@ -1,0 +1,289 @@
+name: Apply Recommendation V6 runner safety
+
+on:
+  push:
+    branches:
+      - diagnostics/run-recommendation-v6-cycle-20260726
+    paths:
+      - .github/workflows/apply-recommendation-v6-runner-safety.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-recommendation-v6-cycle-20260726
+          fetch-depth: 0
+
+      - name: Apply verified safety edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync, writeFileSync, rmSync } = require('node:fs');
+
+          const lines = (...values) => values.join('\n');
+          const replaceOnce = (path, before, after) => {
+            const content = readFileSync(path, 'utf8');
+            const count = content.split(before).length - 1;
+            if (count !== 1) {
+              throw new Error(`${path}: expected one replacement target, found ${count}`);
+            }
+            writeFileSync(path, content.replace(before, after), 'utf8');
+          };
+
+          const workflowPath = '.github/workflows/run-recommendation-v6-full-crawler-cycle.yml';
+          replaceOnce(
+            workflowPath,
+            lines(
+              'permissions:',
+              '  contents: read',
+              '',
+              'jobs:',
+            ),
+            lines(
+              'permissions:',
+              '  contents: read',
+              '',
+              'concurrency:',
+              '  group: recommendation-v6-full-crawler-cycle',
+              '  cancel-in-progress: false',
+              '',
+              'jobs:',
+            ),
+          );
+
+          const scriptPath = 'scripts/run-recommendation-v6-full-crawler-cycle.mjs';
+          replaceOnce(
+            scriptPath,
+            "import { mkdir, rm, stat, writeFile } from 'node:fs/promises';",
+            "import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';",
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              "const lockPath = '/tmp/recommendation-v6-full-crawler.lock';",
+              "const completedPath = '/tmp/recommendation-v6-full-crawler.completed';",
+            ),
+            lines(
+              "const lockPath = '/tmp/recommendation-v6-full-crawler.lock';",
+              "const lockOwnerPath = join(lockPath, 'owner.json');",
+              "const completedPath = '/tmp/recommendation-v6-full-crawler.completed';",
+              'const lockWaitTimeoutMs = 13 * 60 * 60_000;',
+              'const staleLockAgeMs = 13 * 60 * 60_000;',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              'await mkdir(resultDirectory, { recursive: true });',
+              '',
+              'if (await exists(completedPath)) {',
+              "  console.log('Recommendation V6 full-crawler cycle already completed; skipping duplicate run.');",
+              '  process.exit(0);',
+              '}',
+              '',
+              'try {',
+              '  await mkdir(lockPath);',
+              '} catch (error) {',
+              "  if (error && typeof error === 'object' && error.code === 'EEXIST') {",
+              "    console.log('Another Recommendation V6 full-crawler cycle is active; skipping duplicate run.');",
+              '    process.exit(0);',
+              '  }',
+              '  throw error;',
+              '}',
+            ),
+            lines(
+              'await mkdir(resultDirectory, { recursive: true });',
+              '',
+              'if (await exists(completedPath)) {',
+              "  console.log('Recommendation V6 full-crawler cycle already completed; skipping duplicate run.');",
+              '  process.exit(0);',
+              '}',
+              '',
+              'const lockAcquired = await acquireCycleLock();',
+              'if (!lockAcquired) {',
+              "  console.log('The active Recommendation V6 cycle completed while this duplicate run was waiting.');",
+              '  process.exit(0);',
+              '}',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              'let failure;',
+              'let succeeded = false;',
+              'try {',
+            ),
+            lines(
+              'let failure;',
+              'let succeeded = false;',
+              'let restored = false;',
+              'try {',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              '  succeeded = true;',
+              '  await writeFile(completedPath, `${new Date().toISOString()}\\n`, \'utf8\');',
+              '} catch (error) {',
+            ),
+            lines(
+              '  succeeded = true;',
+              '} catch (error) {',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              '  try {',
+              '    await restoreProductionApi();',
+              '  } catch (restoreError) {',
+            ),
+            lines(
+              '  try {',
+              '    await restoreProductionApi();',
+              '    restored = true;',
+              '  } catch (restoreError) {',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              '  await rm(lockPath, { recursive: true, force: true });',
+              '  if (!succeeded) {',
+              '    await rm(completedPath, { force: true });',
+              '  }',
+            ),
+            lines(
+              '  if (succeeded && restored && !failure) {',
+              '    await writeFile(completedPath, `${new Date().toISOString()}\\n`, \'utf8\');',
+              '  } else {',
+              '    await rm(completedPath, { force: true });',
+              '  }',
+              '  await rm(lockPath, { recursive: true, force: true });',
+            ),
+          );
+          replaceOnce(
+            scriptPath,
+            lines(
+              'if (failure) {',
+              '  throw failure;',
+              '}',
+              '',
+              'async function inspectRequiredSources(volumeRoot) {',
+            ),
+            lines(
+              'if (failure) {',
+              '  throw failure;',
+              '}',
+              '',
+              'async function acquireCycleLock() {',
+              '  const startedAt = Date.now();',
+              '  while (Date.now() - startedAt <= lockWaitTimeoutMs) {',
+              '    if (await exists(completedPath)) {',
+              '      return false;',
+              '    }',
+              '    try {',
+              '      await mkdir(lockPath);',
+              '      await writeFile(',
+              '        lockOwnerPath,',
+              '        `${JSON.stringify({',
+              '          pid: process.pid,',
+              '          runId: process.env.GITHUB_RUN_ID,',
+              '          runAttempt: process.env.GITHUB_RUN_ATTEMPT,',
+              '          createdAt: new Date().toISOString(),',
+              '        }, undefined, 2)}\\n`,',
+              "        'utf8',",
+              '      );',
+              '      return true;',
+              '    } catch (error) {',
+              "      if (!error || typeof error !== 'object' || error.code !== 'EEXIST') {",
+              '        throw error;',
+              '      }',
+              '    }',
+              '',
+              '    const lock = await inspectCycleLock();',
+              '    if (!lock.active) {',
+              '      console.log(`Removing stale Recommendation V6 lock: ${lock.reason}`);',
+              '      await rm(lockPath, { recursive: true, force: true });',
+              '      continue;',
+              '    }',
+              '    console.log(',
+              '      `Recommendation V6 cycle owned by PID ${lock.pid} is active; waiting for completion.`,',
+              '    );',
+              '    await sleep(30_000);',
+              '  }',
+              "  throw new Error('Timed out waiting for the active Recommendation V6 cycle lock.');",
+              '}',
+              '',
+              'async function inspectCycleLock() {',
+              '  let lockStat;',
+              '  try {',
+              '    lockStat = await stat(lockPath);',
+              '  } catch (error) {',
+              "    if (error && typeof error === 'object' && error.code === 'ENOENT') {",
+              "      return { active: false, reason: 'lock disappeared' };",
+              '    }',
+              '    throw error;',
+              '  }',
+              '  const ageMs = Date.now() - lockStat.mtimeMs;',
+              '  if (ageMs > staleLockAgeMs) {',
+              "    return { active: false, reason: `lock age ${Math.round(ageMs / 60_000)} minutes` };",
+              '  }',
+              '  try {',
+              "    const owner = JSON.parse(await readFile(lockOwnerPath, 'utf8'));",
+              '    const pid = Number(owner.pid);',
+              '    if (!Number.isSafeInteger(pid) || pid <= 0) {',
+              "      return { active: false, reason: 'invalid owner PID' };",
+              '    }',
+              '    try {',
+              '      process.kill(pid, 0);',
+              "      return { active: true, pid, reason: 'owner process is alive' };",
+              '    } catch (error) {',
+              "      if (error && typeof error === 'object' && error.code === 'ESRCH') {",
+              "        return { active: false, pid, reason: 'owner process is not alive' };",
+              '      }',
+              '      if (error && typeof error === \'object\' && error.code === \'EPERM\') {',
+              "        return { active: true, pid, reason: 'owner process exists without signal permission' };",
+              '      }',
+              '      throw error;',
+              '    }',
+              '  } catch (error) {',
+              "    if (error && typeof error === 'object' && error.code === 'ENOENT') {",
+              "      return { active: false, reason: 'owner metadata is missing' };",
+              '    }',
+              '    if (error instanceof SyntaxError) {',
+              "      return { active: false, reason: 'owner metadata is invalid JSON' };",
+              '    }',
+              '    throw error;',
+              '  }',
+              '}',
+              '',
+              'async function inspectRequiredSources(volumeRoot) {',
+            ),
+          );
+
+          rmSync('.github/workflows/apply-recommendation-v6-runner-safety.yml', { force: true });
+          NODE
+
+      - name: Validate scripts
+        run: |
+          node --check scripts/run-recommendation-v6-full-crawler-cycle.mjs
+          node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
+
+      - name: Commit safety fixes
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: serialize Recommendation V6 diagnostic runs"
+          git push origin HEAD:diagnostics/run-recommendation-v6-cycle-20260726
