@@ -1,0 +1,49 @@
+name: Validate Recommendation V6 DB timeline results
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/validate-recommendation-v6-db-timeline-results.yml
+      - .github/scripts/patch-recommendation-v6-validator-gzip.cjs
+      - scripts/validate-recommendation-v6-full-crawler-result.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  validate-db-timeline-results:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: self-hosted
+    timeout-minutes: 180
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate completed DB timeline artifacts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rm -rf recommendation-v6-full-crawler-result
+          mkdir -p recommendation-v6-full-crawler-result
+          node .github/scripts/patch-recommendation-v6-validator-gzip.cjs \
+            scripts/validate-recommendation-v6-full-crawler-result.mjs
+          node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
+          node scripts/validate-recommendation-v6-full-crawler-result.mjs
+
+      - name: Upload validation result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-db-timeline-validation-${{ github.sha }}
+          path: recommendation-v6-full-crawler-result
+          if-no-files-found: warn
+          retention-days: 14
