@@ -16,6 +16,24 @@ function replaceOnce(content, before, after, name) {
 let content = readFileSync(path, 'utf8');
 content = replaceOnce(
   content,
+  "const datasetDirectory =\n  'recommendation-decision-dataset-v5-full-crawler-20260726';",
+  "const datasetDirectory =\n  'recommendation-decision-dataset-v5-full-crawler-db-timeline-20260726';",
+  'validator-dataset-directory',
+);
+content = replaceOnce(
+  content,
+  "const valueDirectory = 'recommendation-value-v6-full-crawler-20260726';",
+  "const valueDirectory = 'recommendation-value-v6-full-crawler-db-timeline-20260726';",
+  'validator-value-directory',
+);
+content = replaceOnce(
+  content,
+  "const policyDirectory = 'recommendation-policy-v6-full-crawler-20260726';",
+  "const policyDirectory = 'recommendation-policy-v6-full-crawler-db-timeline-20260726';",
+  'validator-policy-directory',
+);
+content = replaceOnce(
+  content,
   "const datasetPath = join(volumeRoot, datasetDirectory, 'dataset.ndjson');\nconst datasetManifestPath = join(volumeRoot, datasetDirectory, 'manifest.json');",
   "const datasetManifestPath = join(volumeRoot, datasetDirectory, 'manifest.json');\nconst datasetManifest = readJson(datasetManifestPath);\nconst datasetFileName = requiredText(\n  datasetManifest?.artifact?.fileName,\n  'Dataset V5.3 artifact file name',\n);\nconst datasetPath = join(volumeRoot, datasetDirectory, datasetFileName);",
   'validator-dataset-path',
