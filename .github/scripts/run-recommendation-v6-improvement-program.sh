@@ -80,9 +80,8 @@ for path in \
   fi
 done
 
-DATASET_FILE_NAME=$(sudo node -e \
-  "const fs=require('fs'); const value=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(String(value.artifact.fileName));" \
-  "$DATASET_DIR/manifest.json")
+DATASET_FILE_NAME=$(sudo cat "$DATASET_DIR/manifest.json" | node -e \
+  "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',(chunk)=>input+=chunk); process.stdin.on('end',()=>{const value=JSON.parse(input); process.stdout.write(String(value.artifact.fileName));});")
 if ! sudo test -f "$DATASET_DIR/$DATASET_FILE_NAME"; then
   echo "Missing Dataset V5.3 artifact: $DATASET_DIR/$DATASET_FILE_NAME"
   exit 1
