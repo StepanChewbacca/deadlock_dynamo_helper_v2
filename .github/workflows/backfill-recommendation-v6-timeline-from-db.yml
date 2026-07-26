@@ -1,0 +1,96 @@
+name: Backfill Recommendation V6 timeline from PostgreSQL
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/scripts/backfill-recommendation-v6-timeline-from-db.cjs
+      - .github/workflows/backfill-recommendation-v6-timeline-from-db.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  reset-backfill-queue:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BACKFILL_WORKFLOW_ID: '320724818'
+    steps:
+      - name: Cancel older database timeline backfills
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t run_ids < <(
+            gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${BACKFILL_WORKFLOW_ID}/runs?per_page=100" \
+              --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
+          )
+          for run_id in "${run_ids[@]}"; do
+            gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
+
+  backfill-historical-timeline:
+    needs: reset-backfill-queue
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: self-hosted
+    timeout-minutes: 360
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Backfill historical timeline from PostgreSQL
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          REPORT="$GITHUB_WORKSPACE/recommendation-v6-db-timeline-backfill.log"
+          exec > >(tee "$REPORT") 2>&1
+          DEPLOY_REPOSITORY=/home/ubuntu/apps/deadlock_dynamo_helper
+          EXPECTED_COMMIT=251660fc3dd541925b8ade9c55d216a91a975d85
+          current_commit=$(git -C "$DEPLOY_REPOSITORY" rev-parse HEAD)
+          if [ "$current_commit" != "$EXPECTED_COMMIT" ]; then
+            echo "Expected deployment commit $EXPECTED_COMMIT, found $current_commit"
+            exit 1
+          fi
+          if ! git -C "$DEPLOY_REPOSITORY" diff --quiet || \
+             ! git -C "$DEPLOY_REPOSITORY" diff --cached --quiet; then
+            echo 'Deployment repository contains tracked changes.'
+            git -C "$DEPLOY_REPOSITORY" status --short
+            exit 1
+          fi
+
+          node --check .github/scripts/backfill-recommendation-v6-timeline-from-db.cjs
+          cd "$DEPLOY_REPOSITORY"
+          sudo docker compose exec -T api node - \
+            < "$GITHUB_WORKSPACE/.github/scripts/backfill-recommendation-v6-timeline-from-db.cjs"
+
+          sudo docker compose exec -T api node - <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const path = '/app/apps/api/storage/match-timeline-events-v1-historical-db-20260726/backfill-summary.json';
+          const summary = JSON.parse(readFileSync(path, 'utf8'));
+          if (summary.passed !== true) throw new Error('Database timeline backfill summary did not pass.');
+          if (summary.requestedMatchCount !== 6855) throw new Error(`Expected 6855 matches, received ${summary.requestedMatchCount}.`);
+          if (summary.auditedMatchCount !== summary.requestedMatchCount) throw new Error('Backfill match coverage is incomplete.');
+          if (summary.playerSnapshotCount <= 0) throw new Error('Backfill contains no player snapshots.');
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
+      - name: Upload database timeline backfill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-db-timeline-backfill-${{ github.sha }}
+          path: recommendation-v6-db-timeline-backfill.log
+          if-no-files-found: warn
+          retention-days: 14
