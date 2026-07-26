@@ -1,0 +1,55 @@
+name: Apply Recommendation V6 runner safety v2
+
+on:
+  push:
+    branches:
+      - diagnostics/run-recommendation-v6-cycle-20260726
+    paths:
+      - .github/scripts/apply-recommendation-v6-runner-safety.cjs
+      - .github/workflows/apply-recommendation-v6-runner-safety-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: diagnostics/run-recommendation-v6-cycle-20260726
+          fetch-depth: 0
+
+      - name: Apply runner safety edits
+        shell: bash
+        run: |
+          set +e
+          node .github/scripts/apply-recommendation-v6-runner-safety.cjs > "$RUNNER_TEMP/runner-safety-patcher.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/runner-safety-patcher.log"
+          exit "$status"
+
+      - name: Upload patcher diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-runner-safety-patcher
+          path: ${{ runner.temp }}/runner-safety-patcher.log
+          retention-days: 3
+
+      - name: Validate diagnostic scripts
+        run: |
+          node --check scripts/run-recommendation-v6-full-crawler-cycle.mjs
+          node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
+
+      - name: Commit runner safety implementation
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/run-recommendation-v6-full-crawler-cycle.mjs
+          git diff --cached --quiet && { echo 'No runner safety changes to commit'; exit 1; }
+          git commit -m "fix: recover and serialize Recommendation V6 runs"
+          git push origin HEAD:diagnostics/run-recommendation-v6-cycle-20260726
