@@ -24,20 +24,23 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      TRAINING_WORKFLOW_ID: '320515287'
+      ACTIVE_TRAINING_WORKFLOW_ID: '320515287'
+      OBSOLETE_WORKFLOW_IDS: '320730715 320712618 320719923'
     steps:
-      - name: Cancel older Recommendation V6 runs
+      - name: Cancel obsolete Recommendation runs
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t run_ids < <(
-            gh api --paginate \
-              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
-              --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
-          )
-          for run_id in "${run_ids[@]}"; do
-            echo "Cancelling older Recommendation V6 run ${run_id}"
-            gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          for workflow_id in $ACTIVE_TRAINING_WORKFLOW_ID $OBSOLETE_WORKFLOW_IDS; do
+            mapfile -t run_ids < <(
+              gh api --paginate \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
+                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
+            )
+            for run_id in "${run_ids[@]}"; do
+              echo "Cancelling workflow ${workflow_id} run ${run_id}"
+              gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+            done
           done
 
   train-and-evaluate:
