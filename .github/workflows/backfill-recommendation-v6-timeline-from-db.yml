@@ -64,7 +64,7 @@ jobs:
           EXPECTED_COMMIT=251660fc3dd541925b8ade9c55d216a91a975d85
 
           echo 'Restoring clean production checkout before read-only database backfill.'
-          git -C "$DEPLOY_REPOSITORY" fetch origin main
+          git -C "$DEPLOY_REPOSITORY" cat-file -e "${EXPECTED_COMMIT}^{commit}"
           git -C "$DEPLOY_REPOSITORY" reset --hard "$EXPECTED_COMMIT"
           git -C "$DEPLOY_REPOSITORY" clean -fd
 
