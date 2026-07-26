@@ -1,0 +1,81 @@
+name: Apply Recommendation V6 lineage v2
+
+on:
+  push:
+    branches:
+      - agent/recommendation-v6-lineage
+    paths:
+      - .github/scripts/apply-recommendation-v6-lineage.cjs
+      - .github/workflows/apply-recommendation-v6-lineage-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout lineage branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-v6-lineage
+          fetch-depth: 0
+
+      - name: Apply lineage edits
+        shell: bash
+        run: |
+          set +e
+          node .github/scripts/apply-recommendation-v6-lineage.cjs > "$RUNNER_TEMP/lineage-patcher.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/lineage-patcher.log"
+          exit "$status"
+
+      - name: Upload patcher diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-lineage-patcher
+          path: ${{ runner.temp }}/lineage-patcher.log
+          retention-days: 3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Run lineage tests
+        run: >-
+          yarn workspace @deadlock-live-probe/api test --runInBand
+          recommendation-value-v6-training.spec.ts
+          recommendation-policy-v6-evaluation.spec.ts
+          recommendation-policy-v6-evaluation-integration.spec.ts
+
+      - name: Commit lineage implementation
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/api/src/deadlock-live/recommendation-value-v6-training.service.ts \
+            apps/api/src/deadlock-live/recommendation-policy-v6-evaluation.service.ts \
+            apps/api/test/recommendation-value-v6-training.spec.ts \
+            apps/api/test/recommendation-policy-v6-evaluation-integration.spec.ts \
+            docs/recommendation-value-v6.md \
+            docs/recommendation-policy-v6-evaluation.md
+          git diff --cached --quiet && { echo 'No lineage changes to commit'; exit 1; }
+          git commit -m "fix: verify Recommendation V6 dataset lineage"
+          git push origin HEAD:agent/recommendation-v6-lineage
