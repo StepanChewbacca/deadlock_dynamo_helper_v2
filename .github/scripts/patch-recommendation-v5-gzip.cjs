@@ -81,21 +81,9 @@ patch(
     );
     content = replaceOnce(
       content,
-      "        const stats = await processPartition({\n          index,\n          paths: this.paths,\n          timelineDirectory: this.timelineDirectory,\n          snapshotStalenessS: options.snapshotStalenessS,\n          catalog,\n        });\n        await atomicJson(statsPath(this.paths, index), stats);",
-      "        const stats = await processPartition({\n          index,\n          paths: this.paths,\n          timelineDirectory: this.timelineDirectory,\n          snapshotStalenessS: options.snapshotStalenessS,\n          catalog,\n        });\n        await rm(sourcePart(this.paths, index), { force: true });\n        await atomicJson(statsPath(this.paths, index), stats);",
-      'v5-remove-processed-source-part',
-    );
-    content = replaceOnce(
-      content,
       "        artifact: {\n          format: 'NDJSON',\n          fileName: DATASET_FILE,",
       "        artifact: {\n          format: 'NDJSON_GZIP',\n          fileName: DATASET_FILE,",
       'v5-manifest-format',
-    );
-    content = replaceOnce(
-      content,
-      "      for await (const chunk of createReadStream(path)) {\n        await output.write(chunk as Buffer);\n      }\n    }",
-      "      for await (const chunk of createReadStream(path)) {\n        await output.write(chunk as Buffer);\n      }\n      await rm(path, { force: true });\n    }",
-      'v5-combine-delete-part',
     );
     content = replaceOnce(
       content,
