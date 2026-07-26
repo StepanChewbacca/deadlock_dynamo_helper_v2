@@ -1,0 +1,94 @@
+name: Run Recommendation V6 improvement program
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/run-recommendation-v6-improvement-program.yml
+      - .github/scripts/run-recommendation-v6-improvement-program.sh
+      - .github/scripts/patch-recommendation-v5-gzip.cjs
+      - scripts/analyze-recommendation-v6-shrinkage.mjs
+      - scripts/run-recommendation-v6-prior-sweep.mjs
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: recommendation-v6-improvement-program
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.commit.outputs.should_run }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - name: Check execution marker
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          message=$(git log -1 --pretty=%B)
+          if grep -Fq '[run-v6-improvement]' <<<"$message"; then
+            echo 'should_run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'should_run=false' >> "$GITHUB_OUTPUT"
+            echo 'Latest commit does not contain the execution marker.'
+          fi
+
+      - name: Cancel obsolete Recommendation workflows
+        if: steps.commit.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow_id in 320515287 320730715 320712618 320719923 320863254; do
+            mapfile -t run_ids < <(
+              gh api --paginate \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
+                --jq '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending") | .id'
+            )
+            for run_id in "${run_ids[@]}"; do
+              echo "Cancelling obsolete workflow ${workflow_id} run ${run_id}"
+              gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+            done
+          done
+
+  improve-and-evaluate:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 1200
+    steps:
+      - name: Checkout execution branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run staged V6 improvement sweep
+        shell: bash
+        run: bash .github/scripts/run-recommendation-v6-improvement-program.sh
+
+      - name: Upload Recommendation V6 improvement results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v6-improvement-${{ github.sha }}
+          path: recommendation-v6-improvement-result
+          if-no-files-found: warn
+          retention-days: 30
