@@ -22,11 +22,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TRAINING_WORKFLOW_ID: '320515287'
     steps:
-      - name: Checkout diagnostic branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-
       - name: Cancel older Recommendation V6 runs
         shell: bash
         run: |
@@ -36,82 +31,83 @@ jobs:
               "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
               --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
           )
-
           for run_id in "${run_ids[@]}"; do
             echo "Cancelling older Recommendation V6 run ${run_id}"
             gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
           done
 
-          for attempt in $(seq 1 60); do
-            active_count=$(gh api --paginate \
-              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
-              --jq "[.workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\")] | length" \
-              | awk '{ total += $1 } END { print total + 0 }')
-            if [ "${active_count}" -eq 0 ]; then
-              echo 'Older Recommendation V6 runs are stopped.'
-              break
-            fi
-            echo "Waiting for ${active_count} older run(s) to stop."
-            sleep 5
-          done
-
-      - name: Inspect configured remote automation
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo 'WORKFLOW_FILES_BEGIN'
-          find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort
-          echo 'WORKFLOW_FILES_END'
-          echo 'REFERENCED_SECRETS_BEGIN'
-          grep -RhoE 'secrets\.[A-Za-z0-9_]+' .github/workflows | sort -u || true
-          echo 'REFERENCED_SECRETS_END'
-          echo 'REMOTE_ACTIONS_BEGIN'
-          grep -RniE 'ssh|scp|rsync|deploy|appleboy|webhook' .github/workflows || true
-          echo 'REMOTE_ACTIONS_END'
-
-  train-and-evaluate:
+  inspect-storage:
     needs: reset-training-queue
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
-    timeout-minutes: 1200
+    timeout-minutes: 20
     steps:
-      - name: Checkout diagnostic branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Run Dataset V5.3, Value V6, and Policy V6 cycle
-        run: node scripts/run-recommendation-v6-full-crawler-cycle.mjs
-
-      - name: Validate timeline and team-economy coverage
-        run: node scripts/validate-recommendation-v6-full-crawler-result.mjs
-
-      - name: Restore production API configuration
-        if: always()
+      - name: Inspect production and training storage
         shell: bash
         run: |
           set -euo pipefail
+          REPORT="$GITHUB_WORKSPACE/recommendation-storage-report.txt"
+          VOLUME_NAME="$(sudo docker volume ls --format '{{.Name}}' | grep 'deadlock-storage' | head -n 1)"
+          VOLUME_ROOT="$(sudo docker volume inspect -f '{{.Mountpoint}}' "$VOLUME_NAME")"
           cd /home/ubuntu/apps/deadlock_dynamo_helper
-          sudo docker compose up -d --force-recreate --no-deps api
-          rm -f /tmp/recommendation-v6-full-crawler.override.yml
-          for attempt in $(seq 1 180); do
-            if curl --max-time 10 --fail --silent http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status >/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
+          API_CONTAINER="$(sudo docker compose ps -q api)"
+          {
+            echo '=== DISK ==='
+            df -h
+            echo "VOLUME_NAME=$VOLUME_NAME"
+            echo "VOLUME_ROOT=$VOLUME_ROOT"
+            echo "API_CONTAINER=$API_CONTAINER"
+            echo
+            echo '=== PRODUCTION API ENV ==='
+            sudo docker inspect "$API_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | grep -E 'DEADLOCK_(CONTEXTUAL|RECOMMENDATION|BUILD_EVALUATION)' \
+              | sort || true
+            echo
+            echo '=== LIVE STATUS ==='
+            curl --max-time 15 --silent --show-error http://127.0.0.1:3000/deadlock/analysis/contextual-v3-live/status || true
+            echo
+            curl --max-time 15 --silent --show-error http://127.0.0.1:3000/deadlock/analysis/recommendation-telemetry/status || true
+            echo
+            echo '=== TARGET DIRECTORIES ==='
+            for name in \
+              recommendation-decision-dataset-v5-full-crawler-20260725 \
+              recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725 \
+              recommendation-decision-dataset-v4-historical-bootstrap \
+              recommendation-decision-dataset-v4-full-crawler-20260724 \
+              contextual-v3-training-full-crawler-recovery-v3-20260725 \
+              recommendation-behavioral-v4-full-crawler-recovery-v3-20260725; do
+              dir="$VOLUME_ROOT/$name"
+              echo
+              echo "--- $name ---"
+              if ! sudo test -d "$dir"; then
+                echo 'MISSING'
+                continue
+              fi
+              sudo du -sh "$dir"
+              sudo find "$dir" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+              for json in manifest.json audit.json evaluation.json model.json; do
+                if sudo test -f "$dir/$json"; then
+                  echo "[$json]"
+                  sudo jq '{datasetVersion,modelVersion,schemaVersion,passed,releaseGatePassed,releaseGate,artifact,artifacts,source,createdAt,completedAt}' "$dir/$json" 2>/dev/null || sudo head -c 6000 "$dir/$json"
+                  echo
+                fi
+              done
+            done
+            echo
+            echo '=== ALL RECOMMENDATION/CONTEXTUAL DIRECTORIES ==='
+            sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+              | grep -E '^(recommendation|contextual-v3)' \
+              | sort \
+              | while read -r name; do sudo du -sh "$VOLUME_ROOT/$name"; done
+            echo
+            echo '=== FINAL DISK ==='
+            df -h
+          } | tee "$REPORT"
 
-      - name: Upload Recommendation V6 cycle results
-        if: always()
+      - name: Upload storage report
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-v6-full-crawler-${{ github.sha }}
-          path: recommendation-v6-full-crawler-result
-          if-no-files-found: warn
-          retention-days: 14
+          name: recommendation-storage-report-${{ github.sha }}
+          path: recommendation-storage-report.txt
+          if-no-files-found: error
+          retention-days: 3
