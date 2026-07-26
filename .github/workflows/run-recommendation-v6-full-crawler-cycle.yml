@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/run-recommendation-v6-full-crawler-cycle.yml
       - scripts/run-recommendation-v6-full-crawler-cycle.mjs
+      - scripts/validate-recommendation-v6-full-crawler-result.mjs
 
 permissions:
   contents: read
@@ -29,6 +30,9 @@ jobs:
 
       - name: Run Dataset V5.3, Value V6, and Policy V6 cycle
         run: node scripts/run-recommendation-v6-full-crawler-cycle.mjs
+
+      - name: Validate timeline and team-economy coverage
+        run: node scripts/validate-recommendation-v6-full-crawler-result.mjs
 
       - name: Restore production API configuration
         if: always()
