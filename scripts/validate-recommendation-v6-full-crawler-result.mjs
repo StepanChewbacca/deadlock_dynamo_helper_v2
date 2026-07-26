@@ -25,8 +25,10 @@ const volumeRoot = commandOutput('sudo', [
 const datasetPath = join(volumeRoot, datasetDirectory, 'dataset.ndjson');
 const datasetManifestPath = join(volumeRoot, datasetDirectory, 'manifest.json');
 const datasetAuditPath = join(volumeRoot, datasetDirectory, 'audit.json');
+const valueManifestPath = join(volumeRoot, valueDirectory, 'manifest.json');
 const valueEvaluationPath = join(volumeRoot, valueDirectory, 'evaluation.json');
 const valueAuditPath = join(volumeRoot, valueDirectory, 'audit.json');
+const policyManifestPath = join(volumeRoot, policyDirectory, 'manifest.json');
 const policyEvaluationPath = join(volumeRoot, policyDirectory, 'evaluation.json');
 const policyAuditPath = join(volumeRoot, policyDirectory, 'audit.json');
 
@@ -34,8 +36,10 @@ for (const path of [
   datasetPath,
   datasetManifestPath,
   datasetAuditPath,
+  valueManifestPath,
   valueEvaluationPath,
   valueAuditPath,
+  policyManifestPath,
   policyEvaluationPath,
   policyAuditPath,
 ]) {
@@ -99,10 +103,33 @@ const counts = {
 
 const datasetManifest = readJson(datasetManifestPath);
 const datasetAudit = readJson(datasetAuditPath);
+const valueManifest = readJson(valueManifestPath);
 const valueEvaluation = readJson(valueEvaluationPath);
 const valueAudit = readJson(valueAuditPath);
+const policyManifest = readJson(policyManifestPath);
 const policyEvaluation = readJson(policyEvaluationPath);
 const policyAudit = readJson(policyAuditPath);
+
+const lineage = {
+  datasetV5UpstreamDatasetV4Sha256: requiredSha(
+    datasetManifest?.source?.sha256,
+    'Dataset V5.3 upstream Dataset V4 SHA-256',
+  ),
+  valueV6UpstreamDatasetV4Sha256: requiredSha(
+    valueManifest?.source?.upstreamDatasetV4Sha256,
+    'Value V6 upstream Dataset V4 SHA-256',
+  ),
+  policyV6BehavioralDatasetV4Sha256: requiredSha(
+    policyManifest?.source?.lineage?.behavioralDatasetV4Sha256,
+    'Policy V6 Behavioral V4 Dataset V4 SHA-256',
+  ),
+  policyV6ValueDatasetV4Sha256: requiredSha(
+    policyManifest?.source?.lineage?.valueDatasetV4Sha256,
+    'Policy V6 Value V6 Dataset V4 SHA-256',
+  ),
+};
+const lineageHashes = Object.values(lineage);
+const lineageMatches = lineageHashes.every((value) => value === lineageHashes[0]);
 
 const coverage = {
   ...counts,
@@ -129,6 +156,10 @@ const validation = {
   datasetAuditPassed: datasetAudit.passed === true,
   valueAuditPassed: valueAudit.passed === true,
   policyAuditPassed: policyAudit.passed === true,
+  lineage: {
+    ...lineage,
+    matches: lineageMatches,
+  },
   coverage,
   valueReleaseGate: valueEvaluation.releaseGate,
   valueTest: valueEvaluation.test,
@@ -161,6 +192,10 @@ assertTrue(
 assertTrue(datasetAudit.passed === true, 'Dataset V5.3 audit did not pass.');
 assertTrue(valueAudit.passed === true, 'Value V6 audit did not pass.');
 assertTrue(policyAudit.passed === true, 'Policy V6 audit did not pass.');
+assertTrue(
+  lineageMatches,
+  `Recommendation V6 Dataset V4 lineage mismatch: ${JSON.stringify(lineage)}`,
+);
 
 console.log(JSON.stringify(validation, undefined, 2));
 
@@ -183,6 +218,12 @@ function commandSucceeded(command, args) {
   } catch {
     return false;
   }
+}
+
+function requiredSha(value, name) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  assertTrue(/^[a-f0-9]{64}$/.test(normalized), `${name} is missing or invalid.`);
+  return normalized;
 }
 
 function divide(numerator, denominator) {
