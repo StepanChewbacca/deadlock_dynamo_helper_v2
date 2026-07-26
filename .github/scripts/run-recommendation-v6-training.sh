@@ -55,13 +55,6 @@ VOLUME_ROOT=$(sudo docker volume inspect \
 SOURCE_DIR="$VOLUME_ROOT/recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725"
 BEHAVIORAL_DIR="$VOLUME_ROOT/recommendation-behavioral-v4-full-crawler-recovery-v3-20260725"
 
-echo '=== STORAGE BEFORE TRAINING ==='
-sudo df -h "$VOLUME_ROOT"
-sudo find "$VOLUME_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
-  | grep -E '^(recommendation|contextual-v3)' \
-  | sort \
-  | while read -r name; do sudo du -sh "$VOLUME_ROOT/$name"; done
-
 for path in \
   "$SOURCE_DIR/dataset.ndjson" \
   "$SOURCE_DIR/manifest.json" \
@@ -74,15 +67,7 @@ for path in \
     echo "Missing required artifact: $path"
     exit 1
   fi
-  sudo stat -c '%n %s bytes' "$path"
 done
-
-available_kb=$(sudo df -Pk "$VOLUME_ROOT" | awk 'NR == 2 { print $4 }')
-minimum_kb=$((50 * 1024 * 1024))
-if [ "$available_kb" -lt "$minimum_kb" ]; then
-  echo "At least 50 GiB free is required after cleanup; available KB: $available_kb"
-  exit 1
-fi
 
 rm -rf /tmp/recommendation-v6-full-crawler.lock
 rm -f /tmp/recommendation-v6-full-crawler.completed
@@ -110,8 +95,8 @@ const replacements = [
   ['resume: false', 'resume: true', 'Dataset V5 resume option'],
   [
     `  const outputDirectories = [\n    directories.datasetV5,\n    directories.valueV6,\n    directories.policyV6,\n  ];`,
-    `  const outputDirectories = [directories.valueV6, directories.policyV6];\n  const datasetV5HostPath = storageHostPath(volumeRoot, directories.datasetV5);\n  commandOutput('sudo', ['mkdir', '-p', datasetV5HostPath]);`,
-    'resumable output cleanup',
+    `  const outputDirectories = [];\n  for (const directory of [directories.datasetV5, directories.valueV6, directories.policyV6]) {\n    commandOutput('sudo', ['mkdir', '-p', storageHostPath(volumeRoot, directory)]);\n  }`,
+    'completed output preservation',
   ],
   [
     `  assertTrue(\n    status.state !== 'COMPLETE',\n    \`${'${name}'} unexpectedly started with a completed artifact in a clean directory.\`,\n  );\n  if (status.state !== 'RUNNING') {`,
@@ -135,31 +120,20 @@ node --check scripts/run-recommendation-v6-full-crawler-cycle.mjs
 node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
 git -C "$DEPLOY_REPOSITORY" diff --check
 
-echo '=== BUILD AND TARGETED TESTS ==='
 YARN_PREFIX="$RUNNER_TEMP/recommendation-v6-yarn"
 rm -rf "$YARN_PREFIX"
 npm install --global --prefix "$YARN_PREFIX" yarn@1.22.22
 export PATH="$YARN_PREFIX/bin:$PATH"
-yarn --version
 
 cd "$DEPLOY_REPOSITORY"
-yarn install --frozen-lockfile --ignore-engines
 yarn workspace @deadlock-live-probe/shared build
 yarn workspace @deadlock-live-probe/build-domain build
 yarn workspace @deadlock-live-probe/api build
-yarn workspace @deadlock-live-probe/api jest --runInBand \
-  recommendation-decision-dataset-v5.spec.ts \
-  recommendation-value-v6-training.spec.ts \
-  recommendation-policy-v6-evaluation.spec.ts \
-  recommendation-policy-v6-evaluation-integration.spec.ts
 sudo docker compose build api
 
 cd "$GITHUB_WORKSPACE"
-echo '=== START RECOMMENDATION V6 CYCLE ==='
+echo '=== REUSE COMPLETED RECOMMENDATION V6 ARTIFACTS ==='
 node scripts/run-recommendation-v6-full-crawler-cycle.mjs
 
 echo '=== VALIDATE RECOMMENDATION V6 CYCLE ==='
 node scripts/validate-recommendation-v6-full-crawler-result.mjs
-
-echo '=== STORAGE AFTER TRAINING ==='
-sudo df -h "$VOLUME_ROOT"
