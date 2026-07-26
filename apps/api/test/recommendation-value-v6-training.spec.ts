@@ -68,6 +68,7 @@ describe('Recommendation Value V6 training', () => {
       source: {
         datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,
         actualSha256: sourceSha256,
+        upstreamDatasetV4Sha256: 'a'.repeat(64),
       },
       leakage: {
         shortHorizonOutcomesUsedOnlyAsTargets: true,
@@ -123,6 +124,9 @@ describe('Recommendation Value V6 training', () => {
         schemaVersion: 3,
         datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,
         auditPassed: true,
+        source: {
+          sha256: 'a'.repeat(64),
+        },
         artifact: {
           fileName: 'dataset.ndjson',
           rowCount: rows.length,

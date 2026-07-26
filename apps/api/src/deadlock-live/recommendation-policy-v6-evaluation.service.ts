@@ -258,6 +258,10 @@ interface SourceBundle {
     valuePrediction: string;
     valueModel: string;
   };
+  lineage: {
+    behavioralDatasetV4Sha256: string;
+    valueDatasetV4Sha256: string;
+  };
 }
 
 interface EvaluationArtifacts {
@@ -787,6 +791,7 @@ export class RecommendationPolicyV6EvaluationService implements OnModuleInit {
             sources.valueManifest,
             ['source', 'datasetVersion'],
           ),
+          lineage: sources.lineage,
           hashes: sources.hashes,
           behavioralAuditPassed: sources.behavioralAudit.passed === true,
           valueAuditPassed: sources.valueAudit.passed === true,
@@ -907,6 +912,25 @@ export class RecommendationPolicyV6EvaluationService implements OnModuleInit {
     ) {
       throw new Error('Recommendation Policy V6 requires Dataset V5.3 lineage.');
     }
+    const behavioralDatasetV4Sha256 = requiredSha(
+      readNestedString(behavioralManifest, [
+        'source',
+        'artifactSha256',
+      ]),
+      'Behavioral V4 source Dataset V4 SHA-256',
+    );
+    const valueDatasetV4Sha256 = requiredSha(
+      readNestedString(valueManifest, [
+        'source',
+        'upstreamDatasetV4Sha256',
+      ]),
+      'Value V6 upstream Dataset V4 SHA-256',
+    );
+    if (behavioralDatasetV4Sha256 !== valueDatasetV4Sha256) {
+      throw new Error(
+        'Behavioral V4 and Value V6 do not share the same Dataset V4 lineage.',
+      );
+    }
     const behavioralModel = parseBehavioralModel(behavioralModelValue);
     const hashes = {
       behavioralValidation: await hashFile(
@@ -970,6 +994,10 @@ export class RecommendationPolicyV6EvaluationService implements OnModuleInit {
       valueManifest,
       valueAudit,
       hashes,
+      lineage: {
+        behavioralDatasetV4Sha256,
+        valueDatasetV4Sha256,
+      },
     };
   }
 
@@ -1693,6 +1721,7 @@ async function buildManifest(input: {
         input.sources.valueManifest,
         ['source', 'datasetVersion'],
       ),
+      lineage: input.sources.lineage,
       hashes: input.sources.hashes,
     },
     policy: {
@@ -2063,6 +2092,14 @@ function requiredText(value: unknown, name: string): string {
   const result = text(value);
   if (!result) {
     throw new Error(`${name} must be a non-empty string.`);
+  }
+  return result;
+}
+
+function requiredSha(value: unknown, name: string): string {
+  const result = requiredText(value, name).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(result)) {
+    throw new Error(`${name} must be a SHA-256 digest.`);
   }
   return result;
 }

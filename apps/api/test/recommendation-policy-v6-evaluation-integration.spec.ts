@@ -51,6 +51,7 @@ describe('Recommendation Policy V6 evaluation service', () => {
   });
 
   it('joins held-out artifacts and persists match-balanced OPE results', async () => {
+    const upstreamDatasetV4Sha256 = 'a'.repeat(64);
     const behavioralRows = [
       behavioralRow('decision-1', 'match-1', 'BUY:A'),
       behavioralRow('decision-2', 'match-2', 'BUY:B'),
@@ -119,6 +120,9 @@ describe('Recommendation Policy V6 evaluation service', () => {
       writeJson(join(behavioralDirectory, 'manifest.json'), {
         auditPassed: true,
         releaseGatePassed: true,
+        source: {
+          artifactSha256: upstreamDatasetV4Sha256,
+        },
         artifacts: {
           validation: { sha256: behavioralValidationSha },
           model: { sha256: behavioralModelSha },
@@ -129,6 +133,7 @@ describe('Recommendation Policy V6 evaluation service', () => {
         releaseGatePassed: true,
         source: {
           datasetVersion: RECOMMENDATION_DECISION_DATASET_V5_VERSION,
+          upstreamDatasetV4Sha256,
         },
         artifacts: {
           predictionEvaluation: { sha256: valuePredictionSha },
@@ -158,6 +163,12 @@ describe('Recommendation Policy V6 evaluation service', () => {
     });
     expect(service.getAudit()).toMatchObject({
       passed: true,
+      source: {
+        lineage: {
+          behavioralDatasetV4Sha256: upstreamDatasetV4Sha256,
+          valueDatasetV4Sha256: upstreamDatasetV4Sha256,
+        },
+      },
       leakage: {
         matchLevelBootstrap: true,
         matchBalancedEvaluationWeights: true,
