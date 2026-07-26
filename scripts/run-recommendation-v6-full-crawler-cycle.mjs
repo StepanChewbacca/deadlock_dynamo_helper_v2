@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const deployRepository = '/home/ubuntu/apps/deadlock_dynamo_helper';
@@ -11,7 +11,10 @@ const resultDirectory = join(
 );
 const overridePath = '/tmp/recommendation-v6-full-crawler.override.yml';
 const lockPath = '/tmp/recommendation-v6-full-crawler.lock';
+const lockOwnerPath = join(lockPath, 'owner.json');
 const completedPath = '/tmp/recommendation-v6-full-crawler.completed';
+const lockWaitTimeoutMs = 13 * 60 * 60_000;
+const staleLockAgeMs = 13 * 60 * 60_000;
 
 const directories = {
   sourceV4:
@@ -41,18 +44,15 @@ if (await exists(completedPath)) {
   process.exit(0);
 }
 
-try {
-  await mkdir(lockPath);
-} catch (error) {
-  if (error && typeof error === 'object' && error.code === 'EEXIST') {
-    console.log('Another Recommendation V6 full-crawler cycle is active; skipping duplicate run.');
-    process.exit(0);
-  }
-  throw error;
+const lockAcquired = await acquireCycleLock();
+if (!lockAcquired) {
+  console.log('The active Recommendation V6 cycle completed while this duplicate run was waiting.');
+  process.exit(0);
 }
 
 let failure;
 let succeeded = false;
+let restored = false;
 try {
   await waitForDeployment();
   const volumeRoot = resolveStorageVolumeRoot();
@@ -245,7 +245,6 @@ try {
   });
 
   succeeded = true;
-  await writeFile(completedPath, `${new Date().toISOString()}\n`, 'utf8');
 } catch (error) {
   failure = error;
   await saveJson('99-failure.json', {
@@ -256,6 +255,7 @@ try {
 } finally {
   try {
     await restoreProductionApi();
+    restored = true;
   } catch (restoreError) {
     failure ??= restoreError;
     await saveJson('98-restore-failure.json', {
@@ -263,14 +263,105 @@ try {
       error: getErrorMessage(restoreError),
     });
   }
-  await rm(lockPath, { recursive: true, force: true });
-  if (!succeeded) {
+  if (succeeded && restored && !failure) {
+    await writeFile(completedPath, `${new Date().toISOString()}\n`, 'utf8');
+  } else {
     await rm(completedPath, { force: true });
   }
+  await rm(lockPath, { recursive: true, force: true });
 }
 
 if (failure) {
   throw failure;
+}
+
+async function acquireCycleLock() {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= lockWaitTimeoutMs) {
+    if (await exists(completedPath)) {
+      return false;
+    }
+    try {
+      await mkdir(lockPath);
+      await writeFile(
+        lockOwnerPath,
+        `${JSON.stringify({
+          pid: process.pid,
+          runId: process.env.GITHUB_RUN_ID,
+          runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+          createdAt: new Date().toISOString(),
+        }, undefined, 2)}\n`,
+        'utf8',
+      );
+      return true;
+    } catch (error) {
+      if (!error || typeof error !== 'object' || error.code !== 'EEXIST') {
+        throw error;
+      }
+    }
+
+    const lock = await inspectCycleLock();
+    if (!lock.active) {
+      console.log(`Removing stale Recommendation V6 lock: ${lock.reason}`);
+      await rm(lockPath, { recursive: true, force: true });
+      continue;
+    }
+    console.log(
+      `Recommendation V6 cycle owned by PID ${lock.pid} is active; waiting for completion.`,
+    );
+    await sleep(30_000);
+  }
+  throw new Error('Timed out waiting for the active Recommendation V6 cycle lock.');
+}
+
+async function inspectCycleLock() {
+  let lockStat;
+  try {
+    lockStat = await stat(lockPath);
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return { active: false, reason: 'lock disappeared' };
+    }
+    throw error;
+  }
+  const ageMs = Date.now() - lockStat.mtimeMs;
+  if (ageMs > staleLockAgeMs) {
+    return {
+      active: false,
+      reason: `lock age ${Math.round(ageMs / 60_000)} minutes`,
+    };
+  }
+  try {
+    const owner = JSON.parse(await readFile(lockOwnerPath, 'utf8'));
+    const pid = Number(owner.pid);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      return { active: false, reason: 'invalid owner PID' };
+    }
+    try {
+      process.kill(pid, 0);
+      return { active: true, pid, reason: 'owner process is alive' };
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ESRCH') {
+        return { active: false, pid, reason: 'owner process is not alive' };
+      }
+      if (error && typeof error === 'object' && error.code === 'EPERM') {
+        return {
+          active: true,
+          pid,
+          reason: 'owner process exists without signal permission',
+        };
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return { active: false, reason: 'owner metadata is missing' };
+    }
+    if (error instanceof SyntaxError) {
+      return { active: false, reason: 'owner metadata is invalid JSON' };
+    }
+    throw error;
+  }
 }
 
 async function inspectRequiredSources(volumeRoot) {
