@@ -85,6 +85,13 @@ fi
 
 node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v5-gzip.cjs" \
   "$DEPLOY_REPOSITORY"
+node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-target-ablation.cjs" \
+  "$DEPLOY_REPOSITORY"
+node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-sweep-target-ablation.cjs" \
+  "$GITHUB_WORKSPACE/scripts/run-recommendation-v6-prior-sweep.mjs"
+
+node --check "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-target-ablation.cjs"
+node --check "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-sweep-target-ablation.cjs"
 node --check "$GITHUB_WORKSPACE/scripts/analyze-recommendation-v6-shrinkage.mjs"
 node --check "$GITHUB_WORKSPACE/scripts/run-recommendation-v6-prior-sweep.mjs"
 git -C "$DEPLOY_REPOSITORY" diff --check
