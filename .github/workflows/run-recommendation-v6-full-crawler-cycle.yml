@@ -35,55 +35,30 @@ jobs:
             gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
           done
 
-  inspect-v5-storage:
+  inspect-v5-checkpoint:
     needs: reset-training-queue
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - name: Inspect V5 storage candidates
+      - name: Inspect V5 checkpoint
         shell: bash
         run: |
           set -euo pipefail
-          REPORT="$GITHUB_WORKSPACE/recommendation-v5-storage-report.txt"
           VOLUME_NAME="$(sudo docker volume ls --format '{{.Name}}' | grep 'deadlock-storage' | head -n 1)"
           VOLUME_ROOT="$(sudo docker volume inspect -f '{{.Mountpoint}}' "$VOLUME_NAME")"
-          {
-            echo '=== LIVE V5 STATUS ==='
-            for suffix in status manifest audit source-availability; do
-              echo "[$suffix]"
-              curl --max-time 20 --silent --show-error "http://127.0.0.1:3000/deadlock/analysis/recommendation-decision-dataset-v5/$suffix" || true
-              echo
-            done
-            for name in \
-              recommendation-decision-dataset-v5-full-crawler-20260725 \
-              recommendation-decision-dataset-v5-full-crawler-v2-20260725; do
-              dir="$VOLUME_ROOT/$name"
-              echo
-              echo "=== $name ==="
-              sudo du -sh "$dir" || true
-              echo '[TOP LEVEL]'
-              sudo find "$dir" -maxdepth 1 -printf '%y %f %s bytes\n' | sort || true
-              echo '[DEPTH 2 LARGE FILES]'
-              sudo find "$dir" -maxdepth 2 -type f -printf '%s %p\n' | sort -nr | head -n 100 || true
-              echo '[DIRECTORY SIZES]'
-              sudo du -h --max-depth=2 "$dir" 2>/dev/null | sort -h | tail -n 100 || true
-              for json in manifest.json audit.json source-availability.json progress.json status.json; do
-                if sudo test -f "$dir/$json"; then
-                  echo "[$json]"
-                  sudo cat "$dir/$json"
-                  echo
-                fi
-              done
-            done
-            echo '=== DISK ==='
-            df -h /
-          } | tee "$REPORT"
-
-      - name: Upload V5 storage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: recommendation-v5-storage-report-${{ github.sha }}
-          path: recommendation-v5-storage-report.txt
-          if-no-files-found: error
-          retention-days: 3
+          for name in \
+            recommendation-decision-dataset-v5-full-crawler-20260725 \
+            recommendation-decision-dataset-v5-full-crawler-v2-20260725; do
+            dir="$VOLUME_ROOT/$name"
+            echo "=== $name ==="
+            echo '[checkpoint.json]'
+            sudo cat "$dir/work/checkpoint.json" || true
+            echo
+            echo "source_part_count=$(sudo find "$dir/work/source-parts" -type f | wc -l)"
+            echo "output_part_count=$(sudo find "$dir/work/output-parts" -type f | wc -l)"
+            echo "part_stats_count=$(sudo find "$dir/work/part-stats" -type f | wc -l)"
+            echo '[last output parts]'
+            sudo find "$dir/work/output-parts" -type f -printf '%f %s bytes\n' | sort | tail -n 20 || true
+          done
+          df -h /
