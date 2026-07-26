@@ -1,4 +1,4 @@
-name: Publish Recommendation V6 lineage
+name: Update Recommendation V6 expected commit
 
 on:
   push:
@@ -11,62 +11,46 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  update-runner:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
-      - name: Checkout lineage branch
+      - name: Checkout diagnostic branch
         uses: actions/checkout@v4
         with:
-          ref: agent/recommendation-v6-lineage
+          ref: diagnostics/run-recommendation-v6-cycle-20260726
           fetch-depth: 0
 
-      - name: Apply verified lineage edits
+      - name: Update deployment commit
         shell: bash
         run: |
-          set +e
-          node .github/scripts/apply-recommendation-v6-lineage.cjs > "$RUNNER_TEMP/lineage-publish.log" 2>&1
-          status=$?
-          cat "$RUNNER_TEMP/lineage-publish.log"
-          if [ "$status" -ne 0 ] && ! grep -q 'value-doc-lineage: expected one target' "$RUNNER_TEMP/lineage-publish.log"; then
-            exit "$status"
-          fi
+          set -euo pipefail
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = 'scripts/run-recommendation-v6-full-crawler-cycle.mjs';
+          const previous = "const expectedCommit = '9590df07f7cb62db8ddae03794f9ba84339c5851';";
+          const next = "const expectedCommit = '251660fc3dd541925b8ade9c55d216a91a975d85';";
+          const content = readFileSync(path, 'utf8');
+          const previousCount = content.split(previous).length - 1;
+          const nextCount = content.split(next).length - 1;
+          if (previousCount === 0 && nextCount === 1) {
+            console.log('Expected deployment commit is already current.');
+            process.exit(0);
+          }
+          if (previousCount !== 1) {
+            throw new Error(`Expected exactly one old deployment commit, found ${previousCount}.`);
+          }
+          writeFileSync(path, content.replace(previous, next), 'utf8');
+          NODE
+          node --check scripts/run-recommendation-v6-full-crawler-cycle.mjs
+          node --check scripts/validate-recommendation-v6-full-crawler-result.mjs
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: yarn
-
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile --ignore-engines
-
-      - name: Build shared package
-        run: yarn workspace @deadlock-live-probe/shared build
-
-      - name: Build domain package
-        run: yarn workspace @deadlock-live-probe/build-domain build
-
-      - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
-
-      - name: Run lineage tests
-        run: >-
-          yarn workspace @deadlock-live-probe/api jest --runInBand
-          recommendation-value-v6-training.spec.ts
-          recommendation-policy-v6-evaluation.spec.ts
-          recommendation-policy-v6-evaluation-integration.spec.ts
-
-      - name: Commit lineage implementation
+      - name: Commit runner update
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            apps/api/src/deadlock-live/recommendation-value-v6-training.service.ts \
-            apps/api/src/deadlock-live/recommendation-policy-v6-evaluation.service.ts \
-            apps/api/test/recommendation-value-v6-training.spec.ts \
-            apps/api/test/recommendation-policy-v6-evaluation-integration.spec.ts
-          git diff --cached --quiet && { echo 'No lineage source changes to commit'; exit 1; }
-          git commit -m "fix: verify Recommendation V6 dataset lineage"
-          git push origin HEAD:agent/recommendation-v6-lineage
+          git add scripts/run-recommendation-v6-full-crawler-cycle.mjs
+          git diff --cached --quiet && { echo 'No runner update to commit'; exit 0; }
+          git commit -m "chore: run Recommendation V6 on lineage commit"
+          git push origin HEAD:diagnostics/run-recommendation-v6-cycle-20260726
