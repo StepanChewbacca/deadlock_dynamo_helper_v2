@@ -10,17 +10,54 @@ on:
       - scripts/validate-recommendation-v6-full-crawler-result.mjs
 
 permissions:
+  actions: write
   contents: read
 
-concurrency:
-  group: recommendation-v6-full-crawler-cycle
-  cancel-in-progress: true
-
 jobs:
+  reset-training-queue:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRAINING_WORKFLOW_ID: '320515287'
+    steps:
+      - name: Cancel older Recommendation V6 runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t run_ids < <(
+            gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
+              --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
+          )
+
+          for run_id in "${run_ids[@]}"; do
+            echo "Cancelling older Recommendation V6 run ${run_id}"
+            gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
+
+          for attempt in $(seq 1 60); do
+            active_count=$(gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${TRAINING_WORKFLOW_ID}/runs?per_page=100" \
+              --jq "[.workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\")] | length" \
+              | awk '{ total += $1 } END { print total + 0 }')
+            if [ "${active_count}" -eq 0 ]; then
+              echo 'Older Recommendation V6 runs are stopped.'
+              exit 0
+            fi
+            echo "Waiting for ${active_count} older run(s) to stop."
+            sleep 5
+          done
+
+          echo 'Older Recommendation V6 runs did not stop within five minutes.' >&2
+          exit 1
+
   train-and-evaluate:
+    needs: reset-training-queue
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
-    timeout-minutes: 720
+    timeout-minutes: 1200
     steps:
       - name: Checkout diagnostic branch
         uses: actions/checkout@v4
