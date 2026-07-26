@@ -62,6 +62,12 @@ jobs:
           exec > >(tee "$REPORT") 2>&1
           DEPLOY_REPOSITORY=/home/ubuntu/apps/deadlock_dynamo_helper
           EXPECTED_COMMIT=251660fc3dd541925b8ade9c55d216a91a975d85
+
+          echo 'Restoring clean production checkout before read-only database backfill.'
+          git -C "$DEPLOY_REPOSITORY" fetch origin main
+          git -C "$DEPLOY_REPOSITORY" reset --hard "$EXPECTED_COMMIT"
+          git -C "$DEPLOY_REPOSITORY" clean -fd
+
           current_commit=$(git -C "$DEPLOY_REPOSITORY" rev-parse HEAD)
           if [ "$current_commit" != "$EXPECTED_COMMIT" ]; then
             echo "Expected deployment commit $EXPECTED_COMMIT, found $current_commit"
@@ -69,7 +75,7 @@ jobs:
           fi
           if ! git -C "$DEPLOY_REPOSITORY" diff --quiet || \
              ! git -C "$DEPLOY_REPOSITORY" diff --cached --quiet; then
-            echo 'Deployment repository contains tracked changes.'
+            echo 'Deployment repository still contains tracked changes after reset.'
             git -C "$DEPLOY_REPOSITORY" status --short
             exit 1
           fi
