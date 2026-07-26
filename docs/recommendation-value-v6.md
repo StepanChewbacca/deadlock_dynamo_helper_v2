@@ -41,6 +41,8 @@ The trainer verifies:
 - eligible decision IDs are unique;
 - chronological splits do not overlap.
 
+The manifest and audit also preserve the upstream Dataset V4 SHA-256 used to build Dataset V5.3.
+
 Environment overrides:
 
 ```text
