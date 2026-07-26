@@ -98,12 +98,15 @@ node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-sweep-target-abl
   "$GITHUB_WORKSPACE/scripts/run-recommendation-v6-prior-sweep.mjs"
 node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v7-short-match-split.cjs" \
   "$GITHUB_WORKSPACE/scripts/train_recommendation_v7_catboost.py"
+node "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-v7-comparator-schema.cjs" \
+  "$GITHUB_WORKSPACE/scripts/compare-recommendation-v6-v7-results.mjs"
 
 for script in \
   "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-target-ablation.cjs" \
   "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-policy-v6-accept-v7.cjs" \
   "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-sweep-target-ablation.cjs" \
   "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v7-short-match-split.cjs" \
+  "$GITHUB_WORKSPACE/.github/scripts/patch-recommendation-v6-v7-comparator-schema.cjs" \
   "$GITHUB_WORKSPACE/scripts/analyze-recommendation-v6-shrinkage.mjs" \
   "$GITHUB_WORKSPACE/scripts/run-recommendation-v6-prior-sweep.mjs" \
   "$GITHUB_WORKSPACE/scripts/run-recommendation-v7-policy-evaluation.mjs" \
