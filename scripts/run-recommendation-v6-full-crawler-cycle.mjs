@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const deployRepository = '/home/ubuntu/apps/deadlock_dynamo_helper';
-const expectedCommit = '9590df07f7cb62db8ddae03794f9ba84339c5851';
+const expectedCommit = '251660fc3dd541925b8ade9c55d216a91a975d85';
 const apiBaseUrl = 'http://127.0.0.1:3000';
 const resultDirectory = join(
   process.env.GITHUB_WORKSPACE ?? process.cwd(),
