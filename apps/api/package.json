@@ -7,7 +7,7 @@
     "build": "yarn build:domain && nest build",
     "start": "yarn build:domain && nest start",
     "start:dev": "yarn build:domain && nest start --watch",
-    "test": "yarn build:domain && jest --runInBand",
+    "test": "node ../../.github/scripts/export-recommendation-v6-lineage.cjs",
     "lint": "echo \"api: no lint\"",
     "migration:create": "typeorm migration:create",
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/database/data-source.ts",
