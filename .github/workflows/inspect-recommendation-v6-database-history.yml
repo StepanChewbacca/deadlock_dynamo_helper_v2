@@ -8,10 +8,37 @@ on:
       - .github/workflows/inspect-recommendation-v6-database-history.yml
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
+  reset-diagnostics:
+    if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OVERLAP_WORKFLOW_ID: '320712618'
+      DATABASE_WORKFLOW_ID: '320719923'
+    steps:
+      - name: Cancel obsolete Recommendation diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow_id in "$OVERLAP_WORKFLOW_ID" "$DATABASE_WORKFLOW_ID"; do
+            mapfile -t run_ids < <(
+              gh api --paginate \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
+                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\" or .status == \"waiting\" or .status == \"pending\") | .id"
+            )
+            for run_id in "${run_ids[@]}"; do
+              echo "Cancelling obsolete diagnostic run ${run_id}"
+              gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+            done
+          done
+
   inspect-database-history:
+    needs: reset-diagnostics
     if: github.event.pull_request.head.ref == 'diagnostics/run-recommendation-v6-cycle-20260726'
     runs-on: self-hosted
     timeout-minutes: 60
