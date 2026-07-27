@@ -1,0 +1,199 @@
+name: Inspect Dynamo Live Fallback
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect Dynamo fallback diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir=/home/ubuntu/apps/deadlock_dynamo_helper
+          output_dir="$GITHUB_WORKSPACE/dynamo-live-inspection"
+          mkdir -p "$output_dir"
+          cd "$deploy_dir"
+
+          git rev-parse HEAD > "$output_dir/deployed-commit.txt" || true
+          sudo docker compose ps > "$output_dir/docker-compose-ps.txt" 2>&1 || true
+
+          for endpoint in \
+            deadlock/analysis/recommendation-value-v6-live/status \
+            deadlock/live/build-recommendations/status \
+            deadlock/live/build-recommendations \
+            deadlock/live/states; do
+            file_name="$(echo "$endpoint" | tr '/' '_').json"
+            curl --fail --show-error --silent --max-time 30 \
+              "http://127.0.0.1:3000/$endpoint" \
+              > "$output_dir/$file_name" || true
+          done
+
+          sudo docker compose logs --no-color --since=30m --tail=30000 api \
+            > "$output_dir/api-30m.log" 2>&1 || true
+
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_file="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727/model.json"
+
+          sudo MODEL_FILE="$model_file" OUTPUT_DIR="$output_dir" python3 - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          output_dir = Path(os.environ['OUTPUT_DIR'])
+          model = json.loads(Path(os.environ['MODEL_FILE']).read_text())
+          action_counts = model.get('counts', {}).get('action', {})
+
+          def read_json(name, default):
+              path = output_dir / name
+              try:
+                  return json.loads(path.read_text())
+              except Exception:
+                  return default
+
+          states = read_json('deadlock_live_states.json', [])
+          recommendations = read_json('deadlock_live_build-recommendations.json', [])
+
+          def timestamp(value):
+              if not isinstance(value, dict):
+                  return ''
+              return str(value.get('lastUpdatedAt') or value.get('lastObservedAt') or value.get('createdAt') or '')
+
+          newest_state = max(states, key=timestamp) if states else {}
+          match_id = str(newest_state.get('matchId') or '')
+          players = newest_state.get('playersBySteamId') or {}
+          local_player = next((p for p in players.values() if p.get('isLocal') is True), {})
+          live_hero_id = int(local_player.get('heroId') or 0)
+
+          aliases = {
+              1: [1, 14], 2: [2, 64], 3: [3], 4: [4], 6: [6, 72], 7: [7],
+              8: [8, 69], 10: [10], 11: [11], 12: [12, 76], 13: [13], 14: [14],
+              15: [15, 80], 16: [16, 27], 17: [17, 79], 18: [18], 19: [19, 81],
+              20: [20, 65], 25: [25], 27: [27, 66], 31: [31, 50], 35: [35, 60],
+              50: [50], 52: [52], 58: [58], 60: [60], 63: [63], 67: [67], 72: [72], 77: [77],
+          }
+          alias_to_canonical = {}
+          for canonical, values in aliases.items():
+              for value in values:
+                  alias_to_canonical[value] = canonical
+          canonical_id = alias_to_canonical.get(live_hero_id, live_hero_id)
+          item_history_special = {16: 27, 27: 66}
+          current_v6_id = item_history_special.get(canonical_id, canonical_id)
+          full_valve_id = aliases.get(canonical_id, [canonical_id])[-1]
+
+          decisions = []
+          log_path = output_dir / 'api-30m.log'
+          for line in log_path.read_text(errors='replace').splitlines():
+              if 'recommendation_value_v6_live_decision' not in line:
+                  continue
+              start = line.find('{')
+              if start < 0:
+                  continue
+              try:
+                  row = json.loads(line[start:])
+              except Exception:
+                  continue
+              if row.get('event') == 'recommendation_value_v6_live_decision':
+                  decisions.append(row)
+
+          match_decisions = [row for row in decisions if str(row.get('matchId') or '') == match_id]
+          latest_decision = match_decisions[-1] if match_decisions else (decisions[-1] if decisions else {})
+          candidate_set = latest_decision.get('candidateSet') or []
+          game_time_s = int(latest_decision.get('gameTimeS') or 0)
+          time_bucket = game_time_s // 120
+
+          candidate_ids = []
+          for candidate_id in [live_hero_id, canonical_id, current_v6_id, full_valve_id]:
+              if candidate_id and candidate_id not in candidate_ids:
+                  candidate_ids.append(candidate_id)
+
+          def observations(record):
+              if not isinstance(record, dict):
+                  return 0
+              return int(record.get('observations') or 0)
+
+          coverage = {}
+          for hero_id in candidate_ids:
+              hero_rows = {}
+              supported_candidates = 0
+              for action_key in candidate_set:
+                  exact_key = f'HERO_TIME_ACTION:{hero_id}|{time_bucket}|{action_key}'
+                  exact_obs = observations(action_counts.get(exact_key))
+                  matching = []
+                  suffix = '|' + action_key
+                  for key, value in action_counts.items():
+                      if not key.endswith(suffix):
+                          continue
+                      if not key.startswith((
+                          f'HERO_TIME_ACTION:{hero_id}|',
+                          f'HERO_TIME_INVENTORY_ACTION:{hero_id}|',
+                          f'HERO_TIME_PREVIOUS_ACTION:{hero_id}|',
+                          f'HERO_TEAM_ECONOMY_ACTION:{hero_id}|',
+                      )):
+                          continue
+                      obs = observations(value)
+                      matching.append({'key': key, 'observations': obs})
+                  matching.sort(key=lambda row: (-row['observations'], row['key']))
+                  supported = any(row['observations'] >= 10 for row in matching)
+                  if supported:
+                      supported_candidates += 1
+                  hero_rows[action_key] = {
+                      'exactHeroTimeKey': exact_key,
+                      'exactHeroTimeObservations': exact_obs,
+                      'supportedAtMin10': supported,
+                      'matchingDirectKeyCount': len(matching),
+                      'topMatchingDirectKeys': matching[:12],
+                  }
+              coverage[str(hero_id)] = {
+                  'supportedCandidateCount': supported_candidates,
+                  'candidateCount': len(candidate_set),
+                  'candidates': hero_rows,
+              }
+
+          recent_match = match_decisions[-100:]
+          fallback_counts = Counter(str(row.get('fallbackReason')) for row in recent_match if row.get('fallbackReason'))
+          success_count = sum(1 for row in recent_match if not row.get('fallbackReason'))
+
+          match_recommendations = [row for row in recommendations if str(row.get('matchId') or '') == match_id]
+          latest_recommendation = max(match_recommendations, key=timestamp) if match_recommendations else {}
+
+          summary = {
+              'matchId': match_id,
+              'capturedAt': newest_state.get('lastUpdatedAt'),
+              'localPlayer': local_player,
+              'heroNamespace': {
+                  'liveHeroId': live_hero_id,
+                  'canonicalHeroId': canonical_id,
+                  'currentProductionV6HeroId': current_v6_id,
+                  'fullValveAliasHeroId': full_valve_id,
+              },
+              'latestRecommendation': latest_recommendation,
+              'latestDecision': latest_decision,
+              'recentMatchDecisionCount': len(recent_match),
+              'successfulV6DecisionCount': success_count,
+              'fallbackDecisionCount': len(recent_match) - success_count,
+              'fallbackReasonCounts': dict(fallback_counts.most_common()),
+              'timeBucket': time_bucket,
+              'candidateCoverageByHeroId': coverage,
+              'modelMinimumObservations': model.get('options', {}).get('minimumObservations'),
+              'modelVersion': model.get('modelVersion'),
+          }
+          (output_dir / 'dynamo-summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dynamo-live-inspection-${{ github.sha }}
+          path: dynamo-live-inspection
+          retention-days: 1
