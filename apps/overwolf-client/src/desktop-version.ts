@@ -5,8 +5,8 @@ import {
 } from './overwolf/secondary-monitor';
 import { isSuccessfulOverwolfResult } from './overwolf/window-result';
 
-const APP_VERSION = '0.1.13';
-const APP_BUILD = '023';
+const APP_VERSION = '0.1.14';
+const APP_BUILD = '024';
 const ow = (window as any).overwolf;
 
 function updateBuildStatus(): void {
@@ -37,7 +37,9 @@ function updateBuildStatus(): void {
   const recommendationSource = snapshot?.recommendation
     ? snapshot.recommendation.recommendationModel === 'RECOMMENDATION_VALUE_V6'
       ? 'MODEL V6'
-      : 'BASELINE'
+      : snapshot.recommendation.recommendationModel === 'PRO_BUILD_CANDIDATE_GENERATOR'
+        ? 'PRO FALLBACK'
+        : 'BASELINE'
     : '';
   const label = [
     `BUILD ${APP_BUILD}`,

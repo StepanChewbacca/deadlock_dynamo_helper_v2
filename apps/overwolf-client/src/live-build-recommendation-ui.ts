@@ -90,9 +90,11 @@ function createHeader(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
   eyebrow.className = 'live-build-eyebrow';
   const source = snapshot.recommendation?.recommendationModel === 'RECOMMENDATION_VALUE_V6'
     ? 'RECOMMENDATION VALUE V6'
-    : snapshot.recommendation
-      ? 'BASELINE'
-      : undefined;
+    : snapshot.recommendation?.recommendationModel === 'PRO_BUILD_CANDIDATE_GENERATOR'
+      ? 'PRO BUILD FALLBACK'
+      : snapshot.recommendation
+        ? 'BASELINE'
+        : undefined;
   const phase = snapshot.recommendation?.contextualFeatures?.phase;
   eyebrow.textContent = ['NEXT BUILD ACTION', source, phase]
     .filter((value): value is string => Boolean(value))
@@ -162,9 +164,10 @@ function createPrimaryAction(
   const confidence = document.createElement('div');
   confidence.className = 'live-build-confidence';
   const confidenceValue = document.createElement('strong');
-  confidenceValue.textContent = `${formatPercent(action.confidencePercent)}%`;
+  const signal = formatRecommendationActionSignal(action);
+  confidenceValue.textContent = signal.value;
   const confidenceLabel = document.createElement('span');
-  confidenceLabel.textContent = 'confidence';
+  confidenceLabel.textContent = signal.label;
   confidence.append(confidenceValue, confidenceLabel);
 
   top.append(copy, confidence);
@@ -210,7 +213,7 @@ function createAlternatives(actions: LiveBuildRecommendationAction[]): HTMLEleme
 
     const confidence = document.createElement('span');
     confidence.className = 'live-build-alternative-confidence';
-    confidence.textContent = `${formatPercent(action.confidencePercent)}%`;
+    confidence.textContent = formatRecommendationActionSignal(action).value;
 
     row.append(copy, confidence);
     section.append(row);
@@ -262,6 +265,25 @@ function createMatchupSignals(
   note.textContent = 'Historical purchase tendency, not win-rate proof.';
   section.append(title, chips, note);
   return section;
+}
+
+export function formatRecommendationActionSignal(
+  action: LiveBuildRecommendationAction,
+): { value: string; label: string } {
+  if (
+    action.valueV6?.supportType === 'DIRECT_ACTION' &&
+    Number.isFinite(action.valueV6.actionAdvantage)
+  ) {
+    const advantage = action.valueV6.actionAdvantage;
+    return {
+      value: `${advantage >= 0 ? '+' : ''}${advantage.toFixed(3)}`,
+      label: 'V6 advantage',
+    };
+  }
+  return {
+    value: `${formatPercent(action.confidencePercent)}%`,
+    label: 'historical evidence',
+  };
 }
 
 function formatFirstMatchupSignal(

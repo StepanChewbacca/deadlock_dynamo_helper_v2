@@ -30,7 +30,11 @@ interface ProjectedRecommendationResponse {
   gameTimeS: number;
   action: ExtendedLiveBuildRecommendationAction;
   alternatives: ExtendedLiveBuildRecommendationAction[];
-  recommendationModel?: 'RECOMMENDATION_VALUE_V6';
+  recommendationModel?:
+    | 'RECOMMENDATION_VALUE_V6'
+    | 'PRO_BUILD_CANDIDATE_GENERATOR';
+  rankingMode?: 'VALUE_V6' | 'CANDIDATE_GENERATOR_FALLBACK';
+  fallbackReason?: string;
 }
 
 interface ProjectedBuildStep {
@@ -151,8 +155,11 @@ async function projectFullBuild(
     if (!isProjectedRecommendationResponse(parsed)) {
       throw new Error('Full build response has an invalid shape.');
     }
-    if (parsed.recommendationModel !== 'RECOMMENDATION_VALUE_V6') {
-      throw new Error('Full build response did not come from Recommendation Value V6.');
+    if (
+      parsed.recommendationModel !== 'RECOMMENDATION_VALUE_V6' &&
+      parsed.recommendationModel !== 'PRO_BUILD_CANDIDATE_GENERATOR'
+    ) {
+      throw new Error('Full build response did not come from an approved pro-build ranking source.');
     }
 
     const action = parsed.action;
@@ -332,9 +339,11 @@ function createSummary(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
       'Recommendation source',
       snapshot.recommendation?.recommendationModel === 'RECOMMENDATION_VALUE_V6'
         ? 'RECOMMENDATION VALUE V6'
-        : snapshot.recommendation
-          ? 'BASELINE'
-          : 'WAITING',
+        : snapshot.recommendation?.recommendationModel === 'PRO_BUILD_CANDIDATE_GENERATOR'
+          ? 'PRO BUILD FALLBACK'
+          : snapshot.recommendation
+            ? 'BASELINE'
+            : 'WAITING',
     ],
     ['Build actions', projectionStatus === 'READY' ? String(projectionSteps.length) : '...'],
     ['Refresh generation', String(snapshot.refreshCount)],
@@ -391,9 +400,10 @@ function createActionBanner(action: LiveBuildRecommendationAction): HTMLElement 
   const confidence = document.createElement('div');
   confidence.className = 'live-build-action-confidence';
   const value = document.createElement('strong');
-  value.textContent = `${formatPercent(action.confidencePercent)}%`;
+  const signal = formatRecommendationSignal(action);
+  value.textContent = signal.value;
   const caption = document.createElement('span');
-  caption.textContent = 'confidence';
+  caption.textContent = signal.label;
   confidence.append(value, caption);
 
   banner.append(copy, confidence);
@@ -464,7 +474,7 @@ function createPhaseTable(phase: LiveBuildPhase, steps: ProjectedBuildStep[]): H
   const table = document.createElement('table');
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  for (const label of ['#', 'Action', 'Item', 'Type', 'Cost', 'Tier', 'Typical', 'Confidence', 'Evidence']) {
+  for (const label of ['#', 'Action', 'Item', 'Type', 'Cost', 'Tier', 'Typical', 'Model signal', 'Evidence']) {
     const cell = document.createElement('th');
     cell.textContent = label;
     headerRow.append(cell);
@@ -504,7 +514,7 @@ function createBuildRow(step: ProjectedBuildStep): HTMLTableRowElement {
     Number(action.item?.cost) > 0 ? String(action.item?.cost) : '-',
     Number(action.item?.tier) > 0 ? String(action.item?.tier) : '-',
     action.typicalGameTimeLabel || formatGameTime(action.averageGameTimeS),
-    `${formatPercent(action.confidencePercent)}%`,
+    formatRecommendationSignal(action).value,
     formatEvidence(action),
   ];
 
@@ -526,6 +536,9 @@ function createDiagnostics(snapshot: LiveBuildRecommendationSnapshot): HTMLEleme
     `Cache hits: ${snapshot.cacheHitCount}`,
     `Discarded: ${snapshot.discardedResultCount}`,
   ];
+  if (snapshot.recommendation?.fallbackReason) {
+    entries.push(`Ranking fallback: ${snapshot.recommendation.fallbackReason}`);
+  }
   if (snapshot.lastError) {
     entries.push(`Backend: ${snapshot.lastError}`);
   }
@@ -669,6 +682,25 @@ function formatEvidence(action: ExtendedLiveBuildRecommendationAction): string {
     return `${count} / ${formatPercent(probability)}%`;
   }
   return action.explanation?.evidenceLevel ?? '-';
+}
+
+export function formatRecommendationSignal(
+  action: LiveBuildRecommendationAction,
+): { value: string; label: string } {
+  if (
+    action.valueV6?.supportType === 'DIRECT_ACTION' &&
+    Number.isFinite(action.valueV6.actionAdvantage)
+  ) {
+    const advantage = action.valueV6.actionAdvantage;
+    return {
+      value: `${advantage >= 0 ? '+' : ''}${advantage.toFixed(3)}`,
+      label: 'V6 advantage',
+    };
+  }
+  return {
+    value: `${formatPercent(action.confidencePercent)}%`,
+    label: 'historical evidence',
+  };
 }
 
 function formatItemMetadata(action: LiveBuildRecommendationAction): string {
