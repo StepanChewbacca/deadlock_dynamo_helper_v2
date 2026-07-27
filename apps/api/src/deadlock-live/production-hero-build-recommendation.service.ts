@@ -12,6 +12,7 @@ import {
 } from './hero-build-recommendation.service';
 import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+import { RecommendationValueV6LiveService } from './recommendation-value-v6-live.service';
 
 const MODE_ENV = 'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE';
 const SHADOW_SAMPLE_RATE_ENV = 'DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE';
@@ -96,6 +97,8 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
+    private readonly recommendationValueV6LiveService:
+      RecommendationValueV6LiveService,
   ) {
     super(
       heroBuildTransitionAggregationService,
@@ -130,7 +133,21 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
+    const currentProductionResponse = await this.recommendCurrentProduction(
+      canonicalRequest,
+      requestedHeroId,
+    );
 
+    return this.recommendationValueV6LiveService.apply(
+      canonicalRequest,
+      currentProductionResponse,
+    );
+  }
+
+  private async recommendCurrentProduction(
+    canonicalRequest: HeroBuildContextualRecommendationRequest,
+    requestedHeroId: number,
+  ): Promise<HeroBuildRecommendationResponse> {
     if (this.mode === 'PRODUCTION') {
       try {
         const contextual = this.contextualV3LiveService.recommend(canonicalRequest);
