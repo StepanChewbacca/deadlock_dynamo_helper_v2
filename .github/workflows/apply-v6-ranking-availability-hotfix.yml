@@ -1,0 +1,71 @@
+name: Apply V6 ranking availability hotfix
+
+on:
+  push:
+    branches:
+      - agent/fix-v6-production-ranking-availability
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v6-ranking-availability-hotfix
+  cancel-in-progress: false
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/fix-v6-production-ranking-availability
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Apply hotfix
+        run: |
+          if ! grep -q "RecommendationValueV6ProductionSafeService" apps/api/src/deadlock-live/recommendation-value-v6.module.ts; then
+            python3 .github/scripts/apply-v6-ranking-availability-hotfix.py
+          fi
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Test API hotfix
+        run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-production-safe.spec.ts hero-build-production-model-only.spec.ts
+
+      - name: Build Overwolf client
+        run: yarn workspace @deadlock-live-probe/overwolf-client build
+
+      - name: Test Overwolf signal semantics
+        run: yarn workspace @deadlock-live-probe/overwolf-client test --runInBand live-build-recommendation-signal.spec.ts
+
+      - name: Commit generated hotfix
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No generated changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/api/src/deadlock-live/recommendation-value-v6.module.ts \
+            apps/api/src/deadlock-live/deadlock-live.module.ts \
+            apps/api/test/recommendation-value-v6-production-safe.spec.ts \
+            apps/overwolf-client/package.json \
+            apps/overwolf-client/src/desktop-version.ts \
+            apps/overwolf-client/src/live-build-recommendation-poller.ts \
+            apps/overwolf-client/src/live-build-desktop-table-ui.ts \
+            apps/overwolf-client/src/live-build-recommendation-ui.ts \
+            apps/overwolf-client/src/live-build-recommendation-signal.spec.ts
+          git commit -m "fix: keep V6 recommendations available with honest signals"
+          git push origin HEAD:agent/fix-v6-production-ranking-availability
