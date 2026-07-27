@@ -57,7 +57,7 @@ function createPanelContent(snapshot: LiveBuildRecommendationSnapshot): Document
       createPrimaryAction(
         recommendation.action,
         snapshot.isStale,
-        recommendation.recommendationModel === 'CONTEXTUAL_V3'
+        recommendation.recommendationModel === 'RECOMMENDATION_VALUE_V6'
           ? recommendation.contextualFeatures?.enemyHeroIds.length ?? 0
           : undefined,
       ),
@@ -88,8 +88,8 @@ function createHeader(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
 
   const eyebrow = document.createElement('span');
   eyebrow.className = 'live-build-eyebrow';
-  const source = snapshot.recommendation?.recommendationModel === 'CONTEXTUAL_V3'
-    ? 'MODEL V3'
+  const source = snapshot.recommendation?.recommendationModel === 'RECOMMENDATION_VALUE_V6'
+    ? 'RECOMMENDATION VALUE V6'
     : snapshot.recommendation
       ? 'BASELINE'
       : undefined;
@@ -233,7 +233,7 @@ function createMatchupSignals(
   const section = document.createElement('div');
   section.className = 'live-build-matchup';
   section.title =
-    'Historical purchase pattern used by Contextual V3. This is model influence, not proven win-rate counter effectiveness.';
+    'Historical candidate evidence evaluated by Recommendation Value V6. This is model influence, not proven win-rate counter effectiveness.';
 
   const title = document.createElement('span');
   title.className = 'live-build-matchup-title';

@@ -35,8 +35,8 @@ function updateBuildStatus(): void {
     : 'NO MATCH ID';
   const matchLabel = matchId ? `MATCH ${matchId}` : '';
   const recommendationSource = snapshot?.recommendation
-    ? snapshot.recommendation.recommendationModel === 'CONTEXTUAL_V3'
-      ? 'MODEL V3'
+    ? snapshot.recommendation.recommendationModel === 'RECOMMENDATION_VALUE_V6'
+      ? 'MODEL V6'
       : 'BASELINE'
     : '';
   const label = [

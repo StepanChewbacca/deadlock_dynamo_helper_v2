@@ -59,9 +59,11 @@ export interface LiveBuildRecommendationPayload {
   mode: 'EXACT' | 'BACKOFF' | 'NO_MATCH';
   action: LiveBuildRecommendationAction;
   alternatives: LiveBuildRecommendationAction[];
-  recommendationModel?: 'CONTEXTUAL_V3';
+  recommendationModel?: 'RECOMMENDATION_VALUE_V6';
   modelVersion?: string;
   modelSha256?: string;
+  candidateId?: string;
+  rolloutMode?: 'PRODUCTION';
   buildArchetypeId?: string;
   contextualFeatures?: {
     phase: 'EARLY' | 'MID' | 'LATE';
