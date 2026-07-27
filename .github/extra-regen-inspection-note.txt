@@ -1,0 +1,1 @@
+Temporary diagnostic trigger for the self-hosted VPS workflow. This branch will not be merged.
