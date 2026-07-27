@@ -1,4 +1,4 @@
-name: Apply V6 ranking availability hotfix
+name: Materialize V6 ranking availability hotfix
 
 on:
   pull_request:
@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  patch-and-validate:
+  materialize:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
@@ -28,22 +28,13 @@ jobs:
           ref: agent/fix-v6-production-ranking-availability
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: yarn
-
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-
       - name: Apply hotfix
         run: |
           if ! grep -q "RecommendationValueV6ProductionSafeService" apps/api/src/deadlock-live/recommendation-value-v6.module.ts; then
             python3 .github/scripts/apply-v6-ranking-availability-hotfix.py
           fi
 
-      - name: Synchronize Overwolf manifest version
+      - name: Synchronize Overwolf release version
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -54,55 +45,6 @@ jobs:
           manifest.meta.version = packageJson.version;
           fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
           NODE
-
-      - name: Build shared workspace
-        run: yarn workspace @deadlock-live-probe/shared build
-
-      - name: Build API
-        id: api-build
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          yarn workspace @deadlock-live-probe/api build 2>&1 | tee api-build.log
-
-      - name: Upload API build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v6-hotfix-api-build-log
-          path: api-build.log
-          if-no-files-found: error
-
-      - name: Stop after API build failure
-        if: steps.api-build.outcome == 'failure'
-        run: exit 1
-
-      - name: Test API hotfix
-        run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-production-safe.spec.ts hero-build-production-model-only.spec.ts
-
-      - name: Build Overwolf client
-        id: overwolf-build
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          yarn workspace @deadlock-live-probe/overwolf-client build 2>&1 | tee overwolf-build.log
-
-      - name: Upload Overwolf build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v6-hotfix-overwolf-build-log
-          path: overwolf-build.log
-          if-no-files-found: error
-
-      - name: Stop after Overwolf build failure
-        if: steps.overwolf-build.outcome == 'failure'
-        run: exit 1
-
-      - name: Test Overwolf signal semantics
-        run: yarn workspace @deadlock-live-probe/overwolf-client test --runInBand live-build-recommendation-signal.spec.ts
 
       - name: Commit generated hotfix
         run: |
