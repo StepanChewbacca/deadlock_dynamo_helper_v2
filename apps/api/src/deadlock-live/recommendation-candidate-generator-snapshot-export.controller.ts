@@ -23,6 +23,16 @@ export class RecommendationCandidateGeneratorSnapshotExportController {
     @Body() request: RecommendationCandidateGeneratorSnapshotExportRequest,
   ) {
     try {
+      const registry = await this.snapshotService.getRegistry();
+      if (
+        registry.snapshots.some(
+          (snapshot) => snapshot.snapshotId === request.snapshotId?.trim(),
+        )
+      ) {
+        throw new Error(
+          `Candidate generator snapshot ID ${request.snapshotId} already exists.`,
+        );
+      }
       return await this.snapshotService.start(request);
     } catch (error) {
       throw new ConflictException(errorMessage(error));
