@@ -144,7 +144,7 @@ export class HeroBuildRecommendationService {
   async recommend(
     request: HeroBuildRecommendationRequest,
   ): Promise<HeroBuildRecommendationResponse> {
-    await this.heroBuildTransitionAggregationService.ensureReady();
+    await this.heroBuildTransitionAggregationService.ensureReady(request.heroId);
 
     const policyStatus = this.heroBuildTransitionAggregationService.getStatus();
     const policy = this.heroBuildTransitionAggregationService.getHeroPolicy(request.heroId);

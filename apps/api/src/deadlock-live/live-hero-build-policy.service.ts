@@ -18,12 +18,12 @@ import {
   chunkValues,
   getRecentMatchCutoff,
   RECENT_MATCH_QUERY_BATCH_SIZE,
-  RECENT_MATCH_TARGET_COUNT,
   RecentMatchSnapshot,
 } from './recent-matches-window.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 
 const LIVE_HERO_POLICY_TTL_MS = 5 * 60_000;
+const LIVE_HERO_POLICY_TARGET_PLAYER_COUNT = 5_000;
 const LIVE_HERO_POLICY_YIELD_INTERVAL = 25;
 
 interface LiveHeroPolicyCache {
@@ -187,7 +187,7 @@ export class LiveHeroBuildPolicyService {
         .andWhere('match.startTime >= :cutoff', { cutoff: getRecentMatchCutoff(new Date()) })
         .orderBy('match.startTime', 'DESC')
         .addOrderBy('match.matchId', 'DESC')
-        .take(RECENT_MATCH_TARGET_COUNT)
+        .take(LIVE_HERO_POLICY_TARGET_PLAYER_COUNT)
         .getMany();
 
       const itemsByPlayerId = new Map<number, MatchPlayerItem[]>();

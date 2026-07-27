@@ -155,7 +155,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     LazyBuildTransitionAggregationService,
     {
       provide: HeroBuildTransitionAggregationService,
-      useExisting: LazyBuildTransitionAggregationService,
+      useExisting: LiveHeroBuildPolicyService,
     },
     HeroBuildMatchupStatisticsService,
     HeroBuildNextActionContextStatisticsService,
