@@ -1,0 +1,36 @@
+name: V6 Exclusive Inspection
+
+"on":
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect recommendation and Overwolf surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p inspection
+          {
+            echo '=== production service ==='
+            sed -n '1,620p' apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts
+            echo
+            echo '=== V6 service response and fallback references ==='
+            grep -RIn --exclude-dir=node_modules --exclude-dir=dist -E 'recommendationExperiment|VALUE_V6|Contextual V3|contextual-v3|modelVersion|modelName|recommendation model|Recommendation Value' apps/overwolf-client apps/api/src/deadlock-live 2>/dev/null || true
+            echo
+            echo '=== Overwolf files ==='
+            find apps/overwolf-client -type f | sort
+          } > inspection/inspection.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6-exclusive-inspection-${{ github.sha }}
+          path: inspection/inspection.txt
+          retention-days: 1
