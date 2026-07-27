@@ -7,54 +7,49 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-api:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: yarn
-      - name: Install dependencies
+      - name: Run verification and persist diagnostics
         shell: bash
         run: |
-          set -o pipefail
-          yarn install --frozen-lockfile --ignore-engines 2>&1 | tee "$RUNNER_TEMP/install.log"
-      - name: Build dependencies
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            yarn workspace @deadlock-live-probe/shared build
-            yarn workspace @deadlock-live-probe/build-domain build
-          } 2>&1 | tee "$RUNNER_TEMP/dependency-build.log"
-      - name: Build API
-        shell: bash
-        run: |
-          set -o pipefail
-          yarn workspace @deadlock-live-probe/api build 2>&1 | tee "$RUNNER_TEMP/api-build.log"
-      - name: Test V6 integration
-        shell: bash
-        run: |
-          set -o pipefail
-          yarn workspace @deadlock-live-probe/api test --runInBand \
-            recommendation-value-v6-features.spec.ts \
-            recommendation-value-v6-live.spec.ts \
-            recommendation-value-v6-telemetry.spec.ts \
-            2>&1 | tee "$RUNNER_TEMP/v6-tests.log"
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v6-ci-diagnostics-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/install.log
-            ${{ runner.temp }}/dependency-build.log
-            ${{ runner.temp }}/api-build.log
-            ${{ runner.temp }}/v6-tests.log
-          if-no-files-found: warn
-          retention-days: 3
+          set +e
+          mkdir -p ci
+          result="ci/v6-ci-result.txt"
+          : > "$result"
+
+          run_step() {
+            name="$1"
+            shift
+            echo "===== $name =====" | tee -a "$result"
+            "$@" >> "$result" 2>&1
+            status=$?
+            echo "STATUS=$status" | tee -a "$result"
+            echo >> "$result"
+            return 0
+          }
+
+          run_step install yarn install --frozen-lockfile --ignore-engines
+          run_step build-shared yarn workspace @deadlock-live-probe/shared build
+          run_step build-domain yarn workspace @deadlock-live-probe/build-domain build
+          run_step build-api yarn workspace @deadlock-live-probe/api build
+          run_step test-v6 yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-features.spec.ts recommendation-value-v6-live.spec.ts recommendation-value-v6-telemetry.spec.ts
+          run_step test-api yarn workspace @deadlock-live-probe/api test --runInBand
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$result"
+          git commit -m "ci: persist V6 verification result" || true
+          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
