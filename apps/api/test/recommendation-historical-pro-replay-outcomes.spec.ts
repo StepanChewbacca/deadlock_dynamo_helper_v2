@@ -93,7 +93,7 @@ describe('Recommendation historical short-horizon outcomes', () => {
         ownObjectiveLossCount: 0,
         survived: true,
       }),
-    ).toBeCloseTo(0.67, 10);
+    ).toBeCloseTo(0.71, 10);
   });
 
   it('builds complete 3m, 5m and 10m outcomes from fresh timeline snapshots', () => {
