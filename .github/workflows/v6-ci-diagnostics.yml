@@ -1,4 +1,4 @@
-name: V6 CI Diagnostics
+name: V6 CI
 
 on:
   pull_request:
@@ -7,126 +7,31 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify-api:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: yarn
-      - name: Apply V6 compatibility fixes
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts')
-          content = path.read_text(encoding='utf-8')
-
-          replacements = [
-              (
-                  "import { Injectable, Logger } from '@nestjs/common';",
-                  "import { Injectable, Logger, Optional } from '@nestjs/common';",
-              ),
-              (
-                  "    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,\n"
-                  "    private readonly recommendationValueV6LiveService:\n"
-                  "      RecommendationValueV6LiveService,\n"
-                  "    private readonly liveMatchStateService: LiveMatchStateService,",
-                  "    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,\n"
-                  "    @Optional()\n"
-                  "    private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,\n"
-                  "    @Optional()\n"
-                  "    private readonly liveMatchStateService?: LiveMatchStateService,",
-              ),
-              (
-                  "    const valueV6Context =\n"
-                  "      this.recommendationValueV6LiveService.getMode() === 'DISABLED'\n"
-                  "        ? undefined\n"
-                  "        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);",
-                  "    if (!this.recommendationValueV6LiveService) {\n"
-                  "      return currentProductionResponse;\n"
-                  "    }\n"
-                  "    const valueV6Context =\n"
-                  "      this.recommendationValueV6LiveService.getMode() === 'DISABLED'\n"
-                  "        ? undefined\n"
-                  "        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);",
-              ),
-              (
-                  "  ): RecommendationValueV6LiveContext {\n"
-                  "    const requestedHeroId = canonicalHeroId(request.heroId);",
-                  "  ): RecommendationValueV6LiveContext {\n"
-                  "    if (!this.liveMatchStateService) {\n"
-                  "      return createRequestOnlyRecommendationValueV6Context(request);\n"
-                  "    }\n"
-                  "    const requestedHeroId = canonicalHeroId(request.heroId);",
-              ),
-              (
-                  "  const values = players.map((player) => finiteNumber(player.souls));\n"
-                  "  if (values.some((value) => value === undefined)) {\n"
-                  "    return undefined;\n"
-                  "  }\n"
-                  "  return values.reduce((sum, value) => sum + Number(value), 0);",
-                  "  let total = 0;\n"
-                  "  for (const player of players) {\n"
-                  "    const value = finiteNumber(player.souls);\n"
-                  "    if (value === undefined) {\n"
-                  "      return undefined;\n"
-                  "    }\n"
-                  "    total += value;\n"
-                  "  }\n"
-                  "  return total;",
-              ),
-          ]
-
-          for before, after in replacements:
-              if before in content:
-                  content = content.replace(before, after, 1)
-              elif after not in content:
-                  raise RuntimeError(f'Replacement target not found: {before[:80]!r}')
-
-          path.write_text(content, encoding='utf-8')
-          PY
-      - name: Run verification and persist diagnostics
-        shell: bash
-        run: |
-          set +e
-          mkdir -p ci
-          result="ci/v6-ci-result.txt"
-          : > "$result"
-          overall_status=0
-
-          run_step() {
-            name="$1"
-            shift
-            echo "===== $name =====" | tee -a "$result"
-            "$@" >> "$result" 2>&1
-            status=$?
-            echo "STATUS=$status" | tee -a "$result"
-            echo >> "$result"
-            if [ "$status" -ne 0 ]; then
-              overall_status="$status"
-            fi
-          }
-
-          run_step install yarn install --frozen-lockfile --ignore-engines
-          run_step build-shared yarn workspace @deadlock-live-probe/shared build
-          run_step build-domain yarn workspace @deadlock-live-probe/build-domain build
-          run_step build-api yarn workspace @deadlock-live-probe/api build
-          run_step test-v6 yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-features.spec.ts recommendation-value-v6-live.spec.ts recommendation-value-v6-telemetry.spec.ts
-          run_step test-api yarn workspace @deadlock-live-probe/api test --runInBand
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts "$result"
-          git commit -m "fix: preserve V6 production compatibility" || true
-          git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
-          exit "$overall_status"
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+      - name: Test Recommendation Value V6 integration
+        run: >-
+          yarn workspace @deadlock-live-probe/api test --runInBand
+          recommendation-value-v6-features.spec.ts
+          recommendation-value-v6-live.spec.ts
+          recommendation-value-v6-telemetry.spec.ts
