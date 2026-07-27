@@ -1,0 +1,108 @@
+name: Observe V6 Production
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TARGET_SHA: 2db9d92d716fc49a191f519295448bd7bea252e2
+      PUBLIC_API_BASE_URL: https://aboba-telegramovich.duckdns.org
+      EXPECTED_V6_SHA: 799803f4882ca2ece436ab1087c41641713377f8a33f9bab0f0f4636a381938e
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Observe deployment and public status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p observation
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+
+          github_get() {
+            curl --fail --show-error --silent \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$1"
+          }
+
+          deployment_run_id=''
+          for attempt in $(seq 1 120); do
+            github_get "${api}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" \
+              > observation/runs.json
+            deployment_run_id="$(jq -r '.workflow_runs[] | select(.name == "Deploy API" and .event == "push") | .id' observation/runs.json | head -n 1)"
+            if [ -n "$deployment_run_id" ]; then
+              status="$(jq -r --argjson id "$deployment_run_id" '.workflow_runs[] | select(.id == $id) | .status' observation/runs.json)"
+              conclusion="$(jq -r --argjson id "$deployment_run_id" '.workflow_runs[] | select(.id == $id) | .conclusion // ""' observation/runs.json)"
+              echo "Deploy API run ${deployment_run_id}: status=${status} conclusion=${conclusion}"
+              if [ "$status" = 'completed' ]; then
+                break
+              fi
+            else
+              echo "Deploy API run not visible yet (${attempt}/120)."
+            fi
+            sleep 10
+          done
+
+          if [ -z "$deployment_run_id" ]; then
+            echo 'Deploy API run was not found.' >&2
+            exit 1
+          fi
+
+          github_get "${api}/actions/runs/${deployment_run_id}/jobs?per_page=100" \
+            > observation/deploy-jobs.json
+
+          deploy_job_id="$(jq -r '.jobs[] | select(.name == "deploy") | .id' observation/deploy-jobs.json | head -n 1)"
+          if [ -n "$deploy_job_id" ]; then
+            curl --fail --show-error --silent --location \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${api}/actions/jobs/${deploy_job_id}/logs" \
+              > observation/deploy.log || true
+          fi
+
+          jq '[.workflow_runs[] | select(.head_sha == env.TARGET_SHA) | {id,name,event,status,conclusion,html_url}]' \
+            observation/runs.json > observation/run-summary.json
+          cat observation/run-summary.json
+          cat observation/deploy-jobs.json
+
+          deploy_conclusion="$(jq -r --argjson id "$deployment_run_id" '.workflow_runs[] | select(.id == $id) | .conclusion // ""' observation/runs.json)"
+          if [ "$deploy_conclusion" != 'success' ]; then
+            echo "Deploy API did not succeed: ${deploy_conclusion}" >&2
+            exit 1
+          fi
+
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 --retry-all-errors \
+            "${PUBLIC_API_BASE_URL}/deadlock/analysis/contextual-v3-live/status" \
+            > observation/contextual-v3-status.json
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 --retry-all-errors \
+            "${PUBLIC_API_BASE_URL}/deadlock/analysis/recommendation-value-v6-live/status" \
+            > observation/v6-status.json
+
+          cat observation/contextual-v3-status.json
+          cat observation/v6-status.json
+
+          jq -e '.mode == "PRODUCTION" and .model.state == "READY"' \
+            observation/contextual-v3-status.json >/dev/null
+          jq -e --arg sha "$EXPECTED_V6_SHA" \
+            '.mode == "CANARY" and .rolloutScope == "ALL_USERS" and .allowlistCount == 0 and .model.state == "READY" and .model.modelSha256 == $sha' \
+            observation/v6-status.json >/dev/null
+
+      - name: Upload production observation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-production-observation-${{ env.TARGET_SHA }}
+          path: observation
+          if-no-files-found: warn
+          retention-days: 3
