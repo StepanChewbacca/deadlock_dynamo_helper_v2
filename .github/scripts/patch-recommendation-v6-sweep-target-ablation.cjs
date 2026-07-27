@@ -10,7 +10,7 @@ let content = readFileSync(path, 'utf8');
 content = replaceOnce(
   content,
   "  createConfig(\n    `${coarseWinner.config.id}-w000-current-fallback`,\n    coarseWinner.config.statePriorStrength,\n    coarseWinner.config.actionPriorStrength,\n    coarseWinner.config.minimumObservations,\n    0,\n  ),",
-  "  createConfig(\n    `${coarseWinner.config.id}-w000-current-fallback`,\n    coarseWinner.config.statePriorStrength,\n    coarseWinner.config.actionPriorStrength,\n    coarseWinner.config.minimumObservations,\n    0,\n  ),\n  createConfig(\n    `${coarseWinner.config.id}-short-only`,\n    coarseWinner.config.statePriorStrength,\n    coarseWinner.config.actionPriorStrength,\n    coarseWinner.config.minimumObservations,\n    0,\n    true,\n  ),",
+  "  createConfig(\n    `${coarseWinner.config.id}-w000-current-fallback`,\n    coarseWinner.config.statePriorStrength,\n    coarseWinner.config.actionPriorStrength,\n    coarseWinner.config.minimumObservations,\n    0,\n  ),\n  createConfig(\n    `${coarseWinner.config.id}-short-only-v2`,\n    coarseWinner.config.statePriorStrength,\n    coarseWinner.config.actionPriorStrength,\n    coarseWinner.config.minimumObservations,\n    0,\n    true,\n  ),",
   'refinement-short-only-config',
 );
 content = replaceOnce(
