@@ -70,7 +70,24 @@ jobs:
         run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-production-safe.spec.ts hero-build-production-model-only.spec.ts
 
       - name: Build Overwolf client
-        run: yarn workspace @deadlock-live-probe/overwolf-client build
+        id: overwolf-build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/overwolf-client build 2>&1 | tee overwolf-build.log
+
+      - name: Upload Overwolf build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-hotfix-overwolf-build-log
+          path: overwolf-build.log
+          if-no-files-found: error
+
+      - name: Stop after Overwolf build failure
+        if: steps.overwolf-build.outcome == 'failure'
+        run: exit 1
 
       - name: Test Overwolf signal semantics
         run: yarn workspace @deadlock-live-probe/overwolf-client test --runInBand live-build-recommendation-signal.spec.ts
