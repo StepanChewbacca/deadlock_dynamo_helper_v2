@@ -75,6 +75,7 @@ export function resolveValveHeroIdFromGep(heroId: number): number {
   return ITEM_BUILD_GEP_TO_VALVE_ID[heroId] ?? heroId;
 }
 
+// Recommendation Value V6 is trained in the same hero-id namespace as item history.
 export function resolveRecommendationValueV6HeroId(
   heroId: number,
 ): number {
