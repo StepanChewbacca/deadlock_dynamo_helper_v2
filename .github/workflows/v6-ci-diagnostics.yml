@@ -22,6 +22,79 @@ jobs:
         with:
           node-version: 22
           cache: yarn
+      - name: Apply V6 compatibility fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts')
+          content = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  "import { Injectable, Logger } from '@nestjs/common';",
+                  "import { Injectable, Logger, Optional } from '@nestjs/common';",
+              ),
+              (
+                  """    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
+              private readonly recommendationValueV6LiveService:
+                RecommendationValueV6LiveService,
+              private readonly liveMatchStateService: LiveMatchStateService,""",
+                  """    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
+              @Optional()
+              private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,
+              @Optional()
+              private readonly liveMatchStateService?: LiveMatchStateService,""",
+              ),
+              (
+                  """    const valueV6Context =
+              this.recommendationValueV6LiveService.getMode() === 'DISABLED'
+                ? undefined
+                : this.resolveRecommendationValueV6LiveContext(canonicalRequest);""",
+                  """    if (!this.recommendationValueV6LiveService) {
+              return currentProductionResponse;
+            }
+            const valueV6Context =
+              this.recommendationValueV6LiveService.getMode() === 'DISABLED'
+                ? undefined
+                : this.resolveRecommendationValueV6LiveContext(canonicalRequest);""",
+              ),
+              (
+                  """  ): RecommendationValueV6LiveContext {
+              const requestedHeroId = canonicalHeroId(request.heroId);""",
+                  """  ): RecommendationValueV6LiveContext {
+              if (!this.liveMatchStateService) {
+                return createRequestOnlyRecommendationValueV6Context(request);
+              }
+              const requestedHeroId = canonicalHeroId(request.heroId);""",
+              ),
+              (
+                  """  const values = players.map((player) => finiteNumber(player.souls));
+            if (values.some((value) => value === undefined)) {
+              return undefined;
+            }
+            return values.reduce((sum, value) => sum + Number(value), 0);""",
+                  """  let total = 0;
+            for (const player of players) {
+              const value = finiteNumber(player.souls);
+              if (value === undefined) {
+                return undefined;
+              }
+              total += value;
+            }
+            return total;""",
+              ),
+          ]
+
+          for before, after in replacements:
+              if before in content:
+                  content = content.replace(before, after, 1)
+              elif after not in content:
+                  raise RuntimeError(f'Replacement target not found: {before[:80]!r}')
+
+          path.write_text(content, encoding='utf-8')
+          PY
       - name: Run verification and persist diagnostics
         shell: bash
         run: |
@@ -29,6 +102,7 @@ jobs:
           mkdir -p ci
           result="ci/v6-ci-result.txt"
           : > "$result"
+          overall_status=0
 
           run_step() {
             name="$1"
@@ -38,7 +112,9 @@ jobs:
             status=$?
             echo "STATUS=$status" | tee -a "$result"
             echo >> "$result"
-            return 0
+            if [ "$status" -ne 0 ]; then
+              overall_status="$status"
+            fi
           }
 
           run_step install yarn install --frozen-lockfile --ignore-engines
@@ -50,6 +126,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$result"
-          git commit -m "ci: persist V6 verification result" || true
+          git add apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts "$result"
+          git commit -m "fix: preserve V6 production compatibility" || true
           git push origin "HEAD:${{ github.head_ref || github.ref_name }}"
+          exit "$overall_status"
