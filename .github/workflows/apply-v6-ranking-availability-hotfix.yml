@@ -1,12 +1,14 @@
 name: Apply V6 ranking availability hotfix
 
 on:
-  push:
-    branches:
-      - agent/fix-v6-production-ranking-availability
   pull_request:
     branches:
       - main
+    paths:
+      - '.github/scripts/apply-v6-ranking-availability-hotfix.py'
+      - '.github/workflows/apply-v6-ranking-availability-hotfix.yml'
+      - 'apps/api/**'
+      - 'apps/overwolf-client/**'
 
 permissions:
   contents: write
@@ -42,7 +44,24 @@ jobs:
           fi
 
       - name: Build API
-        run: yarn workspace @deadlock-live-probe/api build
+        id: api-build
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/api build 2>&1 | tee api-build.log
+
+      - name: Upload API build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-hotfix-api-build-log
+          path: api-build.log
+          if-no-files-found: error
+
+      - name: Stop after API build failure
+        if: steps.api-build.outcome == 'failure'
+        run: exit 1
 
       - name: Test API hotfix
         run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-value-v6-production-safe.spec.ts hero-build-production-model-only.spec.ts
@@ -54,7 +73,6 @@ jobs:
         run: yarn workspace @deadlock-live-probe/overwolf-client test --runInBand live-build-recommendation-signal.spec.ts
 
       - name: Commit generated hotfix
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           if git diff --quiet && git diff --cached --quiet; then
             echo "No generated changes to commit."
