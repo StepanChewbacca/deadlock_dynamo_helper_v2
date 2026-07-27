@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-v6-production-ranking-availability
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -51,6 +54,7 @@ jobs:
         run: yarn workspace @deadlock-live-probe/overwolf-client test --runInBand live-build-recommendation-signal.spec.ts
 
       - name: Commit generated hotfix
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           if git diff --quiet && git diff --cached --quiet; then
             echo "No generated changes to commit."
