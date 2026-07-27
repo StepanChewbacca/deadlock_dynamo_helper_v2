@@ -1,0 +1,209 @@
+name: Inspect V6 Production Model
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect production model and fallback diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir=/home/ubuntu/apps/deadlock_dynamo_helper
+          output_dir="$GITHUB_WORKSPACE/v6-production-inspection"
+          mkdir -p "$output_dir"
+          cd "$deploy_dir"
+
+          git rev-parse HEAD > "$output_dir/deployed-commit.txt" || true
+          sudo docker compose ps > "$output_dir/docker-compose-ps.txt" 2>&1 || true
+          sudo docker compose exec -T api env \
+            | grep -E '^DEADLOCK_(RECOMMENDATION_VALUE_V6_LIVE_MODEL_DIR|RECOMMENDATION_VALUE_V6_LIVE_EXPECTED_MODEL_SHA256|RECOMMENDATION_VALUE_V6_LIVE_MODE|RECOMMENDATION_VALUE_V6_CANARY_MIN_SEPARATION)=' \
+            | sort > "$output_dir/v6-environment.txt" || true
+
+          for endpoint in \
+            deadlock/analysis/recommendation-value-v6-live/status \
+            deadlock/live/build-recommendations/status \
+            deadlock/live/build-recommendations \
+            deadlock/live/states; do
+            file_name="$(echo "$endpoint" | tr '/' '_').json"
+            curl --fail --show-error --silent --max-time 30 \
+              "http://127.0.0.1:3000/$endpoint" \
+              > "$output_dir/$file_name" || true
+          done
+
+          sudo docker compose logs --no-color --since=72h --tail=10000 api \
+            > "$output_dir/api-72h.log" 2>&1 || true
+
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_dir="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727"
+          printf '%s\n' "$model_dir" > "$output_dir/model-directory.txt"
+          sudo sha256sum "$model_dir/model.json" > "$output_dir/model-sha256.txt"
+          for file_name in manifest.json audit.json evaluation.json promotion.json; do
+            sudo cat "$model_dir/$file_name" > "$output_dir/$file_name"
+          done
+
+          sudo MODEL_FILE="$model_dir/model.json" OUTPUT_FILE="$output_dir/model-summary.json" python3 - <<'PY'
+          import json
+          import math
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          model_path = Path(os.environ['MODEL_FILE'])
+          output_path = Path(os.environ['OUTPUT_FILE'])
+          data = json.loads(model_path.read_text())
+          nested = data.get('model') if isinstance(data.get('model'), dict) else data
+
+          def table(name):
+              value = nested.get(name, {}) if isinstance(nested, dict) else {}
+              return value if isinstance(value, dict) else {}
+
+          def count_record(value):
+              return value if isinstance(value, dict) else {}
+
+          def quantile(values, q):
+              if not values:
+                  return None
+              ordered = sorted(values)
+              index = (len(ordered) - 1) * q
+              lower = math.floor(index)
+              upper = math.ceil(index)
+              if lower == upper:
+                  return ordered[lower]
+              return ordered[lower] * (upper - index) + ordered[upper] * (index - lower)
+
+          direct_prefixes = {
+              'HERO_TIME_ACTION',
+              'HERO_TIME_INVENTORY_ACTION',
+              'HERO_TIME_PREVIOUS_ACTION',
+              'HERO_TEAM_ECONOMY_ACTION',
+          }
+
+          def summarize(name):
+              values = table(name)
+              prefix_counts = Counter()
+              observations = []
+              supported_min10 = 0
+              direct_key_count = 0
+              direct_supported_min10 = 0
+              ranked = []
+              for key, raw in values.items():
+                  record = count_record(raw)
+                  obs = int(record.get('observations', 0) or 0)
+                  observations.append(obs)
+                  prefix = key.split(':', 1)[0]
+                  prefix_counts[prefix] += 1
+                  if obs >= 10:
+                      supported_min10 += 1
+                  if prefix in direct_prefixes:
+                      direct_key_count += 1
+                      if obs >= 10:
+                          direct_supported_min10 += 1
+                  ranked.append({
+                      'key': key,
+                      'observations': obs,
+                      'totalWeight': record.get('totalWeight'),
+                      'utilitySum': record.get('utilitySum'),
+                  })
+              ranked.sort(key=lambda row: (-row['observations'], row['key']))
+              return {
+                  'keyCount': len(values),
+                  'prefixCounts': dict(prefix_counts.most_common()),
+                  'observationStats': {
+                      'minimum': min(observations) if observations else None,
+                      'p50': quantile(observations, 0.50),
+                      'p90': quantile(observations, 0.90),
+                      'p95': quantile(observations, 0.95),
+                      'p99': quantile(observations, 0.99),
+                      'maximum': max(observations) if observations else None,
+                  },
+                  'supportedAtMinimum10': supported_min10,
+                  'directKeyCount': direct_key_count,
+                  'directSupportedAtMinimum10': direct_supported_min10,
+                  'topKeysByObservations': ranked[:100],
+              }
+
+          summary = {
+              'topLevelKeys': sorted(data.keys()),
+              'modelVersion': data.get('modelVersion') or nested.get('modelVersion'),
+              'modelKind': data.get('modelKind') or nested.get('modelKind'),
+              'options': data.get('options') or nested.get('options'),
+              'actionResidualScale': data.get('actionResidualScale') or nested.get('actionResidualScale'),
+              'state': summarize('state'),
+              'action': summarize('action'),
+          }
+          output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+          LOG_FILE="$output_dir/api-72h.log" OUTPUT_FILE="$output_dir/live-decision-summary.json" python3 - <<'PY'
+          import json
+          import math
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          log_path = Path(os.environ['LOG_FILE'])
+          output_path = Path(os.environ['OUTPUT_FILE'])
+          decisions = []
+          for line in log_path.read_text(errors='replace').splitlines():
+              if 'recommendation_value_v6_live_decision' not in line:
+                  continue
+              start = line.find('{')
+              if start < 0:
+                  continue
+              try:
+                  value = json.loads(line[start:])
+              except json.JSONDecodeError:
+                  continue
+              if value.get('event') == 'recommendation_value_v6_live_decision':
+                  decisions.append(value)
+
+          def numeric(values):
+              return [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(value)]
+
+          fallback_counts = Counter(str(row.get('fallbackReason')) for row in decisions if row.get('fallbackReason'))
+          mode_counts = Counter(str(row.get('mode')) for row in decisions)
+          candidate_counts = [len(row.get('candidateSet') or []) for row in decisions]
+          displayed_counts = [len(row.get('displayedRanking') or []) for row in decisions]
+          separations = numeric(row.get('topSeparation') for row in decisions)
+          support_counts = []
+          direct_support_counts = []
+          for row in decisions:
+              for support in row.get('supportCounts') or []:
+                  value = support.get('supportedActionKeyCount')
+                  if isinstance(value, int):
+                      support_counts.append(value)
+                  direct = support.get('directSupportedActionKeyCount')
+                  if isinstance(direct, int):
+                      direct_support_counts.append(direct)
+
+          summary = {
+              'decisionCount': len(decisions),
+              'modeCounts': dict(mode_counts),
+              'fallbackReasonCounts': dict(fallback_counts.most_common()),
+              'candidateCountRange': [min(candidate_counts), max(candidate_counts)] if candidate_counts else None,
+              'displayedCountRange': [min(displayed_counts), max(displayed_counts)] if displayed_counts else None,
+              'topSeparationRange': [min(separations), max(separations)] if separations else None,
+              'candidateSupportRange': [min(support_counts), max(support_counts)] if support_counts else None,
+              'directCandidateSupportRange': [min(direct_support_counts), max(direct_support_counts)] if direct_support_counts else None,
+              'recentDecisions': decisions[-100:],
+          }
+          output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6-production-model-inspection-${{ github.sha }}
+          path: v6-production-inspection
+          retention-days: 1
