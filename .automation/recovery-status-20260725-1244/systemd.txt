@@ -1,6 +1,6 @@
 Result=success
 NRestarts=0
-ExecMainCode=0
-ExecMainStatus=0
-ActiveState=active
-SubState=running
+ExecMainCode=2
+ExecMainStatus=15
+ActiveState=inactive
+SubState=dead
