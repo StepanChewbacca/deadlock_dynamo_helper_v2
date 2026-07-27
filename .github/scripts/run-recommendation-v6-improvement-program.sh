@@ -143,13 +143,13 @@ node scripts/run-recommendation-v6-prior-sweep.mjs
 
 echo '=== RUN V7 CATBOOST STATE AND CANDIDATE SCORERS ==='
 sudo mkdir -p "$V7_VALUE_HOST_DIR" "$V7_POLICY_HOST_DIR"
-sudo chown -R "$(id -u):$(id -g)" "$V7_VALUE_HOST_DIR" "$V7_POLICY_HOST_DIR"
-"$PYTHON_ENV/bin/python" scripts/train_recommendation_v7_catboost.py \
+sudo "$PYTHON_ENV/bin/python" scripts/train_recommendation_v7_catboost.py \
   --dataset "$DATASET_DIR/$DATASET_FILE_NAME" \
   --manifest "$DATASET_DIR/manifest.json" \
   --audit "$DATASET_DIR/audit.json" \
   --output-dir "$V7_VALUE_HOST_DIR" \
   --report-dir "$RESULT_DIRECTORY"
+sudo chown -R "$(id -u):$(id -g)" "$V7_VALUE_HOST_DIR" "$RESULT_DIRECTORY"
 
 echo '=== RUN V7 PROPENSITY-CORRECTED POLICY OPE ==='
 export RECOMMENDATION_V7_VALUE_DIR="$V7_VALUE_CONTAINER_DIR"
