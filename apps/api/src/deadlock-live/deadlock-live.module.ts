@@ -169,7 +169,6 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3CandidateEvaluationService,
     HeroBuildContextualV3FinalTestService,
     HeroBuildContextualV3LiveService,
-    RecommendationValueV6TelemetryService,
     {
       provide: RecommendationDecisionTelemetryService,
       useExisting: RecommendationValueV6TelemetryService,
