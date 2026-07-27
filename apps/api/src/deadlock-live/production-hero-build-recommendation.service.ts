@@ -9,7 +9,10 @@ import {
   ContextualV3LiveStatus,
   HeroBuildContextualV3LiveService,
 } from './hero-build-contextual-v3-live.service';
-import { canonicalHeroId } from './hero-id-aliases';
+import {
+  canonicalHeroId,
+  resolveRecommendationValueV6HeroId,
+} from './hero-id-aliases';
 import {
   HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
@@ -148,6 +151,9 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
+    const valueV6Request = createRecommendationValueV6Request(
+      canonicalRequest,
+    );
     const canonicalCandidates = await super.recommend(canonicalRequest);
     const candidates: HeroBuildRecommendationResponse = {
       ...canonicalCandidates,
@@ -166,9 +172,9 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     }
 
     const valueV6Context =
-      this.resolveRecommendationValueV6LiveContext(canonicalRequest);
+      this.resolveRecommendationValueV6LiveContext(valueV6Request);
     const response = await this.recommendationValueV6LiveService.apply(
-      canonicalRequest,
+      valueV6Request,
       candidates,
       valueV6Context,
     );
@@ -507,6 +513,17 @@ function createCanonicalRequest(
     previousActionKeys: request.previousActionKeys
       ? [...request.previousActionKeys]
       : undefined,
+  };
+}
+
+function createRecommendationValueV6Request(
+  canonicalRequest: HeroBuildContextualRecommendationRequest,
+): HeroBuildContextualRecommendationRequest {
+  return {
+    ...canonicalRequest,
+    heroId: resolveRecommendationValueV6HeroId(
+      canonicalRequest.heroId,
+    ),
   };
 }
 

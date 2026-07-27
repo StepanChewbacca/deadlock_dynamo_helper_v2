@@ -74,3 +74,9 @@ const ITEM_BUILD_GEP_TO_VALVE_ID: Readonly<Record<number, number>> = Object.free
 export function resolveValveHeroIdFromGep(heroId: number): number {
   return ITEM_BUILD_GEP_TO_VALVE_ID[heroId] ?? heroId;
 }
+
+export function resolveRecommendationValueV6HeroId(
+  heroId: number,
+): number {
+  return resolveValveHeroIdFromGep(canonicalHeroId(heroId));
+}
