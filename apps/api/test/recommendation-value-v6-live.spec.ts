@@ -22,6 +22,7 @@ interface ArtifactOptions {
   auditPassed?: boolean;
   modelVersion?: string;
   actionUtilities?: Record<string, number>;
+  productionRolloutAuthorized?: boolean;
 }
 
 describe('Recommendation Value V6 immutable loader', () => {
@@ -75,6 +76,16 @@ describe('Recommendation Value V6 immutable loader', () => {
       loadRecommendationValueV6Model(directory, artifact.sha256),
     ).rejects.toThrow('audit did not pass');
   });
+
+  it('fails closed when promotion does not authorize the global canary', async () => {
+    const artifact = await writeArtifacts(directory, {
+      productionRolloutAuthorized: false,
+    });
+
+    await expect(
+      loadRecommendationValueV6Model(directory, artifact.sha256),
+    ).rejects.toThrow('does not authorize the global canary');
+  });
 });
 
 describe('Recommendation Value V6 production reranking', () => {
@@ -106,7 +117,7 @@ describe('Recommendation Value V6 production reranking', () => {
     )) as RecommendationValueV6LiveResponse;
 
     expect(response.action.actionKey).toBe('BUY:1');
-    expect(response.alternatives.map((action) => action.actionKey)).toEqual([
+    expect(response.alternatives.map((candidate) => candidate.actionKey)).toEqual([
       'BUY:2',
     ]);
     expect(response.recommendationExperiment).toMatchObject({
@@ -121,6 +132,26 @@ describe('Recommendation Value V6 production reranking', () => {
       allowlistCount: 0,
       canaryResponseCount: 1,
     });
+  });
+
+  it('keeps unsupported candidates in their original baseline slots', async () => {
+    const artifact = await writeArtifacts(directory, {
+      actionUtilities: {
+        'HERO_TIME_ACTION:15|5|BUY:1': 0.8,
+        'HERO_TIME_ACTION:15|5|BUY:2': 0.1,
+      },
+    });
+    const service = await createService(
+      directory,
+      artifact.sha256,
+      createItemRepository(),
+    );
+    const baseline = baselineResponseWithUnsupportedMiddleCandidate();
+
+    const response = await service.apply(recommendationRequest(), baseline);
+
+    expect(actionKeys(response)).toEqual(['BUY:1', 'BUY:3', 'BUY:2']);
+    expect(new Set(actionKeys(response))).toEqual(new Set(actionKeys(baseline)));
   });
 
   it('falls back when fewer than two candidates are supported', async () => {
@@ -228,9 +259,16 @@ describe('Recommendation Value V6 production reranking', () => {
     );
     const baseline = baselineResponse();
 
-    const response = await service.apply(recommendationRequest(), baseline);
+    const response = (await service.apply(
+      recommendationRequest(),
+      baseline,
+    )) as RecommendationValueV6LiveResponse;
 
-    expect(response).toBe(baseline);
+    expect(actionKeys(response)).toEqual(actionKeys(baseline));
+    expect(response.recommendationExperiment).toMatchObject({
+      source: 'BASELINE',
+      fallbackReason: 'SHADOW_ONLY',
+    });
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(repository.find).toHaveBeenCalledTimes(1);
     expect(service.getStatus().canaryResponseCount).toBe(0);
@@ -341,7 +379,8 @@ async function writeArtifacts(
           candidateId: 'v6-short-only-20260727',
           modelSha256: sha256,
           usage: 'GLOBAL_CANARY_OPERATOR_OVERRIDE',
-          productionRolloutAuthorized: true,
+          productionRolloutAuthorized:
+            options.productionRolloutAuthorized ?? true,
           rolloutScope: 'ALL_USERS',
         },
         null,
@@ -368,6 +407,7 @@ function createItemRepository(): Repository<Item> {
     find: jest.fn().mockResolvedValue([
       item(1, 3_000, 3, 'weapon'),
       item(2, 1_500, 2, 'spirit'),
+      item(3, 1_250, 2, 'vitality'),
     ]),
   } as unknown as Repository<Item>;
 }
@@ -421,6 +461,13 @@ function baselineResponse(): HeroBuildRecommendationResponse {
   };
 }
 
+function baselineResponseWithUnsupportedMiddleCandidate(): HeroBuildRecommendationResponse {
+  return {
+    ...baselineResponse(),
+    alternatives: [action(3, 0.5), action(1, 0.2)],
+  };
+}
+
 function action(itemId: number, score: number): HeroBuildRecommendationAction {
   return {
     type: 'BUY',
@@ -445,6 +492,6 @@ function action(itemId: number, score: number): HeroBuildRecommendationAction {
 function actionKeys(response: HeroBuildRecommendationResponse): string[] {
   return [
     response.action.actionKey,
-    ...response.alternatives.map((action) => action.actionKey),
+    ...response.alternatives.map((candidate) => candidate.actionKey),
   ];
 }
