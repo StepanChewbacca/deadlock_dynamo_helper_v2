@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -25,6 +25,10 @@ import {
   type RecommendationValueV6ModelOptions,
   type RecommendationValueV6Prediction,
 } from './recommendation-value-v6-model';
+import {
+  RecommendationValueV6TelemetryService,
+  type RecommendationValueV6CandidateDecisionScore,
+} from './recommendation-value-v6-telemetry.service';
 
 const MODEL_DIR_ENV = 'DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODEL_DIR';
 const EXPECTED_SHA_ENV =
@@ -35,6 +39,13 @@ const MIN_SEPARATION_ENV =
 const DEFAULT_MIN_SEPARATION = 0.001;
 const LIVE_TIME_BUCKET_SECONDS = 120;
 const EXPECTED_MODEL_KIND = 'OBSERVATIONAL_STATE_ACTION_ADVANTAGE';
+const EXPECTED_PROMOTION_USAGE = 'GLOBAL_CANARY_OPERATOR_OVERRIDE';
+const CANDIDATE_GENERATOR_VERSION =
+  'PRODUCTION_HERO_BUILD_RECOMMENDER_251660F';
+const STATE_FEATURE_VERSION = 'RECOMMENDATION_VALUE_V6_FEATURE_KEYS_1';
+const BASELINE_MODEL_VERSION = 'CURRENT_PRODUCTION_RECOMMENDER';
+const POLICY_VERSION = 'RECOMMENDATION_VALUE_V6_GLOBAL_CANARY_1';
+const CATALOG_VERSION = 'CURRENT_ITEMS_TABLE';
 
 export type RecommendationValueV6LiveMode = 'DISABLED' | 'SHADOW' | 'CANARY';
 export type RecommendationValueV6LiveModelState =
@@ -43,6 +54,7 @@ export type RecommendationValueV6LiveModelState =
   | 'FAILED';
 
 export interface RecommendationValueV6LiveContext {
+  matchId?: string;
   localSteamId?: string;
   heroId: number;
   teamId?: number;
@@ -107,7 +119,7 @@ export interface RecommendationValueV6LiveStatus {
   lastModelError?: string;
 }
 
-interface LoadedRecommendationValueV6Model {
+export interface LoadedRecommendationValueV6Model {
   candidateId: string;
   modelVersion: typeof RECOMMENDATION_VALUE_V6_MODEL_VERSION;
   modelSha256: string;
@@ -139,6 +151,7 @@ interface RecommendationValueV6Evaluation {
   metadata: RecommendationExperimentMetadata;
   candidateScores: RecommendationValueV6CandidateScore[];
   displayedActionKeys: string[];
+  context: RecommendationValueV6LiveContext;
 }
 
 @Injectable()
@@ -165,6 +178,8 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
   constructor(
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @Optional()
+    private readonly telemetryService?: RecommendationValueV6TelemetryService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -200,6 +215,10 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
     }
   }
 
+  getMode(): RecommendationValueV6LiveMode {
+    return this.mode;
+  }
+
   getStatus(): RecommendationValueV6LiveStatus {
     return {
       mode: this.mode,
@@ -221,59 +240,117 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
   async apply(
     request: HeroBuildContextualRecommendationRequest,
     baseline: HeroBuildRecommendationResponse,
+    resolvedContext?: RecommendationValueV6LiveContext,
   ): Promise<HeroBuildRecommendationResponse> {
     this.requestCount += 1;
     if (this.mode === 'DISABLED') {
       this.baselineResponseCount += 1;
       return baseline;
     }
+
     if (this.mode === 'SHADOW') {
       this.baselineResponseCount += 1;
-      void this.evaluateShadow(request, baseline);
-      return baseline;
+      const shadowResponse = withExperimentMetadata(baseline, {
+        source: 'BASELINE',
+        candidateId: this.loaded?.candidateId,
+        modelVersion: this.loaded?.modelVersion,
+        modelSha256: this.loaded?.modelSha256,
+        fallbackReason: 'SHADOW_ONLY',
+      });
+      void this.evaluateShadow(request, baseline, resolvedContext);
+      return shadowResponse;
     }
 
+    const startedAt = Date.now();
     try {
-      const evaluation = await this.evaluate(request, baseline);
+      const evaluation = await this.evaluate(
+        request,
+        baseline,
+        resolvedContext,
+      );
       if (evaluation.metadata.source === 'VALUE_V6_CANARY') {
         this.canaryResponseCount += 1;
       } else {
+        this.baselineResponseCount += 1;
         this.recordFallback(
           evaluation.metadata.fallbackReason ?? 'UNSPECIFIED_FALLBACK',
         );
       }
-      this.logEvaluation(request, baseline, evaluation, 'CANARY');
+      this.logEvaluation(
+        baseline,
+        evaluation,
+        'CANARY',
+        Date.now() - startedAt,
+      );
       return evaluation.response;
     } catch (error) {
       const message = getErrorMessage(error);
       this.modelErrorCount += 1;
       this.lastModelError = message;
+      this.baselineResponseCount += 1;
       this.recordFallback(`MODEL_ERROR:${message}`);
+      const context = mergeLiveContext(request, resolvedContext, new Map());
+      const evaluation = createFallbackEvaluation(
+        baseline,
+        this.loaded,
+        'MODEL_ERROR',
+        context,
+      );
+      this.logEvaluation(
+        baseline,
+        evaluation,
+        'CANARY',
+        Date.now() - startedAt,
+      );
       this.logger.warn(
         `Recommendation Value V6 request failed and returned baseline: ${message}`,
       );
-      return withExperimentMetadata(baseline, {
-        source: 'BASELINE',
-        fallbackReason: 'MODEL_ERROR',
-        candidateId: this.loaded?.candidateId,
-        modelVersion: this.loaded?.modelVersion,
-        modelSha256: this.loaded?.modelSha256,
-      });
+      return evaluation.response;
     }
   }
 
   private async evaluateShadow(
     request: HeroBuildContextualRecommendationRequest,
     baseline: HeroBuildRecommendationResponse,
+    resolvedContext?: RecommendationValueV6LiveContext,
   ): Promise<void> {
+    const startedAt = Date.now();
     try {
-      const evaluation = await this.evaluate(request, baseline);
+      const evaluation = await this.evaluate(
+        request,
+        baseline,
+        resolvedContext,
+      );
       this.shadowEvaluationCount += 1;
-      this.logEvaluation(request, baseline, evaluation, 'SHADOW');
+      if (evaluation.metadata.fallbackReason) {
+        this.recordFallback(evaluation.metadata.fallbackReason);
+      }
+      this.logEvaluation(
+        baseline,
+        {
+          ...evaluation,
+          displayedActionKeys: actionKeys(baseline),
+        },
+        'SHADOW',
+        Date.now() - startedAt,
+      );
     } catch (error) {
       const message = getErrorMessage(error);
       this.modelErrorCount += 1;
       this.lastModelError = message;
+      this.recordFallback(`MODEL_ERROR:${message}`);
+      const context = mergeLiveContext(request, resolvedContext, new Map());
+      this.logEvaluation(
+        baseline,
+        createFallbackEvaluation(
+          baseline,
+          this.loaded,
+          'MODEL_ERROR',
+          context,
+        ),
+        'SHADOW',
+        Date.now() - startedAt,
+      );
       this.logger.warn(`Recommendation Value V6 shadow failed: ${message}`);
     }
   }
@@ -281,10 +358,16 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
   private async evaluate(
     request: HeroBuildContextualRecommendationRequest,
     baseline: HeroBuildRecommendationResponse,
+    resolvedContext?: RecommendationValueV6LiveContext,
   ): Promise<RecommendationValueV6Evaluation> {
     const loaded = this.loaded;
     if (!loaded || this.modelStatus.state !== 'READY') {
-      return createFallbackEvaluation(baseline, loaded, 'MODEL_NOT_READY');
+      return createFallbackEvaluation(
+        baseline,
+        loaded,
+        'MODEL_NOT_READY',
+        mergeLiveContext(request, resolvedContext, new Map()),
+      );
     }
 
     const candidates = deduplicateCandidates(baseline);
@@ -294,6 +377,7 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
         baseline,
         loaded,
         'INSUFFICIENT_BASELINE_CANDIDATES',
+        mergeLiveContext(request, resolvedContext, new Map()),
         candidates.length,
       );
     }
@@ -306,12 +390,12 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
       ? await this.itemRepository.find({ where: { itemId: In(itemIds) } })
       : [];
     const itemById = new Map(items.map((item) => [Number(item.itemId), item]));
-    const context = buildLiveContext(request, itemById);
+    const context = mergeLiveContext(request, resolvedContext, itemById);
     const stateKeys = buildRecommendationValueV6StateKeys(context);
     const teamEconomyBand = resolveTeamEconomyBand(context);
     const scores = candidates.map((candidate) => {
       const metadata = buildCandidateMetadata(candidate.action, itemById);
-      const actionKeys = buildRecommendationValueV6ActionKeys({
+      const actionKeysForCandidate = buildRecommendationValueV6ActionKeys({
         heroId: context.heroId,
         timeBucket: context.timeBucket,
         inventoryStateKey: context.inventoryStateKey,
@@ -327,7 +411,7 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
       });
       const prediction = predictRecommendationValueV6(
         loaded.model,
-        { stateKeys, actionKeys },
+        { stateKeys, actionKeys: actionKeysForCandidate },
         loaded.options,
         loaded.actionResidualScale,
       );
@@ -347,6 +431,7 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
         baseline,
         loaded,
         'INSUFFICIENT_SUPPORTED_CANDIDATES',
+        context,
         supported.length,
         scores,
       );
@@ -361,16 +446,14 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
         baseline,
         loaded,
         'LOW_TOP_SEPARATION',
+        context,
         supported.length,
         scores,
         topSeparation,
       );
     }
 
-    const unsupported = scores
-      .filter((candidate) => !candidate.supported)
-      .sort((left, right) => left.baselineRank - right.baselineRank);
-    const ranking = [...supported, ...unsupported];
+    const ranking = rerankSupportedCandidatesInBaselineSlots(scores, supported);
     const displayedActionKeys = ranking.map(
       (candidate) => candidate.action.actionKey,
     );
@@ -394,58 +477,103 @@ export class RecommendationValueV6LiveService implements OnModuleInit {
       metadata,
       candidateScores: scores,
       displayedActionKeys,
+      context,
     };
   }
 
   private recordFallback(reason: string): void {
-    this.baselineResponseCount += 1;
     this.fallbackCount += 1;
     this.lastFallbackReason = reason;
   }
 
   private logEvaluation(
-    request: HeroBuildContextualRecommendationRequest,
     baseline: HeroBuildRecommendationResponse,
     evaluation: RecommendationValueV6Evaluation,
     mode: 'SHADOW' | 'CANARY',
+    elapsedMs: number,
   ): void {
-    const loaded = this.loaded;
+    const decisionId = randomUUID();
     const baselineRanking = actionKeys(baseline);
-    const v6Ranking = [...evaluation.candidateScores]
+    const challengerRanking = [...evaluation.candidateScores]
       .filter((candidate) => candidate.supported)
       .sort(compareCandidateScores)
       .map((candidate) => candidate.action.actionKey);
-    this.logger.log(
-      JSON.stringify({
-        event: 'recommendation_value_v6_live_decision',
-        decisionId: randomUUID(),
-        matchId: 'UNRESOLVED',
-        localIdentityReference: 'UNRESOLVED',
-        gameTimeS: request.gameTimeS,
-        candidateSet: baselineRanking,
-        baselineRanking,
-        v6Ranking,
-        displayedRanking:
-          mode === 'SHADOW'
-            ? baselineRanking
-            : evaluation.displayedActionKeys,
-        modelVersion: loaded?.modelVersion,
-        modelSha256: loaded?.modelSha256,
-        candidateId: loaded?.candidateId,
-        mode,
-        supportCounts: evaluation.candidateScores.map((candidate) => ({
-          actionKey: candidate.action.actionKey,
-          supportedStateKeyCount:
-            candidate.prediction.supportedStateKeyCount,
-          supportedActionKeyCount:
-            candidate.prediction.supportedActionKeyCount,
-        })),
-        topSeparation: evaluation.metadata.topSeparation,
-        fallbackReason: evaluation.metadata.fallbackReason,
-        dataSource: 'USER_LIVE',
-        eligibleForProModelTraining: false,
+    const baselineScores = baselineRanking.map(
+      (actionKey, rank): RecommendationValueV6CandidateDecisionScore => ({
+        actionKey,
+        score: findAction(baseline, actionKey)?.score ?? 0,
+        rank: rank + 1,
+        supported:
+          evaluation.candidateScores.find(
+            (candidate) => candidate.action.actionKey === actionKey,
+          )?.supported ?? false,
       }),
     );
+    const challengerScores = evaluation.candidateScores.map(
+      (candidate): RecommendationValueV6CandidateDecisionScore => ({
+        actionKey: candidate.action.actionKey,
+        score: candidate.prediction.actionAdvantage,
+        rank: challengerRanking.indexOf(candidate.action.actionKey) + 1,
+        supported: candidate.supported,
+        actionUtility: candidate.prediction.actionUtility,
+        actionAdvantage: candidate.prediction.actionAdvantage,
+        supportedStateKeyCount:
+          candidate.prediction.supportedStateKeyCount,
+        supportedActionKeyCount:
+          candidate.prediction.supportedActionKeyCount,
+      }),
+    );
+    const log = {
+      event: 'recommendation_value_v6_live_decision',
+      decisionId,
+      matchId: evaluation.context.matchId ?? 'UNRESOLVED',
+      localIdentityReference: stableIdentityReference(
+        evaluation.context.localSteamId,
+      ),
+      gameTimeSeconds: evaluation.context.gameTimeS,
+      candidateSet: baselineRanking,
+      baselineRanking,
+      v6Ranking: challengerRanking,
+      displayedRanking: evaluation.displayedActionKeys,
+      modelVersion: this.loaded?.modelVersion,
+      modelSha256: this.loaded?.modelSha256,
+      candidateId: this.loaded?.candidateId,
+      mode,
+      supportCounts: challengerScores.map((candidate) => ({
+        actionKey: candidate.actionKey,
+        supportedStateKeyCount: candidate.supportedStateKeyCount,
+        supportedActionKeyCount: candidate.supportedActionKeyCount,
+      })),
+      topSeparation: evaluation.metadata.topSeparation,
+      fallbackReason: evaluation.metadata.fallbackReason,
+      elapsedMs,
+      dataSource: 'USER_LIVE',
+      eligibleForProModelTraining: false,
+    };
+    this.logger.log(JSON.stringify(log));
+    this.telemetryService?.recordEvaluation({
+      decisionId,
+      matchId: evaluation.context.matchId ?? 'UNRESOLVED',
+      localSteamId: evaluation.context.localSteamId,
+      gameTimeSeconds: evaluation.context.gameTimeS,
+      candidateGeneratorVersion: CANDIDATE_GENERATOR_VERSION,
+      catalogVersion: CATALOG_VERSION,
+      stateFeatureVersion: STATE_FEATURE_VERSION,
+      baselineModelVersion: BASELINE_MODEL_VERSION,
+      challengerModelVersion: this.loaded?.modelVersion,
+      challengerModelSha256: this.loaded?.modelSha256,
+      candidateId: this.loaded?.candidateId,
+      policyVersion: POLICY_VERSION,
+      rolloutMode: mode,
+      candidateActionKeys: baselineRanking,
+      baselineScores,
+      challengerScores,
+      displayedActionKeys: evaluation.displayedActionKeys,
+      topSeparation: evaluation.metadata.topSeparation,
+      supportedCandidateCount: evaluation.metadata.supportedCandidateCount,
+      fallbackReason: evaluation.metadata.fallbackReason,
+      elapsedMs,
+    });
   }
 }
 
@@ -497,18 +625,28 @@ export async function loadRecommendationValueV6Model(
   if (normalizeSha(promotion.modelSha256) !== actualSha) {
     throw new Error('Recommendation Value V6 promotion SHA does not match model.json.');
   }
-  const candidateId = requiredText(promotion.candidateId, 'promotion candidateId');
+  if (
+    promotion.usage !== EXPECTED_PROMOTION_USAGE ||
+    promotion.productionRolloutAuthorized !== true ||
+    promotion.rolloutScope !== 'ALL_USERS'
+  ) {
+    throw new Error('Recommendation Value V6 promotion does not authorize the global canary.');
+  }
+  const candidateId = requiredText(
+    promotion.candidateId,
+    'promotion candidateId',
+  );
   const options = parseModelOptions(record(modelArtifact.options));
   const counts = record(modelArtifact.counts);
   if (counts.version !== RECOMMENDATION_VALUE_V6_MODEL_VERSION) {
     throw new Error('Recommendation Value V6 serialized counts version is invalid.');
   }
-  const model: RecommendationValueV6Model = {
+  const model: RecommendationValueV6Model = Object.freeze({
     version: RECOMMENDATION_VALUE_V6_MODEL_VERSION,
     global: freezeCount(record(counts.global), 'global'),
     state: deserializeCounts(record(counts.state), 'state'),
     action: deserializeCounts(record(counts.action), 'action'),
-  };
+  });
   if (model.global.totalWeight <= 0) {
     throw new Error('Recommendation Value V6 global training weight is empty.');
   }
@@ -536,33 +674,53 @@ function loadRecommendationValueV6ModelFromEnvironment(): Promise<LoadedRecommen
   return loadRecommendationValueV6Model(modelDirectory, expectedSha);
 }
 
-function buildLiveContext(
+function mergeLiveContext(
   request: HeroBuildContextualRecommendationRequest,
+  resolvedContext: RecommendationValueV6LiveContext | undefined,
   itemById: ReadonlyMap<number, Item>,
 ): RecommendationValueV6LiveContext {
   const inventoryItems = request.itemIds
     .map((itemId) => itemById.get(itemId))
     .filter((item): item is Item => item !== undefined);
   const inventoryMetadataComplete =
-    inventoryItems.length === request.itemIds.length;
+    request.itemIds.length > 0 && inventoryItems.length === request.itemIds.length;
   return {
+    matchId: resolvedContext?.matchId,
+    localSteamId: resolvedContext?.localSteamId,
     heroId: request.heroId,
+    teamId: resolvedContext?.teamId,
     gameTimeS: request.gameTimeS,
     timeBucket: Math.floor(request.gameTimeS / LIVE_TIME_BUCKET_SECONDS),
     itemIds: [...request.itemIds],
     inventoryStateKey: createInventoryStateKeyFromItemIds(request.itemIds),
     previousActionKeys: [...(request.previousActionKeys ?? [])],
-    alliedHeroIds: [...(request.alliedHeroIds ?? [])],
-    enemyHeroIds: [...(request.enemyHeroIds ?? [])],
-    inventoryTotalCost: inventoryMetadataComplete
-      ? inventoryItems.reduce((sum, item) => sum + item.cost, 0)
-      : undefined,
-    inventoryHighestTier: inventoryMetadataComplete
-      ? inventoryItems.reduce(
-          (highest, item) => Math.max(highest, item.itemTier),
-          0,
-        )
-      : undefined,
+    alliedHeroIds: [...(request.alliedHeroIds ?? resolvedContext?.alliedHeroIds ?? [])],
+    enemyHeroIds: [...(request.enemyHeroIds ?? resolvedContext?.enemyHeroIds ?? [])],
+    inventoryTotalCost:
+      resolvedContext?.inventoryTotalCost ??
+      (inventoryMetadataComplete
+        ? inventoryItems.reduce((sum, item) => sum + item.cost, 0)
+        : request.itemIds.length === 0
+          ? 0
+          : undefined),
+    inventoryHighestTier:
+      resolvedContext?.inventoryHighestTier ??
+      (inventoryMetadataComplete
+        ? inventoryItems.reduce(
+            (highest, item) => Math.max(highest, item.itemTier),
+            0,
+          )
+        : request.itemIds.length === 0
+          ? 0
+          : undefined),
+    playerNetWorth: resolvedContext?.playerNetWorth,
+    playerKills: resolvedContext?.playerKills,
+    playerDeaths: resolvedContext?.playerDeaths,
+    playerAssists: resolvedContext?.playerAssists,
+    teamNetWorthDelta: resolvedContext?.teamNetWorthDelta,
+    teamRelativeNetWorthDelta: resolvedContext?.teamRelativeNetWorthDelta,
+    playerNetWorthRankInTeam: resolvedContext?.playerNetWorthRankInTeam,
+    playerNetWorthShare: resolvedContext?.playerNetWorthShare,
   };
 }
 
@@ -620,10 +778,28 @@ function compareCandidateScores(
   );
 }
 
+function rerankSupportedCandidatesInBaselineSlots(
+  scores: readonly RecommendationValueV6CandidateScore[],
+  supportedRanking: readonly RecommendationValueV6CandidateScore[],
+): RecommendationValueV6CandidateScore[] {
+  let supportedIndex = 0;
+  return [...scores]
+    .sort((left, right) => left.baselineRank - right.baselineRank)
+    .map((candidate) => {
+      if (!candidate.supported) {
+        return candidate;
+      }
+      const replacement = supportedRanking[supportedIndex];
+      supportedIndex += 1;
+      return replacement;
+    });
+}
+
 function createFallbackEvaluation(
   baseline: HeroBuildRecommendationResponse,
   loaded: LoadedRecommendationValueV6Model | undefined,
   fallbackReason: string,
+  context: RecommendationValueV6LiveContext,
   supportedCandidateCount?: number,
   candidateScores: RecommendationValueV6CandidateScore[] = [],
   topSeparation?: number,
@@ -642,6 +818,7 @@ function createFallbackEvaluation(
     metadata,
     candidateScores,
     displayedActionKeys: actionKeys(baseline),
+    context,
   };
 }
 
@@ -660,6 +837,15 @@ function actionKeys(response: HeroBuildRecommendationResponse): string[] {
     response.action.actionKey,
     ...response.alternatives.map((action) => action.actionKey),
   ];
+}
+
+function findAction(
+  response: HeroBuildRecommendationResponse,
+  actionKey: string,
+): HeroBuildRecommendationAction | undefined {
+  return [response.action, ...response.alternatives].find(
+    (action) => action.actionKey === actionKey,
+  );
 }
 
 function deserializeCounts(
@@ -790,7 +976,9 @@ function requiredNonNegativeInteger(value: unknown, label: string): number {
   return Number(value);
 }
 
-function uniquePositiveIntegers(values: readonly (number | undefined)[]): number[] {
+function uniquePositiveIntegers(
+  values: readonly (number | undefined)[],
+): number[] {
   return [...new Set(
     values.filter(
       (value): value is number =>
@@ -812,6 +1000,13 @@ function readMinimumSeparation(): number {
   return Number.isFinite(value) && value >= 0
     ? value
     : DEFAULT_MIN_SEPARATION;
+}
+
+function stableIdentityReference(steamId: string | undefined): string {
+  if (!steamId) {
+    return 'UNRESOLVED';
+  }
+  return createHash('sha256').update(steamId).digest('hex').slice(0, 24);
 }
 
 function getErrorMessage(error: unknown): string {
