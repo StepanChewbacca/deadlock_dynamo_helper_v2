@@ -1,10 +1,25 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Item } from './entities/item.entity';
+import { RecommendationValueV6LiveController } from './recommendation-value-v6-live.controller';
+import { RecommendationValueV6LiveService } from './recommendation-value-v6-live.service';
 import { RecommendationValueV6TrainingController } from './recommendation-value-v6-training.controller';
 import { RecommendationValueV6TrainingService } from './recommendation-value-v6-training.service';
 
+@Global()
 @Module({
-  controllers: [RecommendationValueV6TrainingController],
-  providers: [RecommendationValueV6TrainingService],
-  exports: [RecommendationValueV6TrainingService],
+  imports: [TypeOrmModule.forFeature([Item])],
+  controllers: [
+    RecommendationValueV6TrainingController,
+    RecommendationValueV6LiveController,
+  ],
+  providers: [
+    RecommendationValueV6TrainingService,
+    RecommendationValueV6LiveService,
+  ],
+  exports: [
+    RecommendationValueV6TrainingService,
+    RecommendationValueV6LiveService,
+  ],
 })
 export class RecommendationValueV6Module {}
