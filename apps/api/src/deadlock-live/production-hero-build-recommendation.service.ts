@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import type {
   MinimalMatchState,
   MinimalPlayerState,
@@ -23,6 +23,7 @@ import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timelin
 import {
   RecommendationValueV6LiveService,
   type RecommendationValueV6LiveContext,
+  type RecommendationValueV6LiveResponse,
 } from './recommendation-value-v6-live.service';
 
 const MODE_ENV = 'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE';
@@ -147,23 +148,63 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
-    const currentProductionResponse = await this.recommendCurrentProduction(
-      canonicalRequest,
-      requestedHeroId,
-    );
-    if (!this.recommendationValueV6LiveService) {
-      return currentProductionResponse;
-    }
-    const valueV6Context =
-      this.recommendationValueV6LiveService.getMode() === 'DISABLED'
-        ? undefined
-        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);
+    const canonicalCandidates = await super.recommend(canonicalRequest);
+    const candidates: HeroBuildRecommendationResponse = {
+      ...canonicalCandidates,
+      heroId: requestedHeroId,
+    };
 
-    return this.recommendationValueV6LiveService.apply(
+    if (!this.recommendationValueV6LiveService) {
+      throw new ServiceUnavailableException(
+        'Recommendation Value V6 service is unavailable.',
+      );
+    }
+    if (this.recommendationValueV6LiveService.getMode() !== 'CANARY') {
+      throw new ServiceUnavailableException(
+        'Recommendation Value V6 must be enabled in CANARY mode for exclusive production ranking.',
+      );
+    }
+
+    const valueV6Context =
+      this.resolveRecommendationValueV6LiveContext(canonicalRequest);
+    const response = await this.recommendationValueV6LiveService.apply(
       canonicalRequest,
-      currentProductionResponse,
+      candidates,
       valueV6Context,
     );
+    const experiment = (response as RecommendationValueV6LiveResponse)
+      .recommendationExperiment;
+
+    if (
+      experiment?.source !== 'VALUE_V6_CANARY' ||
+      !experiment.candidateId ||
+      !experiment.modelVersion ||
+      !experiment.modelSha256
+    ) {
+      const reason = experiment?.fallbackReason ?? 'V6_RANKING_UNAVAILABLE';
+      this.modelErrorCount += 1;
+      this.lastModelErrorAt = new Date().toISOString();
+      this.lastModelError = reason;
+      throw new ServiceUnavailableException(
+        `Recommendation Value V6 did not produce an exclusive ranking: ${reason}.`,
+      );
+    }
+
+    const exclusiveResponse: HeroBuildRecommendationResponse & {
+      recommendationModel: 'RECOMMENDATION_VALUE_V6';
+      modelVersion: string;
+      modelSha256: string;
+      candidateId: string;
+      rolloutMode: 'PRODUCTION';
+    } = {
+      ...response,
+      recommendationModel: 'RECOMMENDATION_VALUE_V6',
+      modelVersion: experiment.modelVersion,
+      modelSha256: experiment.modelSha256,
+      candidateId: experiment.candidateId,
+      rolloutMode: 'PRODUCTION',
+    };
+    return exclusiveResponse;
   }
 
   private async recommendCurrentProduction(

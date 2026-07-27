@@ -16,6 +16,7 @@ export type HeroBuildPresentationExplanationCode =
   | 'SUBSET_STATE_EVIDENCE'
   | 'DIRECTIONAL_STATE_INFERENCE'
   | 'CONTEXTUAL_V3_MODEL'
+  | 'RECOMMENDATION_VALUE_V6_MODEL'
   | 'NO_HERO_POLICY'
   | 'NO_NEARBY_STATE'
   | 'NO_LEGAL_ACTION';
@@ -244,6 +245,20 @@ function createExplanation(
       archetypeApplied?: boolean;
     };
   };
+  if (contextualV3.recommendationModel === 'RECOMMENDATION_VALUE_V6') {
+    const model = contextualV3 as typeof contextualV3 & {
+      modelVersion?: string;
+      candidateId?: string;
+    };
+    return {
+      code: 'RECOMMENDATION_VALUE_V6_MODEL',
+      evidenceLevel: 'INFERRED',
+      text:
+        `Recommendation Value V6 ranked this action with model ${model.modelVersion ?? 'UNKNOWN'} ` +
+        `(candidate ${model.candidateId ?? 'UNKNOWN'}).`,
+    };
+  }
+
   if (contextualV3.recommendationModel === 'CONTEXTUAL_V3') {
     const features = contextualV3.contextualFeatures;
     return {

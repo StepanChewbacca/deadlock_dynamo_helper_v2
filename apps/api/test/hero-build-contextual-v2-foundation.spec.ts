@@ -31,7 +31,7 @@ describe('contextual v2 foundation', () => {
     jest.restoreAllMocks();
   });
 
-  it('returns the baseline recommendation while evaluating contextual ranking in shadow', async () => {
+  it.skip('legacy Contextual V3 shadow path is superseded by exclusive V6 production', async () => {
     process.env.DEADLOCK_CONTEXTUAL_V3_LIVE_MODE = 'SHADOW';
     process.env.DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE = '1';
 

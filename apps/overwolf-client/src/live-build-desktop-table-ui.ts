@@ -30,7 +30,7 @@ interface ProjectedRecommendationResponse {
   gameTimeS: number;
   action: ExtendedLiveBuildRecommendationAction;
   alternatives: ExtendedLiveBuildRecommendationAction[];
-  recommendationModel?: 'CONTEXTUAL_V3';
+  recommendationModel?: 'RECOMMENDATION_VALUE_V6';
 }
 
 interface ProjectedBuildStep {
@@ -151,8 +151,8 @@ async function projectFullBuild(
     if (!isProjectedRecommendationResponse(parsed)) {
       throw new Error('Full build response has an invalid shape.');
     }
-    if (parsed.recommendationModel !== 'CONTEXTUAL_V3') {
-      throw new Error('Full build response did not come from Contextual V3.');
+    if (parsed.recommendationModel !== 'RECOMMENDATION_VALUE_V6') {
+      throw new Error('Full build response did not come from Recommendation Value V6.');
     }
 
     const action = parsed.action;
@@ -330,8 +330,8 @@ function createSummary(snapshot: LiveBuildRecommendationSnapshot): HTMLElement {
     ['Game time', formatGameTime(snapshot.gameTimeS)],
     [
       'Recommendation source',
-      snapshot.recommendation?.recommendationModel === 'CONTEXTUAL_V3'
-        ? `MODEL V3 ${snapshot.recommendation.contextualFeatures?.phase ?? ''}`.trim()
+      snapshot.recommendation?.recommendationModel === 'RECOMMENDATION_VALUE_V6'
+        ? 'RECOMMENDATION VALUE V6'
         : snapshot.recommendation
           ? 'BASELINE'
           : 'WAITING',
