@@ -1,0 +1,58 @@
+name: Diagnose V6 Refreshing
+
+"on":
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLIC_API_BASE_URL: https://aboba-telegramovich.duckdns.org
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect production diagnostics
+        shell: bash
+        run: |
+          set -u
+          mkdir -p diagnosis
+          curl -sS --max-time 20 -D diagnosis/v6-status.headers \
+            "$PUBLIC_API_BASE_URL/deadlock/analysis/recommendation-value-v6-live/status" \
+            -o diagnosis/v6-status.json || true
+          curl -sS --max-time 20 -D diagnosis/traversal-status.headers \
+            "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations/status" \
+            -o diagnosis/traversal-status.json || true
+          curl -sS --max-time 20 -D diagnosis/traversal-snapshots.headers \
+            "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations" \
+            -o diagnosis/traversal-snapshots.json || true
+          curl -sS --max-time 20 -D diagnosis/live-states.headers \
+            "$PUBLIC_API_BASE_URL/deadlock/live/states" \
+            -o diagnosis/live-states.json || true
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --limit 5 \
+            --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url \
+            > diagnosis/deploy-runs.json || true
+          latest_run_id="$(jq -r '.[0].databaseId // empty' diagnosis/deploy-runs.json 2>/dev/null || true)"
+          if [ -n "$latest_run_id" ]; then
+            gh run view "$latest_run_id" --repo "$GITHUB_REPOSITORY" \
+              --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url,jobs \
+              > diagnosis/deploy-run.json || true
+            gh run view "$latest_run_id" --repo "$GITHUB_REPOSITORY" --log \
+              > diagnosis/deploy.log 2>&1 || true
+          fi
+          for file in diagnosis/*.json; do
+            echo "=== $file ==="
+            cat "$file" || true
+            echo
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6-refreshing-diagnosis-${{ github.sha }}
+          path: diagnosis
+          retention-days: 1
