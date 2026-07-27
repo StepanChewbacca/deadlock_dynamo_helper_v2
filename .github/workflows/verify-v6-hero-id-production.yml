@@ -1,0 +1,137 @@
+name: Verify V6 Hero ID Production
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event.pull_request.head.ref == 'agent/verify-v6-hero-id-production'
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for deployment and collect live diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_commit='0d38673f1bddcfbe4c6817685efa1a23f771d2fa'
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          output_dir="$GITHUB_WORKSPACE/v6-hero-id-production-verification"
+          mkdir -p "$output_dir"
+
+          for attempt in $(seq 1 90); do
+            deployed_commit="$(cd "$deploy_dir" && git rev-parse HEAD 2>/dev/null || true)"
+            container_id="$(cd "$deploy_dir" && sudo docker compose ps -q api 2>/dev/null || true)"
+            health='missing'
+            if [ -n "$container_id" ]; then
+              health="$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id" 2>/dev/null || true)"
+            fi
+            echo "deployment check $attempt/90: commit=$deployed_commit health=$health"
+            if [ "$deployed_commit" = "$expected_commit" ] && [ "$health" = 'healthy' ]; then
+              break
+            fi
+            if [ "$attempt" = '90' ]; then
+              echo "Deployment did not reach expected commit in time." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          printf '%s\n' "$deployed_commit" > "$output_dir/deployed-commit.txt"
+          cd "$deploy_dir"
+
+          for endpoint in \
+            deadlock/analysis/recommendation-value-v6-live/status \
+            deadlock/live/build-recommendations/status \
+            deadlock/live/build-recommendations \
+            deadlock/live/states; do
+            file_name="$(echo "$endpoint" | tr '/' '_').json"
+            curl --fail --show-error --silent --max-time 30 \
+              "http://127.0.0.1:3000/$endpoint" \
+              > "$output_dir/$file_name"
+          done
+
+          sudo docker compose logs --no-color --since=30m --tail=30000 api \
+            > "$output_dir/api-30m.log" 2>&1 || true
+
+          OUTPUT_DIR="$output_dir" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ['OUTPUT_DIR'])
+          states = json.loads((output_dir / 'deadlock_live_states.json').read_text())
+          recommendations = json.loads(
+              (output_dir / 'deadlock_live_build-recommendations.json').read_text()
+          )
+
+          def timestamp(value):
+              if not isinstance(value, dict):
+                  return ''
+              return str(value.get('lastUpdatedAt') or value.get('lastObservedAt') or '')
+
+          newest_state = max(states, key=timestamp) if states else {}
+          match_id = str(newest_state.get('matchId') or '')
+          players = newest_state.get('playersBySteamId') or {}
+          local_player = next(
+              (player for player in players.values() if player.get('isLocal') is True),
+              {},
+          )
+          match_recommendations = [
+              row for row in recommendations
+              if str(row.get('matchId') or '') == match_id
+          ]
+          latest_recommendation = (
+              max(match_recommendations, key=timestamp)
+              if match_recommendations
+              else {}
+          )
+
+          decisions = []
+          for line in (output_dir / 'api-30m.log').read_text(errors='replace').splitlines():
+              if 'recommendation_value_v6_live_decision' not in line:
+                  continue
+              start = line.find('{')
+              if start < 0:
+                  continue
+              try:
+                  value = json.loads(line[start:])
+              except json.JSONDecodeError:
+                  continue
+              if value.get('event') == 'recommendation_value_v6_live_decision':
+                  decisions.append(value)
+
+          match_decisions = [
+              row for row in decisions
+              if str(row.get('matchId') or '') == match_id
+          ]
+          summary = {
+              'matchId': match_id,
+              'localPlayer': {
+                  'heroId': local_player.get('heroId'),
+                  'heroName': local_player.get('heroName'),
+                  'level': local_player.get('level'),
+                  'souls': local_player.get('souls'),
+                  'items': local_player.get('items'),
+              },
+              'latestRecommendation': latest_recommendation,
+              'latestDecision': match_decisions[-1] if match_decisions else {},
+              'recentDecisionCountForMatch': len(match_decisions),
+          }
+          (output_dir / 'summary.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2)
+          )
+          print(json.dumps(summary, ensure_ascii=False))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6-hero-id-production-verification-${{ github.sha }}
+          path: v6-hero-id-production-verification
+          retention-days: 1
