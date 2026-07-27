@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "benchmarkVersion": "RECOMMENDATION_MODEL_BENCHMARK_V1",
+  "sourceArchiveSha256": "e19becb1c1968ffcdcc725fb844b624c02b5d2f8e7a1a79073b209e34b4caf12",
+  "productionBaselineCommit": "251660fc3dd541925b8ade9c55d216a91a975d85",
+  "dataset": {
+    "version": "RECOMMENDATION_DECISION_DATASET_V5_3",
+    "sha256": "b63ac98c81459eea192a04121924fa1ea86b6c795bf586ed109634302e5ccf77",
+    "upstreamDatasetV4Sha256": "8f5574002225123f7244cf4da0535a10ce5ab694a56ff18625bbbcb826813b5d",
+    "splitDescriptorSha256": "0999966582be2cae967a70d6c6a80f8dbbf88b92355c711055b522ea97932ba6"
+  },
+  "behavioralV4": {
+    "modelSha256": "a0c8c0bb609f49c1b938f9cb1609ce1e0e68454e0ee0dcd32c43694d68b0ebf4"
+  },
+  "v6Winner": {
+    "id": "coarse-s10-a0p1-m10-w025-short-only-v2",
+    "fingerprint": "3dbbdadce6b71c6ba247f07f96859582ea4ae37f953a1fdc416b03c061bce8a5",
+    "modelSha256": "799803f4882ca2ece436ab1087c41641713377f8a33f9bab0f0f4636a381938e",
+    "predictionSha256": "22936a9e9833c94883b2924d76d06e26a8c718a39882c7514142dcf95b209c77"
+  },
+  "v7": {
+    "modelVersion": "RECOMMENDATION_VALUE_V7_TABULAR_CANDIDATE_SCORER_1",
+    "modelSha256": "72e9f5826418ce9fa33f7fe1e2d867fa6d2ff7bf132f5d85654ca66b7d4b76cc",
+    "predictionSha256": "6b4900b3c239aa89cd092cd0a7acdbe5b128f99f673f2d4764bcc793e2304c36",
+    "evaluationSha256": "c8885525939bdce225a18147d400e83eaf2c4839c8229f25a67528da2675d924",
+    "auditSha256": "ad5f0a6a8546d76a43cbd1f48920a3d1418789a9b040d3107624661f26283170"
+  }
+}
