@@ -43,6 +43,9 @@ jobs:
             python3 .github/scripts/apply-v6-ranking-availability-hotfix.py
           fi
 
+      - name: Build shared workspace
+        run: yarn workspace @deadlock-live-probe/shared build
+
       - name: Build API
         id: api-build
         continue-on-error: true
