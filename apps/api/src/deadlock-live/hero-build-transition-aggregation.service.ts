@@ -275,7 +275,7 @@ export class HeroBuildTransitionAggregationService implements OnModuleInit {
     });
   }
 
-  async ensureReady(): Promise<void> {
+  async ensureReady(_heroId?: number): Promise<void> {
     let sourceStatus = this.recentMatchesWindowService.getStatus();
     if (!sourceStatus.lastRefreshedAt) {
       sourceStatus = await this.recentMatchesWindowService.refresh();

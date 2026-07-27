@@ -28,6 +28,7 @@ import { RecommendationDecisionTelemetryService } from './recommendation-decisio
 export const LIVE_BUILD_RECOMMENDATION_TIME_BUCKET_S = 120;
 export const LIVE_BUILD_RECOMMENDATION_LIMIT = 5;
 export const LIVE_BUILD_RECOMMENDATION_MAX_TRACKED_MATCHES = 32;
+export const LIVE_BUILD_RECOMMENDATION_TIMEOUT_MS = 30_000;
 
 export type LiveBuildRecommendationTraversalState =
   | 'WAITING_FOR_LOCAL_PLAYER'
@@ -373,8 +374,9 @@ export class LiveBuildRecommendationTraversalService {
           gameTimeS: input.gameTimeS,
           limit: HERO_BUILD_MAX_RECOMMENDATION_LIMIT,
         };
-        const recommendation = await this.heroBuildRecommendationService.recommend(
-          recommendationRequest,
+        const recommendation = await withTimeout(
+          this.heroBuildRecommendationService.recommend(recommendationRequest),
+          LIVE_BUILD_RECOMMENDATION_TIMEOUT_MS,
         );
         const filtered = filterHeroBuildRecommendationAlternatives(recommendation, {
           limit: LIVE_BUILD_RECOMMENDATION_LIMIT,
@@ -441,6 +443,10 @@ export class LiveBuildRecommendationTraversalService {
           lastUpdatedAt: new Date().toISOString(),
           lastError: message,
         };
+        if (message === createRecommendationTimeoutMessage()) {
+          runtime.desiredInput = undefined;
+          runtime.lastAttemptedKey = undefined;
+        }
         this.logger.warn(
           `Live build recommendation traversal failed for match ${input.matchId}: ${message}`,
         );
@@ -750,6 +756,29 @@ function cloneSnapshot(
   };
 }
 
+
+function createRecommendationTimeoutMessage(): string {
+  return `Recommendation Value V6 candidate generation timed out after ${LIVE_BUILD_RECOMMENDATION_TIMEOUT_MS} ms.`;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(createRecommendationTimeoutMessage()));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function sameNumberArrays(left: readonly number[], right: readonly number[]): boolean {
   return (
