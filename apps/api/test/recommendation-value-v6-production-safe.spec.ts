@@ -1,5 +1,6 @@
 import type { HeroBuildContextualV3LiveService } from '../src/deadlock-live/hero-build-contextual-v3-live.service';
 import {
+  canonicalHeroId,
   HERO_ID_ALIASES,
   resolveRecommendationValueV6HeroId,
   resolveValveHeroIdFromGep,
@@ -46,15 +47,16 @@ describe('Recommendation Value V6 production safety', () => {
     expect(recommendationValueV6SupportType(1, 3)).toBe('DIRECT_ACTION');
   });
 
-  it('maps every supported hero alias into the item-history namespace', () => {
-    for (const [canonicalIdText, aliases] of Object.entries(HERO_ID_ALIASES)) {
-      const canonicalId = Number(canonicalIdText);
-      const expectedValueHeroId = resolveValveHeroIdFromGep(canonicalId);
-      for (const alias of aliases) {
-        expect(resolveRecommendationValueV6HeroId(alias)).toBe(
-          expectedValueHeroId,
-        );
-      }
+  it('maps every supported hero id into the item-history namespace', () => {
+    const supportedHeroIds = new Set<number>([
+      ...Object.keys(HERO_ID_ALIASES).map(Number),
+      ...Object.values(HERO_ID_ALIASES).flat(),
+    ]);
+
+    for (const heroId of supportedHeroIds) {
+      expect(resolveRecommendationValueV6HeroId(heroId)).toBe(
+        resolveValveHeroIdFromGep(canonicalHeroId(heroId)),
+      );
     }
   });
 
@@ -66,7 +68,7 @@ describe('Recommendation Value V6 production safety', () => {
     [2, 2, 2],
     [3, 3, 3],
   ])(
-    'uses candidate hero %i and V6 hero %i for requested hero %i',
+    'uses requested hero %i, candidate hero %i and V6 hero %i',
     async (requestedHeroId, candidateHeroId, valueHeroId) => {
       const transitionService = createTransitionService();
       const recipeService = {
