@@ -21,8 +21,8 @@ function decision(
     team: 0,
     gameTimeS: 300,
     phase: 'EARLY',
-    inventoryBeforeStateKey: '1001:1',
-    inventoryAfterStateKey: '1001:1|1002:1',
+    inventoryBeforeStateKey: '1001x1',
+    inventoryAfterStateKey: '1001x1|1002x1',
     previousActionKeys: ['BUY:1001'],
     buildPrefixKey: 'BUY:1001',
     alliedHeroIds: [1, 2, 3, 4, 5, 6],
@@ -58,7 +58,7 @@ function policy(): RecommendationSerializedHeroBuildPolicy {
     transitionCount: 20,
     states: [
       {
-        stateKey: '1001:1',
+        stateKey: '1001x1',
         observationCount: 20,
         nextActionCount: 2,
         nextActions: [
@@ -71,7 +71,7 @@ function policy(): RecommendationSerializedHeroBuildPolicy {
             averageGameTimeS: 320,
             afterStates: [
               {
-                afterStateKey: '1001:1|1002:1',
+                afterStateKey: '1001x1|1002x1',
                 count: 12,
                 probability: 1,
               },
@@ -86,7 +86,7 @@ function policy(): RecommendationSerializedHeroBuildPolicy {
             averageGameTimeS: 340,
             afterStates: [
               {
-                afterStateKey: '1001:1|1003:1',
+                afterStateKey: '1001x1|1003x1',
                 count: 8,
                 probability: 1,
               },
