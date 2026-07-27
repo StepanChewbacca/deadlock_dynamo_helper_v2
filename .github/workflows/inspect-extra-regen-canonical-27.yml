@@ -1,0 +1,83 @@
+name: Inspect Extra Regen Canonical Hero Collision
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare hero 66 and canonical hero 27 model support
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_dir="$GITHUB_WORKSPACE/extra-regen-canonical-27"
+          mkdir -p "$output_dir"
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_file="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727/model.json"
+
+          sudo MODEL_FILE="$model_file" OUTPUT_FILE="$output_dir/summary.json" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          model = json.loads(Path(os.environ['MODEL_FILE']).read_text())
+          counts = model['counts']['action']
+          candidates = [
+              'UPGRADE:2064029594',
+              'BUY:968099481',
+              'UPGRADE:709540378',
+              'BUY:3776945997',
+              'BUY:1439347412',
+              'BUY:3977876567',
+              'UPGRADE:2566692615',
+              'BUY:395944548',
+          ]
+          inventory = '1009965641x1|2829638276x1|3077079169x1'
+          previous = 'BUY:2829638276>BUY:1009965641>BUY:3077079169'
+
+          def obs(key):
+              value = counts.get(key)
+              return int(value.get('observations', 0) or 0) if isinstance(value, dict) else 0
+
+          result = {}
+          for hero_id in (66, 27):
+              hero_result = {}
+              for action in candidates:
+                  keys = [
+                      f'HERO_TIME_ACTION:{hero_id}|2|{action}',
+                      f'HERO_TIME_INVENTORY_ACTION:{hero_id}|2|{inventory}|{action}',
+                      f'HERO_TIME_PREVIOUS_ACTION:{hero_id}|2|{previous}|{action}',
+                      f'HERO_TEAM_ECONOMY_ACTION:{hero_id}|EVEN|{action}',
+                  ]
+                  rows = [{'key': key, 'observations': obs(key)} for key in keys]
+                  hero_result[action] = {
+                      'supported': any(row['observations'] >= 10 for row in rows),
+                      'keys': rows,
+                  }
+              result[str(hero_id)] = {
+                  'supportedCandidateCount': sum(
+                      1 for row in hero_result.values() if row['supported']
+                  ),
+                  'candidates': hero_result,
+              }
+
+          Path(os.environ['OUTPUT_FILE']).write_text(
+              json.dumps(result, ensure_ascii=False, indent=2)
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extra-regen-canonical-27-${{ github.sha }}
+          path: extra-regen-canonical-27
+          retention-days: 1
