@@ -1,0 +1,60 @@
+name: V6 CI Diagnostics
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn install --frozen-lockfile --ignore-engines 2>&1 | tee "$RUNNER_TEMP/install.log"
+      - name: Build dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            yarn workspace @deadlock-live-probe/shared build
+            yarn workspace @deadlock-live-probe/build-domain build
+          } 2>&1 | tee "$RUNNER_TEMP/dependency-build.log"
+      - name: Build API
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/api build 2>&1 | tee "$RUNNER_TEMP/api-build.log"
+      - name: Test V6 integration
+        shell: bash
+        run: |
+          set -o pipefail
+          yarn workspace @deadlock-live-probe/api test --runInBand \
+            recommendation-value-v6-features.spec.ts \
+            recommendation-value-v6-live.spec.ts \
+            recommendation-value-v6-telemetry.spec.ts \
+            2>&1 | tee "$RUNNER_TEMP/v6-tests.log"
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-ci-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/install.log
+            ${{ runner.temp }}/dependency-build.log
+            ${{ runner.temp }}/api-build.log
+            ${{ runner.temp }}/v6-tests.log
+          if-no-files-found: warn
+          retention-days: 3
