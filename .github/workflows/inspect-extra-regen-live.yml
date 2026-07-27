@@ -1,0 +1,180 @@
+name: Inspect Extra Regen Live Fallback
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect live Extra Regen diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir=/home/ubuntu/apps/deadlock_dynamo_helper
+          output_dir="$GITHUB_WORKSPACE/extra-regen-live-inspection"
+          mkdir -p "$output_dir"
+          cd "$deploy_dir"
+
+          git rev-parse HEAD > "$output_dir/deployed-commit.txt" || true
+          sudo docker compose ps > "$output_dir/docker-compose-ps.txt" 2>&1 || true
+
+          for endpoint in \
+            deadlock/analysis/recommendation-value-v6-live/status \
+            deadlock/live/build-recommendations/status \
+            deadlock/live/build-recommendations \
+            deadlock/live/states; do
+            file_name="$(echo "$endpoint" | tr '/' '_').json"
+            curl --fail --show-error --silent --max-time 30 \
+              "http://127.0.0.1:3000/$endpoint" \
+              > "$output_dir/$file_name" || true
+          done
+
+          sudo docker compose logs --no-color --since=45m --tail=20000 api \
+            > "$output_dir/api-45m.log" 2>&1 || true
+
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_file="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727/model.json"
+          sudo sha256sum "$model_file" > "$output_dir/model-sha256.txt"
+
+          sudo MODEL_FILE="$model_file" OUTPUT_DIR="$output_dir" python3 - <<'PY'
+          import json
+          import math
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          output_dir = Path(os.environ['OUTPUT_DIR'])
+          states = json.loads((output_dir / 'deadlock_live_states.json').read_text())
+          recommendations = json.loads((output_dir / 'deadlock_live_build-recommendations.json').read_text())
+          model = json.loads(Path(os.environ['MODEL_FILE']).read_text())
+          action_counts = model.get('counts', {}).get('action', {})
+
+          def timestamp(value):
+              if not isinstance(value, dict):
+                  return ''
+              return str(value.get('lastUpdatedAt') or value.get('lastObservedAt') or '')
+
+          newest_state = max(states, key=timestamp) if states else {}
+          match_id = str(newest_state.get('matchId') or '')
+          players = newest_state.get('playersBySteamId') or {}
+          local_player = next((p for p in players.values() if p.get('isLocal') is True), {})
+          local_items = local_player.get('items') or []
+          extra_regen_items = [
+              item for item in local_items
+              if 'extra regen' in str(item.get('name') or '').lower()
+          ]
+          extra_regen_ids = sorted({int(item['id']) for item in extra_regen_items if isinstance(item.get('id'), int)})
+
+          match_recommendations = [row for row in recommendations if str(row.get('matchId') or '') == match_id]
+          latest_recommendation = max(match_recommendations, key=timestamp) if match_recommendations else {}
+
+          decisions = []
+          log_file = output_dir / 'api-45m.log'
+          for line in log_file.read_text(errors='replace').splitlines():
+              if 'recommendation_value_v6_live_decision' not in line:
+                  continue
+              start = line.find('{')
+              if start < 0:
+                  continue
+              try:
+                  value = json.loads(line[start:])
+              except json.JSONDecodeError:
+                  continue
+              if value.get('event') == 'recommendation_value_v6_live_decision':
+                  decisions.append(value)
+
+          match_decisions = [row for row in decisions if str(row.get('matchId') or '') == match_id]
+          recent_decisions = match_decisions[-100:]
+          latest_decision = recent_decisions[-1] if recent_decisions else {}
+
+          def observation(record):
+              return int(record.get('observations', 0) or 0) if isinstance(record, dict) else 0
+
+          def keys_for_action(action_key):
+              suffix = '|' + action_key
+              rows = []
+              for key, value in action_counts.items():
+                  if key.endswith(suffix):
+                      rows.append({
+                          'key': key,
+                          'observations': observation(value),
+                          'totalWeight': value.get('totalWeight') if isinstance(value, dict) else None,
+                      })
+              rows.sort(key=lambda row: (-row['observations'], row['key']))
+              return rows
+
+          candidate_keys = latest_decision.get('candidateSet') or []
+          candidate_model_coverage = {}
+          for action_key in candidate_keys:
+              rows = keys_for_action(action_key)
+              candidate_model_coverage[action_key] = {
+                  'matchingModelKeyCount': len(rows),
+                  'matchingSupportedAtMin10': sum(1 for row in rows if row['observations'] >= 10),
+                  'topMatchingKeys': rows[:20],
+              }
+
+          extra_regen_model_coverage = {}
+          for item_id in extra_regen_ids:
+              for action_type in ('BUY', 'UPGRADE', 'SELL'):
+                  action_key = f'{action_type}:{item_id}'
+                  rows = keys_for_action(action_key)
+                  extra_regen_model_coverage[action_key] = {
+                      'matchingModelKeyCount': len(rows),
+                      'matchingSupportedAtMin10': sum(1 for row in rows if row['observations'] >= 10),
+                      'topMatchingKeys': rows[:50],
+                  }
+
+          fallback_counts = Counter(
+              str(row.get('fallbackReason'))
+              for row in recent_decisions
+              if row.get('fallbackReason')
+          )
+          successful = sum(1 for row in recent_decisions if not row.get('fallbackReason'))
+
+          summary = {
+              'capturedAt': newest_state.get('lastUpdatedAt'),
+              'matchId': match_id,
+              'localPlayer': {
+                  'steamId': local_player.get('steamId'),
+                  'playerName': local_player.get('playerName'),
+                  'heroId': local_player.get('heroId'),
+                  'heroName': local_player.get('heroName'),
+                  'teamId': local_player.get('teamId'),
+                  'level': local_player.get('level'),
+                  'souls': local_player.get('souls'),
+                  'items': local_items,
+              },
+              'extraRegenItems': extra_regen_items,
+              'extraRegenIds': extra_regen_ids,
+              'latestRecommendation': latest_recommendation,
+              'recentDecisionCount': len(recent_decisions),
+              'successfulV6DecisionCount': successful,
+              'fallbackDecisionCount': len(recent_decisions) - successful,
+              'fallbackReasonCounts': dict(fallback_counts.most_common()),
+              'latestDecision': latest_decision,
+              'recentDecisions': recent_decisions,
+              'candidateModelCoverage': candidate_model_coverage,
+              'extraRegenModelCoverage': extra_regen_model_coverage,
+              'modelOptions': model.get('options'),
+              'modelVersion': model.get('modelVersion'),
+          }
+          (output_dir / 'extra-regen-summary.json').write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2)
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extra-regen-live-inspection-${{ github.sha }}
+          path: extra-regen-live-inspection
+          retention-days: 1
