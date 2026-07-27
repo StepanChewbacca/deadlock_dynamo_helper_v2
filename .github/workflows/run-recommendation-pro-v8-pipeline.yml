@@ -1,0 +1,119 @@
+name: Run Recommendation Pro V8 Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Pipeline mode
+        required: true
+        default: diagnostic
+        type: choice
+        options:
+          - diagnostic
+          - full
+      max_rows:
+        description: Optional row limit, empty uses the mode default
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: recommendation-pro-v8-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-run:
+    runs-on: self-hosted
+    timeout-minutes: 2400
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate source and storage
+        id: paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          VOLUME_ROOT=$(sudo docker volume inspect \
+            deadlock_dynamo_helper_deadlock-storage \
+            --format '{{ .Mountpoint }}')
+          SOURCE_DIR="$VOLUME_ROOT/recommendation-decision-dataset-v5-full-crawler-db-timeline-20260726"
+          OUTPUT_DIR="$VOLUME_ROOT/recommendation-pro-v8-${{ github.run_id }}"
+          BASELINE_EVALUATION="$VOLUME_ROOT/recommendation-value-v6-prior-sweep-db-timeline-20260726/coarse-s10-a0p1-m10-w025-short-only-v2-3dbbdadce6b7/evaluation.json"
+
+          sudo test -f "$SOURCE_DIR/manifest.json"
+          sudo test -f "$SOURCE_DIR/audit.json"
+          sudo mkdir -p "$OUTPUT_DIR"
+          sudo chown -R "$(id -u):$(id -g)" "$OUTPUT_DIR"
+
+          echo "source_dir=$SOURCE_DIR" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
+          if sudo test -f "$BASELINE_EVALUATION"; then
+            echo "baseline_evaluation=$BASELINE_EVALUATION" >> "$GITHUB_OUTPUT"
+          else
+            echo "baseline_evaluation=" >> "$GITHUB_OUTPUT"
+          fi
+
+          df -h "$VOLUME_ROOT"
+          sudo docker compose ps
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Test data isolation
+        run: yarn workspace @deadlock-live-probe/api test --runTestsByPath test/recommendation-data-provenance.spec.ts
+
+      - name: Validate pipeline syntax
+        run: node --check scripts/run-recommendation-pro-v8-pipeline.mjs
+
+      - name: Run pipeline
+        shell: bash
+        env:
+          SOURCE_DIR: ${{ steps.paths.outputs.source_dir }}
+          OUTPUT_DIR: ${{ steps.paths.outputs.output_dir }}
+          BASELINE_EVALUATION: ${{ steps.paths.outputs.baseline_evaluation }}
+          MODE: ${{ inputs.mode }}
+          MAX_ROWS: ${{ inputs.max_rows }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --source-dir "$SOURCE_DIR"
+            --output-dir "$OUTPUT_DIR"
+            --mode "$MODE"
+          )
+          if [[ -n "$MAX_ROWS" ]]; then
+            ARGS+=(--max-rows "$MAX_ROWS")
+          fi
+          if [[ -n "$BASELINE_EVALUATION" ]]; then
+            ARGS+=(--baseline-evaluation "$BASELINE_EVALUATION")
+          fi
+          node scripts/run-recommendation-pro-v8-pipeline.mjs "${ARGS[@]}"
+
+      - name: Verify reports
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.paths.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+          test -f "$OUTPUT_DIR/10-dataset-audit.json"
+          test -f "$OUTPUT_DIR/30-behavioral-v5-report.json"
+          test -f "$OUTPUT_DIR/40-value-v8-report.json"
+          test -f "$OUTPUT_DIR/41-value-v8-model.json"
+          test -f "$OUTPUT_DIR/50-policy-v8-report.json"
+          test -f "$OUTPUT_DIR/99-summary.json"
+          jq '.releaseGate' "$OUTPUT_DIR/99-summary.json"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-pro-v8-${{ github.run_id }}
+          path: ${{ steps.paths.outputs.output_dir }}
+          if-no-files-found: warn
+          retention-days: 14
