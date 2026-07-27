@@ -1,0 +1,99 @@
+name: Inspect Extra Regen Captured Context
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect captured model keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_dir="$GITHUB_WORKSPACE/extra-regen-241"
+          mkdir -p "$output_dir"
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_file="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727/model.json"
+
+          sudo MODEL_FILE="$model_file" OUTPUT_FILE="$output_dir/summary.json" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          model = json.loads(Path(os.environ['MODEL_FILE']).read_text())
+          action_counts = model['counts']['action']
+          hero_id = 66
+          time_bucket = 2
+          inventory_key = '1009965641x1|2829638276x1|3077079169x1'
+          previous_tail = 'BUY:2829638276>BUY:1009965641>BUY:3077079169'
+          economy_band = 'EVEN'
+          candidates = [
+              'UPGRADE:2064029594',
+              'BUY:968099481',
+              'UPGRADE:709540378',
+              'BUY:3776945997',
+              'BUY:1439347412',
+              'BUY:3977876567',
+              'UPGRADE:2566692615',
+              'BUY:395944548',
+          ]
+
+          def observations(key):
+              value = action_counts.get(key)
+              return int(value.get('observations', 0) or 0) if isinstance(value, dict) else 0
+
+          coverage = {}
+          for action_key in candidates:
+              keys = [
+                  f'HERO_TIME_ACTION:{hero_id}|{time_bucket}|{action_key}',
+                  f'HERO_TIME_INVENTORY_ACTION:{hero_id}|{time_bucket}|{inventory_key}|{action_key}',
+                  f'HERO_TIME_PREVIOUS_ACTION:{hero_id}|{time_bucket}|{previous_tail}|{action_key}',
+                  f'HERO_TEAM_ECONOMY_ACTION:{hero_id}|{economy_band}|{action_key}',
+              ]
+              rows = [{'key': key, 'observations': observations(key)} for key in keys]
+              coverage[action_key] = {
+                  'directSupportedKeyCount': sum(1 for row in rows if row['observations'] >= 10),
+                  'keys': rows,
+              }
+
+          extra_regen_key = f'HERO_TIME_ACTION:{hero_id}|{time_bucket}|BUY:2829638276'
+          result = {
+              'capturedContext': {
+                  'matchId': '95977754',
+                  'gameTimeSeconds': 241,
+                  'heroId': hero_id,
+                  'timeBucket': time_bucket,
+                  'inventoryStateKey': inventory_key,
+                  'previousActionTail': previous_tail,
+                  'teamEconomyBand': economy_band,
+              },
+              'candidateCoverage': coverage,
+              'supportedCandidateCount': sum(
+                  1 for row in coverage.values() if row['directSupportedKeyCount'] > 0
+              ),
+              'extraRegenPurchaseKey': {
+                  'key': extra_regen_key,
+                  'observations': observations(extra_regen_key),
+              },
+              'minimumObservations': model['options']['minimumObservations'],
+          }
+          Path(os.environ['OUTPUT_FILE']).write_text(
+              json.dumps(result, ensure_ascii=False, indent=2)
+          )
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extra-regen-241-${{ github.sha }}
+          path: extra-regen-241
+          retention-days: 1
