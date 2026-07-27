@@ -16,39 +16,77 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       PUBLIC_API_BASE_URL: https://aboba-telegramovich.duckdns.org
+      EXPECTED_MAIN_SHA: 66e06faeeab1decbd4fee2ef875a30a2754935d4
     steps:
       - uses: actions/checkout@v4
-      - name: Collect production diagnostics
+      - name: Wait for hotfix deployment
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           mkdir -p diagnosis
-          curl -sS --max-time 20 -D diagnosis/v6-status.headers \
+          for attempt in $(seq 1 60); do
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --limit 5 \
+              --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url \
+              > diagnosis/deploy-runs.json
+            run_id="$(jq -r --arg sha "$EXPECTED_MAIN_SHA" '.[] | select(.headSha == $sha) | .databaseId' diagnosis/deploy-runs.json | head -n 1)"
+            if [ -n "$run_id" ]; then
+              status="$(jq -r --argjson id "$run_id" '.[] | select(.databaseId == $id) | .status' diagnosis/deploy-runs.json)"
+              conclusion="$(jq -r --argjson id "$run_id" '.[] | select(.databaseId == $id) | .conclusion // ""' diagnosis/deploy-runs.json)"
+              echo "Deploy $run_id: $status $conclusion ($attempt/60)"
+              if [ "$status" = "completed" ]; then
+                test "$conclusion" = "success"
+                gh run view "$run_id" --repo "$GITHUB_REPOSITORY" \
+                  --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url,jobs \
+                  > diagnosis/deploy-run.json
+                gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --log \
+                  > diagnosis/deploy.log 2>&1 || true
+                exit 0
+              fi
+            else
+              echo "Hotfix deploy run not visible yet ($attempt/60)."
+            fi
+            sleep 5
+          done
+          exit 1
+      - name: Collect production state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --fail --max-time 20 \
             "$PUBLIC_API_BASE_URL/deadlock/analysis/recommendation-value-v6-live/status" \
-            -o diagnosis/v6-status.json || true
-          curl -sS --max-time 20 -D diagnosis/traversal-status.headers \
+            -o diagnosis/v6-status.json
+          curl -sS --fail --max-time 20 \
             "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations/status" \
-            -o diagnosis/traversal-status.json || true
-          curl -sS --max-time 20 -D diagnosis/traversal-snapshots.headers \
+            -o diagnosis/traversal-status.json
+          curl -sS --fail --max-time 20 \
             "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations" \
-            -o diagnosis/traversal-snapshots.json || true
-          curl -sS --max-time 20 -D diagnosis/live-states.headers \
-            "$PUBLIC_API_BASE_URL/deadlock/live/states" \
-            -o diagnosis/live-states.json || true
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --limit 5 \
-            --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url \
-            > diagnosis/deploy-runs.json || true
-          latest_run_id="$(jq -r '.[0].databaseId // empty' diagnosis/deploy-runs.json 2>/dev/null || true)"
-          if [ -n "$latest_run_id" ]; then
-            gh run view "$latest_run_id" --repo "$GITHUB_REPOSITORY" \
-              --json databaseId,status,conclusion,headSha,event,createdAt,updatedAt,url,jobs \
-              > diagnosis/deploy-run.json || true
-            gh run view "$latest_run_id" --repo "$GITHUB_REPOSITORY" --log \
-              > diagnosis/deploy.log 2>&1 || true
-          fi
+            -o diagnosis/traversal-snapshots.json
+          curl -sS --fail --max-time 20 \
+            "$PUBLIC_API_BASE_URL/deadlock/analysis/build-policy/status" \
+            -o diagnosis/build-policy-status.json
+          for attempt in $(seq 1 18); do
+            state="$(jq -r '.[0].state // "NONE"' diagnosis/traversal-snapshots.json)"
+            echo "Traversal state: $state ($attempt/18)"
+            if [ "$state" = "READY" ] || [ "$state" = "ERROR" ]; then
+              break
+            fi
+            sleep 5
+            curl -sS --fail --max-time 20 \
+              "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations" \
+              -o diagnosis/traversal-snapshots.json
+            curl -sS --fail --max-time 20 \
+              "$PUBLIC_API_BASE_URL/deadlock/live/build-recommendations/status" \
+              -o diagnosis/traversal-status.json
+            curl -sS --fail --max-time 20 \
+              "$PUBLIC_API_BASE_URL/deadlock/analysis/recommendation-value-v6-live/status" \
+              -o diagnosis/v6-status.json
+            curl -sS --fail --max-time 20 \
+              "$PUBLIC_API_BASE_URL/deadlock/analysis/build-policy/status" \
+              -o diagnosis/build-policy-status.json
+          done
           for file in diagnosis/*.json; do
             echo "=== $file ==="
-            cat "$file" || true
+            cat "$file"
             echo
           done
       - uses: actions/upload-artifact@v4
