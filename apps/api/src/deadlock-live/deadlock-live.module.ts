@@ -74,18 +74,19 @@ import { RecentMatchRosterRepairService } from './recent-match-roster-repair.ser
 import { RecentMatchesWindowController } from './recent-matches-window.controller';
 import { RecentMatchesWindowService } from './recent-matches-window.service';
 import { RecommendationBehavioralV4TrainingController } from './recommendation-behavioral-v4-training.controller';
-import { RecommendationPolicyV4EvaluationController } from './recommendation-policy-v4-evaluation.controller';
-import { RecommendationValueV4TrainingController } from './recommendation-value-v4-training.controller';
-import { RecommendationDecisionDatasetV4HistoricalBootstrapController } from './recommendation-decision-dataset-v4-historical-bootstrap.controller';
-import { RecommendationDecisionDatasetV4Controller } from './recommendation-decision-dataset-v4.controller';
-import { RecommendationDecisionTelemetryController } from './recommendation-decision-telemetry.controller';
 import { RecommendationBehavioralV4TrainingService } from './recommendation-behavioral-v4-training.service';
-import { RecommendationPolicyV4EvaluationService } from './recommendation-policy-v4-evaluation.service';
-import { RecommendationValueV4TrainingService } from './recommendation-value-v4-training.service';
+import { RecommendationDecisionDatasetV4HistoricalBootstrapController } from './recommendation-decision-dataset-v4-historical-bootstrap.controller';
 import { RecommendationDecisionDatasetV4HistoricalBootstrapService } from './recommendation-decision-dataset-v4-historical-bootstrap.service';
+import { RecommendationDecisionDatasetV4Controller } from './recommendation-decision-dataset-v4.controller';
 import { RecommendationDecisionDatasetV4Service } from './recommendation-decision-dataset-v4.service';
+import { RecommendationDecisionTelemetryController } from './recommendation-decision-telemetry.controller';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 import { RecommendationOutcomeLinkerService } from './recommendation-outcome-linker.service';
+import { RecommendationPolicyV4EvaluationController } from './recommendation-policy-v4-evaluation.controller';
+import { RecommendationPolicyV4EvaluationService } from './recommendation-policy-v4-evaluation.service';
+import { RecommendationValueV4TrainingController } from './recommendation-value-v4-training.controller';
+import { RecommendationValueV4TrainingService } from './recommendation-value-v4-training.service';
+import { RecommendationValueV6TelemetryService } from './recommendation-value-v6-telemetry.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 import { ReferenceDataController } from './reference-data.controller';
 import { ReferenceDataImportService } from './reference-data-import.service';
@@ -168,7 +169,10 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     HeroBuildContextualV3CandidateEvaluationService,
     HeroBuildContextualV3FinalTestService,
     HeroBuildContextualV3LiveService,
-    RecommendationDecisionTelemetryService,
+    {
+      provide: RecommendationDecisionTelemetryService,
+      useExisting: RecommendationValueV6TelemetryService,
+    },
     RecommendationDecisionDatasetV4Service,
     RecommendationDecisionDatasetV4HistoricalBootstrapService,
     RecommendationBehavioralV4TrainingService,

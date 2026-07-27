@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import type {
+  MinimalMatchState,
+  MinimalPlayerState,
+} from '@deadlock-live-probe/shared';
 import type { HeroBuildContextualRecommendationRequest } from './contextual-hero-build-recommendation.service';
 import {
   ContextualV3LiveRecommendationResponse,
@@ -10,14 +14,23 @@ import {
   HeroBuildRecommendationResponse,
   HeroBuildRecommendationService,
 } from './hero-build-recommendation.service';
-import { HeroBuildTransitionAggregationService } from './hero-build-transition-aggregation.service';
+import {
+  createInventoryStateKeyFromItemIds,
+  HeroBuildTransitionAggregationService,
+} from './hero-build-transition-aggregation.service';
+import { LiveMatchStateService } from './live-match-state.service';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
+import {
+  RecommendationValueV6LiveService,
+  type RecommendationValueV6LiveContext,
+} from './recommendation-value-v6-live.service';
 
 const MODE_ENV = 'DEADLOCK_CONTEXTUAL_V3_LIVE_MODE';
 const SHADOW_SAMPLE_RATE_ENV = 'DEADLOCK_CONTEXTUAL_V3_SHADOW_SAMPLE_RATE';
 const SHADOW_MAX_IN_FLIGHT_ENV = 'DEADLOCK_CONTEXTUAL_V3_SHADOW_MAX_IN_FLIGHT';
 const DEFAULT_SHADOW_SAMPLE_RATE = 1;
 const DEFAULT_SHADOW_MAX_IN_FLIGHT = 2;
+const VALUE_V6_TIME_BUCKET_SECONDS = 120;
 
 export type ContextualV3LiveMode = 'BASELINE' | 'SHADOW' | 'PRODUCTION';
 
@@ -96,6 +109,10 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
+    @Optional()
+    private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,
+    @Optional()
+    private readonly liveMatchStateService?: LiveMatchStateService,
   ) {
     super(
       heroBuildTransitionAggregationService,
@@ -130,7 +147,29 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.requestCount += 1;
     const requestedHeroId = request.heroId;
     const canonicalRequest = createCanonicalRequest(request);
+    const currentProductionResponse = await this.recommendCurrentProduction(
+      canonicalRequest,
+      requestedHeroId,
+    );
+    if (!this.recommendationValueV6LiveService) {
+      return currentProductionResponse;
+    }
+    const valueV6Context =
+      this.recommendationValueV6LiveService.getMode() === 'DISABLED'
+        ? undefined
+        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);
 
+    return this.recommendationValueV6LiveService.apply(
+      canonicalRequest,
+      currentProductionResponse,
+      valueV6Context,
+    );
+  }
+
+  private async recommendCurrentProduction(
+    canonicalRequest: HeroBuildContextualRecommendationRequest,
+    requestedHeroId: number,
+  ): Promise<HeroBuildRecommendationResponse> {
     if (this.mode === 'PRODUCTION') {
       try {
         const contextual = this.contextualV3LiveService.recommend(canonicalRequest);
@@ -163,6 +202,42 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       baseline,
     );
     return baseline;
+  }
+
+  private resolveRecommendationValueV6LiveContext(
+    request: HeroBuildContextualRecommendationRequest,
+  ): RecommendationValueV6LiveContext {
+    if (!this.liveMatchStateService) {
+      return createRequestOnlyRecommendationValueV6Context(request);
+    }
+    const requestedHeroId = canonicalHeroId(request.heroId);
+    const states = this.liveMatchStateService
+      .getAllStates()
+      .sort(
+        (left, right) =>
+          Date.parse(right.lastUpdatedAt) - Date.parse(left.lastUpdatedAt),
+      );
+
+    for (const state of states) {
+      const localEntry = Object.entries(state.playersBySteamId).find(
+        ([, player]) =>
+          player.isLocal === true &&
+          Number.isSafeInteger(player.heroId) &&
+          canonicalHeroId(Number(player.heroId)) === requestedHeroId,
+      );
+      if (!localEntry) {
+        continue;
+      }
+      const [steamId, localPlayer] = localEntry;
+      return createRecommendationValueV6LiveContext(
+        request,
+        state,
+        localPlayer,
+        steamId,
+      );
+    }
+
+    return createRequestOnlyRecommendationValueV6Context(request);
   }
 
   private scheduleContextualShadow(
@@ -222,6 +297,157 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     this.lastModelError = message;
     this.logger.error(`Contextual V3 model-only request failed: ${message}`);
   }
+}
+
+function createRecommendationValueV6LiveContext(
+  request: HeroBuildContextualRecommendationRequest,
+  state: MinimalMatchState,
+  localPlayer: MinimalPlayerState,
+  localSteamId: string,
+): RecommendationValueV6LiveContext {
+  const teamId = normalizeTeamId(localPlayer.teamId);
+  const players = Object.values(state.playersBySteamId);
+  const alliedHeroIds = teamId === undefined
+    ? [...(request.alliedHeroIds ?? [])]
+    : uniquePositiveIntegers(
+        players
+          .filter(
+            (player) =>
+              player.steamId !== localPlayer.steamId &&
+              player.teamId === teamId,
+          )
+          .map((player) => player.heroId),
+      );
+  const enemyHeroIds = teamId === undefined
+    ? [...(request.enemyHeroIds ?? [])]
+    : uniquePositiveIntegers(
+        players
+          .filter(
+            (player) =>
+              player.teamId !== undefined && player.teamId !== teamId,
+          )
+          .map((player) => player.heroId),
+      );
+  const ownTeamPlayers = teamId === undefined
+    ? []
+    : players.filter((player) => player.teamId === teamId);
+  const enemyTeamPlayers = teamId === undefined
+    ? []
+    : players.filter(
+        (player) =>
+          player.teamId !== undefined && player.teamId !== teamId,
+      );
+  const ownTeamNetWorth = sumAvailableSouls(ownTeamPlayers);
+  const enemyTeamNetWorth = sumAvailableSouls(enemyTeamPlayers);
+  const teamEconomyAvailable =
+    ownTeamNetWorth !== undefined && enemyTeamNetWorth !== undefined;
+  const teamNetWorthDelta = teamEconomyAvailable
+    ? ownTeamNetWorth - enemyTeamNetWorth
+    : undefined;
+  const combinedNetWorth = teamEconomyAvailable
+    ? ownTeamNetWorth + enemyTeamNetWorth
+    : 0;
+  const playerNetWorth = finiteNumber(localPlayer.souls);
+  const rankedOwnTeam = ownTeamPlayers
+    .filter((player) => finiteNumber(player.souls) !== undefined)
+    .sort(
+      (left, right) =>
+        Number(right.souls) - Number(left.souls) ||
+        Number(left.heroId ?? 0) - Number(right.heroId ?? 0) ||
+        left.steamId.localeCompare(right.steamId),
+    );
+  const playerRank = rankedOwnTeam.findIndex(
+    (player) => player.steamId === localPlayer.steamId,
+  );
+
+  return {
+    matchId: state.matchId,
+    localSteamId: localPlayer.steamId || localSteamId,
+    heroId: request.heroId,
+    teamId,
+    gameTimeS: request.gameTimeS,
+    timeBucket: Math.floor(
+      request.gameTimeS / VALUE_V6_TIME_BUCKET_SECONDS,
+    ),
+    itemIds: [...request.itemIds],
+    inventoryStateKey: createInventoryStateKeyFromItemIds(request.itemIds),
+    previousActionKeys: [...(request.previousActionKeys ?? [])],
+    alliedHeroIds,
+    enemyHeroIds,
+    playerNetWorth,
+    playerKills: finiteNumber(localPlayer.kills),
+    playerDeaths: finiteNumber(localPlayer.deaths),
+    playerAssists: finiteNumber(localPlayer.assists),
+    teamNetWorthDelta,
+    teamRelativeNetWorthDelta:
+      teamNetWorthDelta !== undefined && combinedNetWorth > 0
+        ? teamNetWorthDelta / combinedNetWorth
+        : undefined,
+    playerNetWorthRankInTeam: playerRank >= 0 ? playerRank + 1 : undefined,
+    playerNetWorthShare:
+      playerNetWorth !== undefined &&
+      ownTeamNetWorth !== undefined &&
+      ownTeamNetWorth > 0
+        ? playerNetWorth / ownTeamNetWorth
+        : undefined,
+  };
+}
+
+function createRequestOnlyRecommendationValueV6Context(
+  request: HeroBuildContextualRecommendationRequest,
+): RecommendationValueV6LiveContext {
+  return {
+    heroId: request.heroId,
+    gameTimeS: request.gameTimeS,
+    timeBucket: Math.floor(
+      request.gameTimeS / VALUE_V6_TIME_BUCKET_SECONDS,
+    ),
+    itemIds: [...request.itemIds],
+    inventoryStateKey: createInventoryStateKeyFromItemIds(request.itemIds),
+    previousActionKeys: [...(request.previousActionKeys ?? [])],
+    alliedHeroIds: [...(request.alliedHeroIds ?? [])],
+    enemyHeroIds: [...(request.enemyHeroIds ?? [])],
+  };
+}
+
+function sumAvailableSouls(
+  players: readonly MinimalPlayerState[],
+): number | undefined {
+  if (players.length === 0) {
+    return undefined;
+  }
+  let total = 0;
+  for (const player of players) {
+    const value = finiteNumber(player.souls);
+    if (value === undefined) {
+      return undefined;
+    }
+    total += value;
+  }
+  return total;
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function normalizeTeamId(value: number | undefined): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : undefined;
+}
+
+function uniquePositiveIntegers(
+  values: readonly (number | undefined)[],
+): number[] {
+  return [...new Set(
+    values.filter(
+      (value): value is number =>
+        Number.isSafeInteger(value) && Number(value) > 0,
+    ),
+  )].sort((left, right) => left - right);
 }
 
 function createCanonicalRequest(
