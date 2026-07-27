@@ -1,0 +1,228 @@
+name: Apply V6 Hero ID Namespace Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/fix-v6-hero-id-namespace'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply production fix and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              source = path.read_text()
+              if source.count(old) != 1:
+                  raise SystemExit(
+                      f'Expected exactly one match in {path} but found {source.count(old)} for:\n{old}'
+                  )
+              path.write_text(source.replace(old, new, 1))
+
+          production_path = Path(
+              'apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts'
+          )
+          replace_once(
+              production_path,
+              "import { canonicalHeroId } from './hero-id-aliases';",
+              "import {\n"
+              "  canonicalHeroId,\n"
+              "  resolveRecommendationValueV6HeroId,\n"
+              "} from './hero-id-aliases';",
+          )
+          replace_once(
+              production_path,
+              "    const requestedHeroId = request.heroId;\n"
+              "    const canonicalRequest = createCanonicalRequest(request);\n"
+              "    const canonicalCandidates = await super.recommend(canonicalRequest);",
+              "    const requestedHeroId = request.heroId;\n"
+              "    const canonicalRequest = createCanonicalRequest(request);\n"
+              "    const valueV6Request = createRecommendationValueV6Request(\n"
+              "      canonicalRequest,\n"
+              "    );\n"
+              "    const canonicalCandidates = await super.recommend(canonicalRequest);",
+          )
+          replace_once(
+              production_path,
+              "    const valueV6Context =\n"
+              "      this.resolveRecommendationValueV6LiveContext(canonicalRequest);\n"
+              "    const response = await this.recommendationValueV6LiveService.apply(\n"
+              "      canonicalRequest,\n"
+              "      candidates,\n"
+              "      valueV6Context,\n"
+              "    );",
+              "    const valueV6Context =\n"
+              "      this.resolveRecommendationValueV6LiveContext(valueV6Request);\n"
+              "    const response = await this.recommendationValueV6LiveService.apply(\n"
+              "      valueV6Request,\n"
+              "      candidates,\n"
+              "      valueV6Context,\n"
+              "    );",
+          )
+          replace_once(
+              production_path,
+              "\nfunction createContextualV3ShadowLog(\n",
+              "\nfunction createRecommendationValueV6Request(\n"
+              "  canonicalRequest: HeroBuildContextualRecommendationRequest,\n"
+              "): HeroBuildContextualRecommendationRequest {\n"
+              "  return {\n"
+              "    ...canonicalRequest,\n"
+              "    heroId: resolveRecommendationValueV6HeroId(\n"
+              "      canonicalRequest.heroId,\n"
+              "    ),\n"
+              "  };\n"
+              "}\n"
+              "\nfunction createContextualV3ShadowLog(\n",
+          )
+
+          aliases_path = Path('apps/api/src/deadlock-live/hero-id-aliases.ts')
+          aliases_source = aliases_path.read_text()
+          helper = (
+              "\n\nexport function resolveRecommendationValueV6HeroId(\n"
+              "  heroId: number,\n"
+              "): number {\n"
+              "  return resolveValveHeroIdFromGep(canonicalHeroId(heroId));\n"
+              "}\n"
+          )
+          if 'export function resolveRecommendationValueV6HeroId(' in aliases_source:
+              raise SystemExit('Recommendation Value V6 hero-id resolver already exists.')
+          aliases_path.write_text(aliases_source.rstrip() + helper)
+
+          test_path = Path('apps/api/test/recommendation-value-v6-production-safe.spec.ts')
+          replace_once(
+              test_path,
+              "import type { HeroBuildContextualV3LiveService } from '../src/deadlock-live/hero-build-contextual-v3-live.service';\n",
+              "import type { HeroBuildContextualV3LiveService } from '../src/deadlock-live/hero-build-contextual-v3-live.service';\n"
+              "import {\n"
+              "  HERO_ID_ALIASES,\n"
+              "  resolveRecommendationValueV6HeroId,\n"
+              "  resolveValveHeroIdFromGep,\n"
+              "} from '../src/deadlock-live/hero-id-aliases';\n",
+          )
+          replace_once(
+              test_path,
+              "  it('returns the pro candidate ranking instead of throwing when V6 falls back', async () => {\n",
+              "  it('maps every supported hero alias into the item-history namespace', () => {\n"
+              "    for (const [canonicalIdText, aliases] of Object.entries(HERO_ID_ALIASES)) {\n"
+              "      const canonicalId = Number(canonicalIdText);\n"
+              "      const expectedValueHeroId = resolveValveHeroIdFromGep(canonicalId);\n"
+              "      for (const alias of aliases) {\n"
+              "        expect(resolveRecommendationValueV6HeroId(alias)).toBe(\n"
+              "          expectedValueHeroId,\n"
+              "        );\n"
+              "      }\n"
+              "    }\n"
+              "  });\n"
+              "\n"
+              "  it.each([\n"
+              "    [66, 27, 66],\n"
+              "    [27, 27, 66],\n"
+              "    [16, 16, 27],\n"
+              "    [64, 2, 2],\n"
+              "    [2, 2, 2],\n"
+              "    [3, 3, 3],\n"
+              "  ])(\n"
+              "    'uses candidate hero %i and V6 hero %i for requested hero %i',\n"
+              "    async (requestedHeroId, candidateHeroId, valueHeroId) => {\n"
+              "      const transitionService = createTransitionService();\n"
+              "      const recipeService = {\n"
+              "        getComponentItemIds: jest.fn(() => []),\n"
+              "      } as unknown as RecipeAwareTimelineReconciliationService;\n"
+              "      const apply = jest.fn(\n"
+              "        async (\n"
+              "          valueRequest: { heroId: number },\n"
+              "          baseline: HeroBuildRecommendationResponse,\n"
+              "          valueContext?: { heroId: number },\n"
+              "        ) => ({\n"
+              "          ...baseline,\n"
+              "          recommendationExperiment: {\n"
+              "            source: 'VALUE_V6_CANARY',\n"
+              "            candidateId: 'candidate',\n"
+              "            modelVersion: MODEL_VERSION,\n"
+              "            modelSha256: 'a'.repeat(64),\n"
+              "          },\n"
+              "          valueRequest,\n"
+              "          valueContext,\n"
+              "        }),\n"
+              "      );\n"
+              "      const v6Service = {\n"
+              "        getMode: jest.fn(() => 'CANARY'),\n"
+              "        apply,\n"
+              "      } as unknown as RecommendationValueV6LiveService;\n"
+              "      const service = new ProductionSafeHeroBuildRecommendationService(\n"
+              "        transitionService,\n"
+              "        recipeService,\n"
+              "        {\n"
+              "          getStatus: jest.fn(() => ({ state: 'READY' })),\n"
+              "        } as unknown as HeroBuildContextualV3LiveService,\n"
+              "        v6Service,\n"
+              "      );\n"
+              "\n"
+              "      await service.recommend({\n"
+              "        heroId: requestedHeroId,\n"
+              "        itemIds: [],\n"
+              "        gameTimeS: 180,\n"
+              "        limit: 5,\n"
+              "      });\n"
+              "\n"
+              "      expect(transitionService.ensureReady).toHaveBeenCalledWith(\n"
+              "        candidateHeroId,\n"
+              "      );\n"
+              "      expect(apply).toHaveBeenCalledTimes(1);\n"
+              "      const [valueRequest, , valueContext] = apply.mock.calls[0];\n"
+              "      expect(valueRequest.heroId).toBe(valueHeroId);\n"
+              "      expect(valueContext?.heroId).toBe(valueHeroId);\n"
+              "    },\n"
+              "  );\n"
+              "\n"
+              "  it('returns the pro candidate ranking instead of throwing when V6 falls back', async () => {\n",
+          )
+          replace_once(
+              test_path,
+              "    getHeroPolicy: jest.fn(() => ({\n"
+              "      heroId: 2,\n",
+              "    getHeroPolicy: jest.fn((heroId: number) => ({\n"
+              "      heroId,\n",
+          )
+          replace_once(
+              test_path,
+              "        heroId: 2,\n"
+              "        stateKey: 'EMPTY',\n",
+              "        heroId,\n"
+              "        stateKey: 'EMPTY',\n",
+          )
+          PY
+
+          rm -f .github/workflows/apply-v6-hero-id-namespace-fix.yml
+
+          git diff --check
+          git status --short
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            apps/api/src/deadlock-live/hero-id-aliases.ts \
+            apps/api/src/deadlock-live/production-hero-build-recommendation.service.ts \
+            apps/api/test/recommendation-value-v6-production-safe.spec.ts \
+            .github/workflows/apply-v6-hero-id-namespace-fix.yml
+          git commit -m 'fix: use item-history hero IDs for V6'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
