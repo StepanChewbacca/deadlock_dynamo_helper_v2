@@ -1,0 +1,202 @@
+name: Inspect Extra Regen Live Fallback V2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect exact live key coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir=/home/ubuntu/apps/deadlock_dynamo_helper
+          output_dir="$GITHUB_WORKSPACE/extra-regen-live-v2"
+          mkdir -p "$output_dir"
+          cd "$deploy_dir"
+
+          curl --fail --show-error --silent --max-time 30 \
+            http://127.0.0.1:3000/deadlock/live/states \
+            > "$output_dir/states.json"
+          curl --fail --show-error --silent --max-time 30 \
+            http://127.0.0.1:3000/deadlock/live/build-recommendations \
+            > "$output_dir/recommendations.json"
+          curl --fail --show-error --silent --max-time 30 \
+            http://127.0.0.1:3000/deadlock/analysis/recommendation-value-v6-live/status \
+            > "$output_dir/v6-status.json"
+          sudo docker compose logs --no-color --since=60m --tail=30000 api \
+            > "$output_dir/api-60m.log" 2>&1 || true
+
+          volume_name="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
+          volume_root="$(sudo docker volume inspect "$volume_name" --format '{{ .Mountpoint }}')"
+          model_file="$volume_root/recommendation-value-v6-live-candidates/v6-short-only-20260727/model.json"
+
+          sudo MODEL_FILE="$model_file" OUTPUT_DIR="$output_dir" python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          out = Path(os.environ['OUTPUT_DIR'])
+          states = json.loads((out / 'states.json').read_text())
+          recommendations = json.loads((out / 'recommendations.json').read_text())
+          model = json.loads(Path(os.environ['MODEL_FILE']).read_text())
+          action_counts = model['counts']['action']
+
+          def ts(row):
+              return str(row.get('lastUpdatedAt') or row.get('lastObservedAt') or '')
+
+          state = max(states, key=ts)
+          match_id = str(state['matchId'])
+          players = state.get('playersBySteamId') or {}
+          local = next(player for player in players.values() if player.get('isLocal') is True)
+          recommendation_row = max(
+              (row for row in recommendations if str(row.get('matchId')) == match_id),
+              key=ts,
+          )
+          recommendation = recommendation_row.get('recommendation') or {}
+          current_game_time = int(recommendation_row.get('gameTimeS') or 0)
+          hero_id = int(recommendation_row.get('heroId') or local.get('heroId') or 0)
+          inventory_key = str(recommendation_row.get('inventoryStateKey') or '')
+          previous_actions = recommendation_row.get('previousActionKeys') or []
+          previous_tail = '>'.join(previous_actions[-5:]) or 'EMPTY'
+
+          own_team_id = local.get('teamId')
+          own_souls = 0.0
+          enemy_souls = 0.0
+          own_ok = False
+          enemy_ok = False
+          for player in players.values():
+              souls = player.get('souls')
+              team_id = player.get('teamId')
+              if not isinstance(souls, (int, float)) or team_id is None:
+                  continue
+              if team_id == own_team_id:
+                  own_souls += float(souls)
+                  own_ok = True
+              else:
+                  enemy_souls += float(souls)
+                  enemy_ok = True
+          relative_delta = None
+          economy_band = None
+          if own_ok and enemy_ok and own_souls + enemy_souls > 0:
+              relative_delta = (own_souls - enemy_souls) / (own_souls + enemy_souls)
+              if relative_delta <= -0.15:
+                  economy_band = 'FAR_BEHIND'
+              elif relative_delta < -0.05:
+                  economy_band = 'BEHIND'
+              elif relative_delta <= 0.05:
+                  economy_band = 'EVEN'
+              elif relative_delta < 0.15:
+                  economy_band = 'AHEAD'
+              else:
+                  economy_band = 'FAR_AHEAD'
+
+          decisions = []
+          ansi = re.compile(r'\x1b\[[0-9;]*m')
+          marker = '{"event":"recommendation_value_v6_live_decision"'
+          for raw_line in (out / 'api-60m.log').read_text(errors='replace').splitlines():
+              line = ansi.sub('', raw_line)
+              start = line.find(marker)
+              if start < 0:
+                  continue
+              end = line.rfind('}')
+              if end < start:
+                  continue
+              try:
+                  value = json.loads(line[start:end + 1])
+              except json.JSONDecodeError:
+                  continue
+              if str(value.get('matchId')) == match_id:
+                  decisions.append(value)
+
+          current_decisions = [
+              row for row in decisions
+              if int(row.get('gameTimeSeconds') or -1) == current_game_time
+          ]
+          current_decision = current_decisions[-1] if current_decisions else {}
+          candidate_set = current_decision.get('candidateSet') or [
+              recommendation.get('action', {}).get('actionKey'),
+              *[row.get('actionKey') for row in recommendation.get('alternatives') or []],
+          ]
+          candidate_set = [key for key in candidate_set if isinstance(key, str) and key]
+          time_bucket = current_game_time // 120
+
+          def observations(key):
+              value = action_counts.get(key)
+              return int(value.get('observations', 0) or 0) if isinstance(value, dict) else 0
+
+          exact_candidate_coverage = {}
+          for action_key in candidate_set:
+              exact_keys = [
+                  f'HERO_TIME_ACTION:{hero_id}|{time_bucket}|{action_key}',
+                  f'HERO_TIME_INVENTORY_ACTION:{hero_id}|{time_bucket}|{inventory_key}|{action_key}',
+                  f'HERO_TIME_PREVIOUS_ACTION:{hero_id}|{time_bucket}|{previous_tail}|{action_key}',
+              ]
+              if economy_band:
+                  exact_keys.append(
+                      f'HERO_TEAM_ECONOMY_ACTION:{hero_id}|{economy_band}|{action_key}'
+                  )
+              rows = [{'key': key, 'observations': observations(key)} for key in exact_keys]
+              exact_candidate_coverage[action_key] = {
+                  'directSupportedKeyCount': sum(1 for row in rows if row['observations'] >= 10),
+                  'exactKeys': rows,
+              }
+
+          extra_regen = next(
+              (item for item in local.get('items') or [] if 'extra regen' in str(item.get('name') or '').lower()),
+              None,
+          )
+          extra_regen_id = int(extra_regen['id']) if extra_regen else None
+          extra_regen_buy_keys = []
+          if extra_regen_id:
+              suffix = f'|BUY:{extra_regen_id}'
+              for key, value in action_counts.items():
+                  if key.endswith(suffix):
+                      extra_regen_buy_keys.append({
+                          'key': key,
+                          'observations': int(value.get('observations', 0) or 0),
+                      })
+              extra_regen_buy_keys.sort(key=lambda row: (-row['observations'], row['key']))
+
+          summary = {
+              'matchId': match_id,
+              'capturedAt': state.get('lastUpdatedAt'),
+              'localPlayer': local,
+              'recommendationRow': recommendation_row,
+              'currentGameTime': current_game_time,
+              'timeBucket': time_bucket,
+              'inventoryStateKey': inventory_key,
+              'previousActionTail': previous_tail,
+              'teamRelativeNetWorthDelta': relative_delta,
+              'teamEconomyBand': economy_band,
+              'currentDecision': current_decision,
+              'matchDecisionCount': len(decisions),
+              'currentGameTimeDecisionCount': len(current_decisions),
+              'exactCandidateCoverage': exact_candidate_coverage,
+              'extraRegen': extra_regen,
+              'extraRegenBuyMatchingKeyCount': len(extra_regen_buy_keys),
+              'extraRegenBuySupportedKeyCount': sum(
+                  1 for row in extra_regen_buy_keys if row['observations'] >= 10
+              ),
+              'extraRegenBuyTopKeys': extra_regen_buy_keys[:100],
+              'modelVersion': model.get('modelVersion'),
+              'modelOptions': model.get('options'),
+          }
+          (out / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extra-regen-live-v2-${{ github.sha }}
+          path: extra-regen-live-v2
+          retention-days: 1
