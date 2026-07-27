@@ -6,23 +6,23 @@ yarn install v1.22.22
 warning Workspaces can only be enabled in private projects.
 warning Workspaces can only be enabled in private projects.
 [4/4] Building fresh packages...
-Done in 6.16s.
+Done in 7.24s.
 STATUS=0
 
 ===== build-shared =====
 yarn workspace v1.22.22
 yarn run v1.22.22
 $ tsc -p tsconfig.json
-Done in 1.27s.
-Done in 1.48s.
+Done in 1.24s.
+Done in 1.45s.
 STATUS=0
 
 ===== build-domain =====
 yarn workspace v1.22.22
 yarn run v1.22.22
 $ tsc -p tsconfig.json
-Done in 1.68s.
-Done in 1.88s.
+Done in 1.64s.
+Done in 1.85s.
 STATUS=0
 
 ===== build-api =====
@@ -31,24 +31,9 @@ yarn run v1.22.22
 $ yarn build:domain && nest build
 $ yarn workspace @deadlock-live-probe/build-domain build
 $ tsc -p tsconfig.json
-[96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m416[0m:[93m40[0m - [91merror[0m[90m TS18048: [0m'sum' is possibly 'undefined'.
-
-[7m416[0m   return values.reduce((sum, value) => sum + Number(value), 0);
-[7m   [0m [91m                                       ~~~[0m
-
-Found 1 error(s).
-
-error Command failed with exit code 1.
-info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.
-error Command failed.
-Exit code: 1
-Command: /opt/hostedtoolcache/node/22.23.1/x64/bin/node
-Arguments: /usr/local/lib/node_modules/yarn/lib/cli.js build
-Directory: /home/runner/work/deadlock_dynamo_helper_v2/deadlock_dynamo_helper_v2/apps/api
-Output:
-
-info Visit https://yarnpkg.com/en/docs/cli/workspace for documentation about this command.
-STATUS=1
+Done in 8.96s.
+Done in 9.17s.
+STATUS=0
 
 ===== test-v6 =====
 yarn workspace v1.22.22
@@ -57,34 +42,34 @@ $ yarn build:domain && jest --runInBand --runInBand recommendation-value-v6-feat
 $ yarn workspace @deadlock-live-probe/build-domain build
 $ tsc -p tsconfig.json
 PASS test/recommendation-value-v6-live.spec.ts
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"07c9fddd-cc73-4002-90f3-67ffce85178a","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":2,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"d7e57a79-603a-452c-9874-354ec47f1ad7","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:3","BUY:1"],"baselineRanking":["BUY:2","BUY:3","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:3","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:3","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"18a6750a-0d17-4af3-90a4-8f609a111e96","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"fallbackReason":"INSUFFICIENT_SUPPORTED_CANDIDATES","elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"328cd159-917b-4895-84e1-af207a6f3c73","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"fallbackReason":"LOW_TOP_SEPARATION","elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"9394176e-a825-4dde-8443-d46297d7937f","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":[],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[],"fallbackReason":"MODEL_ERROR","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[33m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [33m   WARN[39m [38;5;3m[RecommendationValueV6LiveService] [39m[33mRecommendation Value V6 request failed and returned baseline: catalog unavailable[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"56c96fa1-e5bb-49e5-a589-40f491c754e0","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"SHADOW","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"ddbc7d66-3442-4aed-ba6c-92220c3dbff0","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"b9a78e01-e9a1-45c2-b649-258f8c3a4f79","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"f99d78e4-93a1-417b-969e-ed9f4bc4199a","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":2,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"4863e91e-493f-465f-9fb2-5617e4dadc95","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:3","BUY:1"],"baselineRanking":["BUY:2","BUY:3","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:3","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:3","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"fc0f9552-c55a-4188-a275-47476eab18ec","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"fallbackReason":"INSUFFICIENT_SUPPORTED_CANDIDATES","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"4386271e-d2a0-45ef-93f1-408bbe120b08","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"fallbackReason":"LOW_TOP_SEPARATION","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"0fe992da-9494-4504-b1b9-09b07e8cef34","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":[],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[],"fallbackReason":"MODEL_ERROR","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[33m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [33m   WARN[39m [38;5;3m[RecommendationValueV6LiveService] [39m[33mRecommendation Value V6 request failed and returned baseline: catalog unavailable[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"c1a97b9c-ae51-49cb-a8c0-916403964082","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"SHADOW","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"bd8f39f2-2ccb-4d8c-b6d3-8b798b24be8b","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"4f71dd3f-b44e-4a8e-b9d8-812d7f9d8ccd","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
 PASS test/recommendation-value-v6-telemetry.spec.ts
 PASS test/recommendation-value-v6-features.spec.ts
 
 Test Suites: 3 passed, 3 total
 Tests:       24 passed, 24 total
 Snapshots:   0 total
-Time:        4.324 s
+Time:        4.141 s
 Ran all test suites matching recommendation-value-v6-features.spec.ts|recommendation-value-v6-live.spec.ts|recommendation-value-v6-telemetry.spec.ts.
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-jdU0E3/pro-training/events.ndjson with 0 persisted events.[39m
-[32m[Nest] 2574  - [39m07/27/2026, 4:18:40 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-CXCGKE/pro-training/events.ndjson with 0 persisted events.[39m
-Done in 7.16s.
-Done in 7.37s.
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-2K6FUO/pro-training/events.ndjson with 0 persisted events.[39m
+[32m[Nest] 2565  - [39m07/27/2026, 4:25:32 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-3tJvnT/pro-training/events.ndjson with 0 persisted events.[39m
+Done in 6.91s.
+Done in 7.11s.
 STATUS=0
 
 ===== test-api =====
@@ -93,195 +78,91 @@ yarn run v1.22.22
 $ yarn build:domain && jest --runInBand --runInBand
 $ yarn workspace @deadlock-live-probe/build-domain build
 $ tsc -p tsconfig.json
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [31m  ERROR[39m [38;5;3m[RecommendationPolicyV4EvaluationService] [39m[31mRecommendation Policy V4 evaluation failed: Behavioral V4 model SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 27a144597e8d8d699d3dcd1c36a8c85f57605d5fe1a431e5e73159e21f63fd4e.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [31m  ERROR[39m [38;5;3m[RecommendationPolicyV4EvaluationService] [39m[31mRecommendation Policy V4 evaluation failed: Behavioral V4 model SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 27a144597e8d8d699d3dcd1c36a8c85f57605d5fe1a431e5e73159e21f63fd4e.[39m
 PASS test/recommendation-policy-v4-evaluation.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [32m    LOG[39m [38;5;3m[RecommendationPolicyV4EvaluationService] [39m[32mRecommendation Policy V4 evaluation completed: 11 decisions, 6 matches, shadow-readiness gate FAIL.[39m
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[31mRecommendation Value V4 training failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 0e11e769e154a388f6a792ee282d4d3b997378ab5e404ca0ebe9c57c989be12c.[39m
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[31mRecommendation Value V4 training failed: The outcome-eligible source subset contains conflicting outcomes for one player within a match.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [32m    LOG[39m [38;5;3m[RecommendationPolicyV4EvaluationService] [39m[32mRecommendation Policy V4 evaluation completed: 11 decisions, 6 matches, shadow-readiness gate FAIL.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[31mRecommendation Value V4 training failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 0e11e769e154a388f6a792ee282d4d3b997378ab5e404ca0ebe9c57c989be12c.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[31mRecommendation Value V4 training failed: The outcome-eligible source subset contains conflicting outcomes for one player within a match.[39m
 PASS test/recommendation-value-v4-training.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [32m    LOG[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[32mRecommendation Value V4 training completed: 6 train rows, 4 validation rows, release gate FAIL.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:47 PM [32m    LOG[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[32mRecommendation Value V4 training completed: 7 train rows, 4 validation rows, release gate FAIL.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [32m    LOG[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[32mRecommendation Value V4 training completed: 6 train rows, 4 validation rows, release gate FAIL.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:39 PM [32m    LOG[39m [38;5;3m[RecommendationValueV4TrainingService] [39m[32mRecommendation Value V4 training completed: 7 train rows, 4 validation rows, release gate FAIL.[39m
 PASS test/recommendation-decision-dataset-v5.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 2 rows.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 1 rows.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 2 rows.[39m
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV5TrainingService] [39m[31mRecommendation Value V5 failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 74c2d4886178168245a0adf7f772b8f1dbe7ec4467432ae9a6eb81d594089b4a.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 2 rows.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 1 rows.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV5Service] [39m[32mRecommendation Dataset V5 completed with 2 rows.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [31m  ERROR[39m [38;5;3m[RecommendationValueV5TrainingService] [39m[31mRecommendation Value V5 failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 74c2d4886178168245a0adf7f772b8f1dbe7ec4467432ae9a6eb81d594089b4a.[39m
 PASS test/recommendation-value-v5-training.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [32m    LOG[39m [38;5;3m[RecommendationValueV5TrainingService] [39m[32mRecommendation Value V5 completed with 6 untouched test decisions.[39m
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [31m  ERROR[39m [38;5;3m[RecommendationBehavioralV4TrainingService] [39m[31mRecommendation Behavioral V4 training failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 79be50c87401f95cb7bf26c5a27751869e7977919d94e5986ff3e9e4199bca84.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [32m    LOG[39m [38;5;3m[RecommendationValueV5TrainingService] [39m[32mRecommendation Value V5 completed with 6 untouched test decisions.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [31m  ERROR[39m [38;5;3m[RecommendationBehavioralV4TrainingService] [39m[31mRecommendation Behavioral V4 training failed: Source SHA-256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, received 79be50c87401f95cb7bf26c5a27751869e7977919d94e5986ff3e9e4199bca84.[39m
 PASS test/recommendation-behavioral-v4-training.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:48 PM [32m    LOG[39m [38;5;3m[RecommendationBehavioralV4TrainingService] [39m[32mRecommendation Behavioral V4 training completed: 4 train rows, 4 validation rows, release gate FAIL.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:40 PM [32m    LOG[39m [38;5;3m[RecommendationBehavioralV4TrainingService] [39m[32mRecommendation Behavioral V4 training completed: 4 train rows, 4 validation rows, release gate FAIL.[39m
 PASS test/live-build-recommendation-traversal.spec.ts
-[31m[Nest] 2658  - [39m07/27/2026, 4:18:49 PM [31m  ERROR[39m [38;5;3m[RecommendationDecisionDatasetV4HistoricalBootstrapService] [39m[31mRecommendation V4 historical bootstrap failed: validation SHA-256 mismatch: expected ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, received 70defd3b81755bc531de1562ba8c51f1b655890dc2302ecc0a76d33e0895cc20.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:41 PM [31m  ERROR[39m [38;5;3m[RecommendationDecisionDatasetV4HistoricalBootstrapService] [39m[31mRecommendation V4 historical bootstrap failed: validation SHA-256 mismatch: expected ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff, received 70defd3b81755bc531de1562ba8c51f1b655890dc2302ecc0a76d33e0895cc20.[39m
 PASS test/recommendation-decision-dataset-v4-historical-bootstrap.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:49 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV4HistoricalBootstrapService] [39m[32mRecommendation V4 historical bootstrap completed: 3 rows, 2 matches, coverage 0.6666666666666666.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:41 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV4HistoricalBootstrapService] [39m[32mRecommendation V4 historical bootstrap completed: 3 rows, 2 matches, coverage 0.6666666666666666.[39m
 PASS test/hero-build-recommendation.spec.ts
 PASS test/recommendation-decision-dataset-v4.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:49 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV4Service] [39m[32mRecommendation decision dataset V4 completed with 1 rows, 1 exact-action eligible rows, and 1 outcome-eligible rows.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[HeroBuildOfflineEvaluationService] [39m[32mEvaluated 2 held-out build steps from 1 matches: baseline top-1 100.00%, contextual 100.00%.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:41 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionDatasetV4Service] [39m[32mRecommendation decision dataset V4 completed with 1 rows, 1 exact-action eligible rows, and 1 outcome-eligible rows.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:41 PM [32m    LOG[39m [38;5;3m[HeroBuildOfflineEvaluationService] [39m[32mEvaluated 2 held-out build steps from 1 matches: baseline top-1 100.00%, contextual 100.00%.[39m
 PASS test/hero-build-offline-evaluation.spec.ts
 PASS test/live-match-state.service.spec.ts
 PASS test/recommendation-policy-v6-evaluation-integration.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[RecommendationPolicyV6EvaluationService] [39m[32mRecommendation Policy V6 evaluation completed: 2 decisions, 2 matches, shadow-readiness gate FAIL.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[RecommendationPolicyV6EvaluationService] [39m[32mRecommendation Policy V6 evaluation completed: 2 decisions, 2 matches, shadow-readiness gate FAIL.[39m
 PASS test/recommendation-value-v6-training.spec.ts
-FAIL test/hero-build-contextual-v2-foundation.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-contextual-v2-foundation.spec.ts[0m:[93m73[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 73[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 74[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 76[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 77[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6TrainingService] [39m[32mRecommendation Value V6 completed with 2 untouched test decisions.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 3 players in 1 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 1 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:50 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6TrainingService] [39m[32mRecommendation Value V6 completed with 2 untouched test decisions.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[ProductionHeroBuildRecommendationService] [39m[32m{"event":"hero_build_contextual_v3_shadow","heroId":1,"canonicalHeroId":1,"gameTimeS":60,"alliedHeroIds":[],"enemyHeroIds":[2,3,4,5,6],"previousActionCount":0,"modelVersion":"CONTEXTUAL_V3_HIERARCHICAL_COUNT_RANKER_1","modelSha256":"test","buildArchetypeId":"UNKNOWN","baselineTopActionKey":"BUY:100","contextualTopActionKey":"BUY:200","baselineTop3ActionKeys":["BUY:100"],"contextualTop3ActionKeys":["BUY:200"],"changedTop1":true,"changedTop3":true,"elapsedMs":0}[39m
+PASS test/hero-build-contextual-v2-foundation.spec.ts
 PASS test/skill-build-analysis.service.spec.ts
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 3 players in 1 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 1 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:42 PM [32m    LOG[39m [38;5;3m[SkillBuildAnalysisService] [39m[32mBuilt skill graph for hero 11 from 1 players in 1 ms.[39m
 PASS test/hero-build-matchup-statistics.service.spec.ts
 PASS test/hero-build-offline-evaluation-v2-runtime.spec.ts
 PASS test/hero-build-offline-evaluation-resilience.spec.ts
-[33m[Nest] 2658  - [39m07/27/2026, 4:18:51 PM [33m   WARN[39m [38;5;3m[HeroBuildOfflineEvaluationResilientService] [39m[33mResuming offline evaluation from hero 2 of 1.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:51 PM [32m    LOG[39m [38;5;3m[HeroBuildOfflineEvaluationResilientService] [39m[32mResilient evaluation processed 0 held-out steps across 1 heroes with peak RSS 697.08 MB: baseline top-1 0.00%, contextual 0.00%.[39m
+[33m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [33m   WARN[39m [38;5;3m[HeroBuildOfflineEvaluationResilientService] [39m[33mResuming offline evaluation from hero 2 of 1.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [32m    LOG[39m [38;5;3m[HeroBuildOfflineEvaluationResilientService] [39m[32mResilient evaluation processed 0 held-out steps across 1 heroes with peak RSS 732.36 MB: baseline top-1 0.00%, contextual 0.00%.[39m
 PASS test/contextual-hero-build-recommendation.service.spec.ts
 PASS test/recommendation-decision-telemetry.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-mc0MDY/events.ndjson with 0 persisted events.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-mc0MDY/events.ndjson with 3 persisted events.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-QBOa8O/events.ndjson with 0 persisted events.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecommendationOutcomeLinkerService] [39m[32mLinked 1 recommendation telemetry outcome(s).[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-NEKx5C/events.ndjson with 0 persisted events.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-NEKx5C/events.ndjson with 3 persisted events.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/deadlock-recommendation-telemetry-W3kB3O/events.ndjson with 0 persisted events.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:43 PM [32m    LOG[39m [38;5;3m[RecommendationOutcomeLinkerService] [39m[32mLinked 1 recommendation telemetry outcome(s).[39m
 PASS test/hero-build-contextual-v2-model.spec.ts
 PASS test/canonical-build-sequence.spec.ts
-FAIL test/hero-build-production-alias.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-production-alias.spec.ts[0m:[93m58[0m:[93m23[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 58[0m       const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 59[0m         transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 61[0m         contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 62[0m       );
-    [7m   [0m [91m~~~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-    [96mtest/hero-build-production-alias.spec.ts[0m:[93m100[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m100[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m101[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m103[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m104[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
+PASS test/hero-build-production-alias.spec.ts
 PASS test/recommendation-value-v6-core.spec.ts
 PASS test/hero-build-recommendation-presentation.spec.ts
 PASS test/recommendation-value-v5-core.spec.ts
 PASS test/inventory-timeline-replay.spec.ts
 PASS test/recipe-aware-timeline-reconciliation.spec.ts
-FAIL test/hero-build-production-model-only.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-production-model-only.spec.ts[0m:[93m37[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 37[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 38[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 40[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 41[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-    [96mtest/hero-build-production-model-only.spec.ts[0m:[93m88[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 88[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 89[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 91[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 92[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:52 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+[31m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [31m  ERROR[39m [38;5;3m[ProductionHeroBuildRecommendationService] [39m[31mContextual V3 model-only request failed: model exploded[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:44 PM [32m    LOG[39m [38;5;3m[RecipeAwareTimelineReconciliationService] [39m[32mLoaded 1 item recipes for historical timeline reconciliation.[39m
+PASS test/hero-build-production-model-only.spec.ts
 PASS test/hero-build-transition-aggregation.spec.ts
 PASS test/situational-recommendation-diagnostics.service.spec.ts
-FAIL test/hero-build-recommendation.controller.spec.ts
-  ● Test suite failed to run
-
-    [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m416[0m:[93m40[0m - [91merror[0m[90m TS18048: [0m'sum' is possibly 'undefined'.
-
-    [7m416[0m   return values.reduce((sum, value) => sum + Number(value), 0);
-    [7m   [0m [91m                                       ~~~[0m
-
+PASS test/hero-build-recommendation.controller.spec.ts
 PASS test/hero-build-contextual-v3-live.spec.ts
 PASS test/skill-build-analysis.controller.spec.ts
 PASS test/recommendation-policy-v6-evaluation.spec.ts
 PASS test/hero-build-decision-dataset-v3-coordinator.spec.ts
 PASS test/live-hero-build-policy.service.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:54 PM [32m    LOG[39m [38;5;3m[LiveHeroBuildPolicyService] [39m[32mBuilt live policy for hero 27 from 1 matches in 1 ms.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:54 PM [32m    LOG[39m [38;5;3m[LiveHeroBuildPolicyService] [39m[32mBuilt live policy for hero 6 from 0 matches in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:45 PM [32m    LOG[39m [38;5;3m[LiveHeroBuildPolicyService] [39m[32mBuilt live policy for hero 27 from 1 matches in 0 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:45 PM [32m    LOG[39m [38;5;3m[LiveHeroBuildPolicyService] [39m[32mBuilt live policy for hero 6 from 0 matches in 0 ms.[39m
 PASS test/recent-matches-window.spec.ts
 PASS test/analysis-operations.controller.spec.ts
 PASS test/hero-build-decision-dataset-v3.spec.ts
 PASS test/match-timeline-normalization.spec.ts
 PASS test/recent-match-crawler.spec.ts
 PASS test/inventory-shadow-replay.service.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:55 PM [32m    LOG[39m [38;5;3m[InventoryShadowReplayService] [39m[32mLoaded 1 item recipes for inventory shadow replay.[39m
 PASS test/match-timeline-collector.spec.ts
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:46 PM [32m    LOG[39m [38;5;3m[InventoryShadowReplayService] [39m[32mLoaded 1 item recipes for inventory shadow replay.[39m
 PASS test/hero-build-recommendation-ownership-filter.service.spec.ts
 PASS test/hero-build-contextual-v3-training.spec.ts
 PASS test/inventory-multiset-action-engine.spec.ts
@@ -290,16 +171,16 @@ PASS test/hero-build-upgrade-preference.spec.ts
 PASS test/hero-build-recommendation-alternative-filter.spec.ts
 PASS test/live-hero-matchup-source.service.spec.ts
 PASS test/inventory-transaction-reconstruction.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:56 PM [32m    LOG[39m [38;5;3m[LiveHeroMatchupSourceService] [39m[32mLoaded matchup source for hero 27: 1 matches, 1 hero players and 1 item events in 1 ms.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:47 PM [32m    LOG[39m [38;5;3m[LiveHeroMatchupSourceService] [39m[32mLoaded matchup source for hero 27: 1 matches, 1 hero players and 1 item events in 1 ms.[39m
 PASS test/ruleset-window-manifest.service.spec.ts
 PASS test/ruleset-resolution-refresh.service.spec.ts
 PASS test/recent-match-roster-repair.spec.ts
 PASS test/hero-build-contextual-v3-candidate-evaluation.spec.ts
 PASS test/reference-data-import.service.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:57 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 38 heroes into PostgreSQL[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:57 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 251 items into PostgreSQL[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:57 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 38 heroes into PostgreSQL[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:57 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 251 items into PostgreSQL[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:48 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 38 heroes into PostgreSQL[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:48 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 251 items into PostgreSQL[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:48 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 38 heroes into PostgreSQL[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:48 PM [32m    LOG[39m [38;5;3m[ReferenceDataImportService] [39m[32mImported 251 items into PostgreSQL[39m
 PASS test/hero-build-offline-evaluation-v2-data-loader.spec.ts
 PASS test/match-roster-preservation.spec.ts
 PASS test/live-inventory-event-normalizer.service.spec.ts
@@ -320,153 +201,33 @@ PASS test/historical-catalog-backfill.service.spec.ts
 PASS test/hero-build-decision-dataset-v3-full-corpus.spec.ts
 PASS test/item-catalog-content.spec.ts
 PASS test/recommendation-value-v6-live.spec.ts
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"ebb24c26-3f20-4d41-9aee-c232b1f4352b","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"138d19b7-44d4-45c6-8471-20eceb0f727b","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:3","BUY:1"],"baselineRanking":["BUY:2","BUY:3","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:3","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:3","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"39febd9f-b253-4c11-b588-66d9c6e1b1e7","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"fallbackReason":"INSUFFICIENT_SUPPORTED_CANDIDATES","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"49b5d551-a26a-4086-b34a-62f3ed047f89","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"fallbackReason":"LOW_TOP_SEPARATION","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"034bf8a7-16f3-4f05-a718-022f376bdda6","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":[],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[],"fallbackReason":"MODEL_ERROR","elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[33m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [33m   WARN[39m [38;5;3m[RecommendationValueV6LiveService] [39m[33mRecommendation Value V6 request failed and returned baseline: catalog unavailable[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"b4e45a90-027f-4f71-96ab-677f99b8691a","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"SHADOW","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"9c704c0d-678e-4135-963a-b5515f80a5cc","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"ee36b50f-6a05-4798-b504-971b5777ef07","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-gH7949/pro-training/events.ndjson with 0 persisted events.[39m
 PASS test/recommendation-value-v6-telemetry.spec.ts
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"ac8e5b10-871f-4ae5-bb84-5458f1de1328","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"42bed2f2-b56c-47cc-adae-419022ce4a2e","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:3","BUY:1"],"baselineRanking":["BUY:2","BUY:3","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:1","BUY:3","BUY:2"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:3","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"03cd15fb-36d8-4e6d-bb68-124b2cba5cf2","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"94f1d02db8a179dc8fbd926e5ba18d43a2756abf57eb15baf9b3c26f7e106843","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":0},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"fallbackReason":"INSUFFICIENT_SUPPORTED_CANDIDATES","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"e1d3123a-d341-4dd2-81d3-b3f50c563744","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"fallbackReason":"LOW_TOP_SEPARATION","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"4e10cf24-489b-4103-9357-e1ecd553aa03","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":[],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[],"fallbackReason":"MODEL_ERROR","elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[33m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [33m   WARN[39m [38;5;3m[RecommendationValueV6LiveService] [39m[33mRecommendation Value V6 request failed and returned baseline: catalog unavailable[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"e161d8ad-2ff9-46a4-a6cb-630d6a037a86","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:1","BUY:2"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"ce17d905849d5af05fe244722da61b6e116edecf38ce532322929331e598d471","candidateId":"v6-short-only-20260727","mode":"SHADOW","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0.6930693069306931,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32mRecommendation Value V6 v6-short-only-20260727 loaded with SHA 88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"2b4a8de2-4d91-4b1d-ab6b-a7ce4cc4712f","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":1,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationValueV6LiveService] [39m[32m{"event":"recommendation_value_v6_live_decision","decisionId":"183b9cd8-00e0-418d-ab19-9f5eb6731d4b","matchId":"UNRESOLVED","localIdentityReference":"UNRESOLVED","gameTimeSeconds":600,"candidateSet":["BUY:2","BUY:1"],"baselineRanking":["BUY:2","BUY:1"],"v6Ranking":["BUY:2","BUY:1"],"displayedRanking":["BUY:2","BUY:1"],"modelVersion":"RECOMMENDATION_VALUE_V6_MATCH_BALANCED_ADVANTAGE_1","modelSha256":"88954d8435a6443c38ed668a076283b6a62342ad960e20b144bf6ee4c8024638","candidateId":"v6-short-only-20260727","mode":"CANARY","supportCounts":[{"actionKey":"BUY:2","supportedStateKeyCount":0,"supportedActionKeyCount":1},{"actionKey":"BUY:1","supportedStateKeyCount":0,"supportedActionKeyCount":1}],"topSeparation":0,"elapsedMs":0,"dataSource":"USER_LIVE","eligibleForProModelTraining":false}[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-P0zWoh/pro-training/events.ndjson with 0 persisted events.[39m
+[32m[Nest] 2647  - [39m07/27/2026, 4:25:50 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-NVnmTm/pro-training/events.ndjson with 0 persisted events.[39m
 PASS test/recommendation-value-v6-features.spec.ts
 
-Summary of all failing tests
-FAIL test/hero-build-contextual-v2-foundation.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-contextual-v2-foundation.spec.ts[0m:[93m73[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 73[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 74[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 76[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 77[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
-FAIL test/hero-build-production-alias.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-production-alias.spec.ts[0m:[93m58[0m:[93m23[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 58[0m       const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 59[0m         transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 61[0m         contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 62[0m       );
-    [7m   [0m [91m~~~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-    [96mtest/hero-build-production-alias.spec.ts[0m:[93m100[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m100[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m101[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m103[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m104[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
-FAIL test/hero-build-production-model-only.spec.ts
-  ● Test suite failed to run
-
-    [96mtest/hero-build-production-model-only.spec.ts[0m:[93m37[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 37[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 38[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 40[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 41[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-    [96mtest/hero-build-production-model-only.spec.ts[0m:[93m88[0m:[93m21[0m - [91merror[0m[90m TS2554: [0mExpected 5 arguments, but got 3.
-
-    [7m 88[0m     const service = new ProductionHeroBuildRecommendationService(
-    [7m   [0m [91m                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 89[0m       transitionService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m...[0m 
-    [7m 91[0m       contextualService,
-    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~[0m
-    [7m 92[0m     );
-    [7m   [0m [91m~~~~~[0m
-
-      [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m112[0m:[93m5[0m
-        [7m112[0m     private readonly recommendationValueV6LiveService:
-        [7m   [0m [96m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        [7m113[0m       RecommendationValueV6LiveService,
-        [7m   [0m [96m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
-        An argument for 'recommendationValueV6LiveService' was not provided.
-
-FAIL test/hero-build-recommendation.controller.spec.ts
-  ● Test suite failed to run
-
-    [96msrc/deadlock-live/production-hero-build-recommendation.service.ts[0m:[93m416[0m:[93m40[0m - [91merror[0m[90m TS18048: [0m'sum' is possibly 'undefined'.
-
-    [7m416[0m   return values.reduce((sum, value) => sum + Number(value), 0);
-    [7m   [0m [91m                                       ~~~[0m
-
-
-Test Suites: 4 failed, 75 passed, 79 total
-Tests:       309 passed, 309 total
+Test Suites: 79 passed, 79 total
+Tests:       323 passed, 323 total
 Snapshots:   0 total
-Time:        16.027 s
+Time:        15.103 s
 Ran all test suites.
-[32m[Nest] 2658  - [39m07/27/2026, 4:18:59 PM [32m    LOG[39m [38;5;3m[RecommendationDecisionTelemetryService] [39m[32mRecommendation telemetry ready at /tmp/recommendation-v6-telemetry-lFsapO/pro-training/events.ndjson with 0 persisted events.[39m
-error Command failed with exit code 1.
-info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.
-error Command failed.
-Exit code: 1
-Command: /opt/hostedtoolcache/node/22.23.1/x64/bin/node
-Arguments: /usr/local/lib/node_modules/yarn/lib/cli.js test --runInBand
-Directory: /home/runner/work/deadlock_dynamo_helper_v2/deadlock_dynamo_helper_v2/apps/api
-Output:
-
-info Visit https://yarnpkg.com/en/docs/cli/workspace for documentation about this command.
-STATUS=1
+Done in 17.80s.
+Done in 18.00s.
+STATUS=0
 

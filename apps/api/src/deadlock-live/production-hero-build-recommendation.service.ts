@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type {
   MinimalMatchState,
   MinimalPlayerState,
@@ -109,9 +109,10 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
     heroBuildTransitionAggregationService: HeroBuildTransitionAggregationService,
     recipeAwareTimelineReconciliationService: RecipeAwareTimelineReconciliationService,
     private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
-    private readonly recommendationValueV6LiveService:
-      RecommendationValueV6LiveService,
-    private readonly liveMatchStateService: LiveMatchStateService,
+    @Optional()
+    private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,
+    @Optional()
+    private readonly liveMatchStateService?: LiveMatchStateService,
   ) {
     super(
       heroBuildTransitionAggregationService,
@@ -150,6 +151,9 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
       canonicalRequest,
       requestedHeroId,
     );
+    if (!this.recommendationValueV6LiveService) {
+      return currentProductionResponse;
+    }
     const valueV6Context =
       this.recommendationValueV6LiveService.getMode() === 'DISABLED'
         ? undefined
@@ -203,6 +207,9 @@ export class ProductionHeroBuildRecommendationService extends HeroBuildRecommend
   private resolveRecommendationValueV6LiveContext(
     request: HeroBuildContextualRecommendationRequest,
   ): RecommendationValueV6LiveContext {
+    if (!this.liveMatchStateService) {
+      return createRequestOnlyRecommendationValueV6Context(request);
+    }
     const requestedHeroId = canonicalHeroId(request.heroId);
     const states = this.liveMatchStateService
       .getAllStates()
@@ -409,11 +416,15 @@ function sumAvailableSouls(
   if (players.length === 0) {
     return undefined;
   }
-  const values = players.map((player) => finiteNumber(player.souls));
-  if (values.some((value) => value === undefined)) {
-    return undefined;
+  let total = 0;
+  for (const player of players) {
+    const value = finiteNumber(player.souls);
+    if (value === undefined) {
+      return undefined;
+    }
+    total += value;
   }
-  return values.reduce((sum, value) => sum + Number(value), 0);
+  return total;
 }
 
 function finiteNumber(value: number | undefined): number | undefined {
