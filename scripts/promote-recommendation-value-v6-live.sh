@@ -5,9 +5,10 @@ EXPECTED_SHA256='799803f4882ca2ece436ab1087c41641713377f8a33f9bab0f0f4636a381938
 SOURCE_RELATIVE_DIR='recommendation-value-v6-prior-sweep-db-timeline-20260726/coarse-s10-a0p1-m10-w025-short-only-v2-3dbbdadce6b7'
 TARGET_RELATIVE_DIR='recommendation-value-v6-live-candidates/v6-short-only-20260727'
 SOURCE_APP_DIR='/app/apps/api/storage/recommendation-value-v6-prior-sweep-db-timeline-20260726/coarse-s10-a0p1-m10-w025-short-only-v2-3dbbdadce6b7'
+VOLUME_NAME="${DEADLOCK_STORAGE_VOLUME_NAME:-deadlock_dynamo_helper_deadlock-storage}"
 
 VOLUME_ROOT="$(sudo docker volume inspect \
-  deadlock_dynamo_helper_deadlock-storage \
+  "$VOLUME_NAME" \
   --format '{{ .Mountpoint }}')"
 SOURCE_DIR="$VOLUME_ROOT/$SOURCE_RELATIVE_DIR"
 TARGET_DIR="$VOLUME_ROOT/$TARGET_RELATIVE_DIR"
@@ -17,8 +18,16 @@ for file_name in model.json manifest.json audit.json evaluation.json; do
 done
 
 if sudo test -e "$TARGET_DIR"; then
-  echo "Refusing to overwrite immutable target: $TARGET_DIR" >&2
-  exit 1
+  for file_name in model.json manifest.json audit.json evaluation.json promotion.json; do
+    sudo test -f "$TARGET_DIR/$file_name"
+  done
+  ACTUAL_SHA256="$(sudo sha256sum "$TARGET_DIR/model.json" | awk '{print $1}')"
+  if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+    echo "Immutable target exists with an unexpected model SHA-256: $ACTUAL_SHA256" >&2
+    exit 1
+  fi
+  echo "Recommendation Value V6 artifact is already promoted at $TARGET_DIR"
+  exit 0
 fi
 
 sudo mkdir -p "$TARGET_DIR"
