@@ -179,6 +179,13 @@ export function generateRecommendationHistoricalCandidatesFromSnapshot(input: {
   artifact: RecommendationCandidateGeneratorSnapshotArtifact;
 }): RecommendationHistoricalCandidateInput[] {
   validateRecommendationCandidateGeneratorSnapshotArtifact(input.artifact);
+  return generateRecommendationHistoricalCandidatesFromValidatedSnapshot(input);
+}
+
+export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(input: {
+  decision: HeroBuildDecisionDatasetV3Row;
+  artifact: RecommendationCandidateGeneratorSnapshotArtifact;
+}): RecommendationHistoricalCandidateInput[] {
   const matchTime = requiredTimestamp(
     input.decision.matchStartTime,
     'decision.matchStartTime',
