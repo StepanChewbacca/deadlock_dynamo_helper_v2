@@ -63,10 +63,12 @@ jobs:
           model_path = Path(os.environ['MODEL_FILE'])
           output_path = Path(os.environ['OUTPUT_FILE'])
           data = json.loads(model_path.read_text())
-          nested = data.get('model') if isinstance(data.get('model'), dict) else data
+          counts = data.get('counts') if isinstance(data.get('counts'), dict) else {}
+          nested_model = data.get('model') if isinstance(data.get('model'), dict) else {}
+          tables = counts or nested_model or data
 
           def table(name):
-              value = nested.get(name, {}) if isinstance(nested, dict) else {}
+              value = tables.get(name, {}) if isinstance(tables, dict) else {}
               return value if isinstance(value, dict) else {}
 
           def count_record(value):
@@ -136,10 +138,11 @@ jobs:
 
           summary = {
               'topLevelKeys': sorted(data.keys()),
-              'modelVersion': data.get('modelVersion') or nested.get('modelVersion'),
-              'modelKind': data.get('modelKind') or nested.get('modelKind'),
-              'options': data.get('options') or nested.get('options'),
-              'actionResidualScale': data.get('actionResidualScale') or nested.get('actionResidualScale'),
+              'countsKeys': sorted(counts.keys()),
+              'modelVersion': data.get('modelVersion') or nested_model.get('modelVersion'),
+              'modelKind': data.get('modelKind') or nested_model.get('modelKind'),
+              'options': data.get('options') or nested_model.get('options'),
+              'actionResidualScale': data.get('actionResidualScale') or nested_model.get('actionResidualScale'),
               'state': summarize('state'),
               'action': summarize('action'),
           }
@@ -150,20 +153,24 @@ jobs:
           import json
           import math
           import os
+          import re
           from collections import Counter
           from pathlib import Path
 
           log_path = Path(os.environ['LOG_FILE'])
           output_path = Path(os.environ['OUTPUT_FILE'])
+          ansi = re.compile(r'\x1b\[[0-9;]*m')
           decisions = []
-          for line in log_path.read_text(errors='replace').splitlines():
-              if 'recommendation_value_v6_live_decision' not in line:
+          for raw_line in log_path.read_text(errors='replace').splitlines():
+              if 'recommendation_value_v6_live_decision' not in raw_line:
                   continue
+              line = ansi.sub('', raw_line)
               start = line.find('{')
-              if start < 0:
+              end = line.rfind('}')
+              if start < 0 or end < start:
                   continue
               try:
-                  value = json.loads(line[start:])
+                  value = json.loads(line[start:end + 1])
               except json.JSONDecodeError:
                   continue
               if value.get('event') == 'recommendation_value_v6_live_decision':
@@ -174,29 +181,30 @@ jobs:
 
           fallback_counts = Counter(str(row.get('fallbackReason')) for row in decisions if row.get('fallbackReason'))
           mode_counts = Counter(str(row.get('mode')) for row in decisions)
+          match_counts = Counter(str(row.get('matchId')) for row in decisions)
           candidate_counts = [len(row.get('candidateSet') or []) for row in decisions]
           displayed_counts = [len(row.get('displayedRanking') or []) for row in decisions]
+          v6_ranking_counts = [len(row.get('v6Ranking') or []) for row in decisions]
           separations = numeric(row.get('topSeparation') for row in decisions)
           support_counts = []
-          direct_support_counts = []
           for row in decisions:
               for support in row.get('supportCounts') or []:
                   value = support.get('supportedActionKeyCount')
                   if isinstance(value, int):
                       support_counts.append(value)
-                  direct = support.get('directSupportedActionKeyCount')
-                  if isinstance(direct, int):
-                      direct_support_counts.append(direct)
 
           summary = {
               'decisionCount': len(decisions),
               'modeCounts': dict(mode_counts),
+              'matchCounts': dict(match_counts.most_common()),
               'fallbackReasonCounts': dict(fallback_counts.most_common()),
+              'successfulV6DecisionCount': sum(1 for row in decisions if not row.get('fallbackReason')),
+              'fallbackDecisionCount': sum(1 for row in decisions if row.get('fallbackReason')),
               'candidateCountRange': [min(candidate_counts), max(candidate_counts)] if candidate_counts else None,
               'displayedCountRange': [min(displayed_counts), max(displayed_counts)] if displayed_counts else None,
+              'v6RankingCountRange': [min(v6_ranking_counts), max(v6_ranking_counts)] if v6_ranking_counts else None,
               'topSeparationRange': [min(separations), max(separations)] if separations else None,
               'candidateSupportRange': [min(support_counts), max(support_counts)] if support_counts else None,
-              'directCandidateSupportRange': [min(direct_support_counts), max(direct_support_counts)] if direct_support_counts else None,
               'recentDecisions': decisions[-100:],
           }
           output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
