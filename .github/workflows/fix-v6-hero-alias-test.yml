@@ -1,0 +1,102 @@
+name: Fix V6 Hero Alias Regression Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.ref == 'agent/fix-v6-hero-id-namespace'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Fix alias coverage expectation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/api/test/recommendation-value-v6-production-safe.spec.ts')
+          source = path.read_text()
+
+          old_import = (
+              "import {\n"
+              "  HERO_ID_ALIASES,\n"
+              "  resolveRecommendationValueV6HeroId,\n"
+              "  resolveValveHeroIdFromGep,\n"
+              "} from '../src/deadlock-live/hero-id-aliases';"
+          )
+          new_import = (
+              "import {\n"
+              "  canonicalHeroId,\n"
+              "  HERO_ID_ALIASES,\n"
+              "  resolveRecommendationValueV6HeroId,\n"
+              "  resolveValveHeroIdFromGep,\n"
+              "} from '../src/deadlock-live/hero-id-aliases';"
+          )
+          if source.count(old_import) != 1:
+              raise SystemExit('Expected hero-id import block was not found exactly once.')
+          source = source.replace(old_import, new_import, 1)
+
+          old_test = (
+              "  it('maps every supported hero alias into the item-history namespace', () => {\n"
+              "    for (const [canonicalIdText, aliases] of Object.entries(HERO_ID_ALIASES)) {\n"
+              "      const canonicalId = Number(canonicalIdText);\n"
+              "      const expectedValueHeroId = resolveValveHeroIdFromGep(canonicalId);\n"
+              "      for (const alias of aliases) {\n"
+              "        expect(resolveRecommendationValueV6HeroId(alias)).toBe(\n"
+              "          expectedValueHeroId,\n"
+              "        );\n"
+              "      }\n"
+              "    }\n"
+              "  });"
+          )
+          new_test = (
+              "  it('maps every supported hero id into the item-history namespace', () => {\n"
+              "    const supportedHeroIds = new Set<number>([\n"
+              "      ...Object.keys(HERO_ID_ALIASES).map(Number),\n"
+              "      ...Object.values(HERO_ID_ALIASES).flat(),\n"
+              "    ]);\n"
+              "\n"
+              "    for (const heroId of supportedHeroIds) {\n"
+              "      expect(resolveRecommendationValueV6HeroId(heroId)).toBe(\n"
+              "        resolveValveHeroIdFromGep(canonicalHeroId(heroId)),\n"
+              "      );\n"
+              "    }\n"
+              "  });"
+          )
+          if source.count(old_test) != 1:
+              raise SystemExit('Expected alias coverage test was not found exactly once.')
+          source = source.replace(old_test, new_test, 1)
+          source = source.replace(
+              "'uses candidate hero %i and V6 hero %i for requested hero %i'",
+              "'uses requested hero %i, candidate hero %i and V6 hero %i'",
+              1,
+          )
+          path.write_text(source)
+          PY
+
+          rm -f .github/workflows/fix-v6-hero-alias-test.yml
+          git diff --check
+
+      - name: Commit test fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            apps/api/test/recommendation-value-v6-production-safe.spec.ts \
+            .github/workflows/fix-v6-hero-alias-test.yml
+          git commit -m 'test: cover overlapping hero aliases'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
