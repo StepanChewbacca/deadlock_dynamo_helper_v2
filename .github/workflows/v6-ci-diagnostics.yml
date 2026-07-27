@@ -37,53 +37,53 @@ jobs:
                   "import { Injectable, Logger, Optional } from '@nestjs/common';",
               ),
               (
-                  """    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
-              private readonly recommendationValueV6LiveService:
-                RecommendationValueV6LiveService,
-              private readonly liveMatchStateService: LiveMatchStateService,""",
-                  """    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,
-              @Optional()
-              private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,
-              @Optional()
-              private readonly liveMatchStateService?: LiveMatchStateService,""",
+                  "    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,\n"
+                  "    private readonly recommendationValueV6LiveService:\n"
+                  "      RecommendationValueV6LiveService,\n"
+                  "    private readonly liveMatchStateService: LiveMatchStateService,",
+                  "    private readonly contextualV3LiveService: HeroBuildContextualV3LiveService,\n"
+                  "    @Optional()\n"
+                  "    private readonly recommendationValueV6LiveService?: RecommendationValueV6LiveService,\n"
+                  "    @Optional()\n"
+                  "    private readonly liveMatchStateService?: LiveMatchStateService,",
               ),
               (
-                  """    const valueV6Context =
-              this.recommendationValueV6LiveService.getMode() === 'DISABLED'
-                ? undefined
-                : this.resolveRecommendationValueV6LiveContext(canonicalRequest);""",
-                  """    if (!this.recommendationValueV6LiveService) {
-              return currentProductionResponse;
-            }
-            const valueV6Context =
-              this.recommendationValueV6LiveService.getMode() === 'DISABLED'
-                ? undefined
-                : this.resolveRecommendationValueV6LiveContext(canonicalRequest);""",
+                  "    const valueV6Context =\n"
+                  "      this.recommendationValueV6LiveService.getMode() === 'DISABLED'\n"
+                  "        ? undefined\n"
+                  "        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);",
+                  "    if (!this.recommendationValueV6LiveService) {\n"
+                  "      return currentProductionResponse;\n"
+                  "    }\n"
+                  "    const valueV6Context =\n"
+                  "      this.recommendationValueV6LiveService.getMode() === 'DISABLED'\n"
+                  "        ? undefined\n"
+                  "        : this.resolveRecommendationValueV6LiveContext(canonicalRequest);",
               ),
               (
-                  """  ): RecommendationValueV6LiveContext {
-              const requestedHeroId = canonicalHeroId(request.heroId);""",
-                  """  ): RecommendationValueV6LiveContext {
-              if (!this.liveMatchStateService) {
-                return createRequestOnlyRecommendationValueV6Context(request);
-              }
-              const requestedHeroId = canonicalHeroId(request.heroId);""",
+                  "  ): RecommendationValueV6LiveContext {\n"
+                  "    const requestedHeroId = canonicalHeroId(request.heroId);",
+                  "  ): RecommendationValueV6LiveContext {\n"
+                  "    if (!this.liveMatchStateService) {\n"
+                  "      return createRequestOnlyRecommendationValueV6Context(request);\n"
+                  "    }\n"
+                  "    const requestedHeroId = canonicalHeroId(request.heroId);",
               ),
               (
-                  """  const values = players.map((player) => finiteNumber(player.souls));
-            if (values.some((value) => value === undefined)) {
-              return undefined;
-            }
-            return values.reduce((sum, value) => sum + Number(value), 0);""",
-                  """  let total = 0;
-            for (const player of players) {
-              const value = finiteNumber(player.souls);
-              if (value === undefined) {
-                return undefined;
-              }
-              total += value;
-            }
-            return total;""",
+                  "  const values = players.map((player) => finiteNumber(player.souls));\n"
+                  "  if (values.some((value) => value === undefined)) {\n"
+                  "    return undefined;\n"
+                  "  }\n"
+                  "  return values.reduce((sum, value) => sum + Number(value), 0);",
+                  "  let total = 0;\n"
+                  "  for (const player of players) {\n"
+                  "    const value = finiteNumber(player.souls);\n"
+                  "    if (value === undefined) {\n"
+                  "      return undefined;\n"
+                  "    }\n"
+                  "    total += value;\n"
+                  "  }\n"
+                  "  return total;",
               ),
           ]
 
