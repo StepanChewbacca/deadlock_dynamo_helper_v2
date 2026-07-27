@@ -53,13 +53,29 @@ export interface LiveBuildRecommendationAction {
   situationalLower95OddsRatio?: number;
   matchupObservationCount?: number;
   matchupSignals?: LiveBuildRecommendationMatchupSignal[];
+  confidenceSemantic?: 'CANDIDATE_GENERATOR_EVIDENCE';
+  valueV6?: {
+    rankingModel: 'RECOMMENDATION_VALUE_V6';
+    baselineRank: number;
+    modelRank?: number;
+    actionUtility: number;
+    actionAdvantage: number;
+    directSupportedActionKeyCount: number;
+    totalSupportedActionKeyCount: number;
+    supportType: 'DIRECT_ACTION' | 'GENERIC_ONLY' | 'UNSUPPORTED';
+  };
 }
 
 export interface LiveBuildRecommendationPayload {
   mode: 'EXACT' | 'BACKOFF' | 'NO_MATCH';
   action: LiveBuildRecommendationAction;
   alternatives: LiveBuildRecommendationAction[];
-  recommendationModel?: 'RECOMMENDATION_VALUE_V6';
+  recommendationModel?:
+    | 'RECOMMENDATION_VALUE_V6'
+    | 'PRO_BUILD_CANDIDATE_GENERATOR';
+  rankingMode?: 'VALUE_V6' | 'CANDIDATE_GENERATOR_FALLBACK';
+  rankingSource?: 'RECOMMENDATION_VALUE_V6' | 'CANDIDATE_GENERATOR';
+  fallbackReason?: string;
   modelVersion?: string;
   modelSha256?: string;
   candidateId?: string;
