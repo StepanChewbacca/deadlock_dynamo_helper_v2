@@ -1,0 +1,30 @@
+name: Run V6 Exclusive Migration
+
+"on":
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply migration
+        run: python3 scripts/apply-v6-exclusive.py
+      - name: Commit migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api apps/overwolf-client
+          git commit -m 'feat: use Recommendation Value V6 exclusively'
+          git push origin "HEAD:${{ github.head_ref }}"
