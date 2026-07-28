@@ -1,0 +1,123 @@
+name: Recommendation V8 Replay Deploy Resume V6
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/recommendation-v8-replay-deploy-resume-v6.yml'
+      - '.github/training-requests/recommendation-v8-replay-deploy-resume-v6.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-replay-deploy-resume
+  cancel-in-progress: false
+
+jobs:
+  build-deploy-resume:
+    runs-on: self-hosted
+    timeout-minutes: 180
+    steps:
+      - name: Checkout fixed training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Check one-shot request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-replay-deploy-resume-v6.json'
+          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+      - name: Build and test bounded-memory replay
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder_image="deadlock-recommendation-v8-replay-v6-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          runtime_image="deadlock-recommendation-v8-replay-v6:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$builder_image" .
+          sudo docker run --rm --entrypoint yarn "$builder_image" workspace @deadlock-live-probe/api test recommendation-candidate-generator-snapshot.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-pro-replay-fractional-snapshot.spec.ts --runInBand
+          sudo docker build -t "$runtime_image" .
+          echo "TRAINING_IMAGE=$runtime_image" >> "$GITHUB_ENV"
+
+      - name: Verify preserved artifacts and resolve mounts
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          production_api_container="$(cd "$deploy_dir" && sudo docker compose ps -q api)"
+          test -n "$production_api_container"
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_api_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_api_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
+          test -n "$storage_type"
+          test -n "$storage_source"
+          run_dir="$(readlink -f /home/ubuntu/apps/deadlock_dynamo_helper-training/current)"
+          test -d "$run_dir"
+          test "$(jq -r '.artifact.sha256' "$storage_source/build-decision-dataset-v3/manifest.json")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          jq -e '.auditPassed == true and .artifact.rowCount == 6188423' "$storage_source/build-decision-dataset-v3/manifest.json" >/dev/null
+          jq -e '.snapshots[] | select(.snapshotId == "v8-20260722-c1-ff04970fda51")' "$storage_source/recommendation-candidate-generator-snapshots/registry.json" >/dev/null
+          test -s "$storage_source/recommendation-candidate-generator-snapshots/v8-20260722-c1-ff04970fda51.json"
+          echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$run_dir/status.json")" >> "$GITHUB_ENV"
+
+      - name: Replace only isolated training API
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          mount_args=()
+          if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
+            mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
+            mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
+          fi
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              break
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423' >/dev/null
+
+      - name: Resume detached diagnostic pipeline
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$TRAINING_RUN_DIR/"
+          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$TRAINING_RUN_DIR/"
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          for attempt in $(seq 1 45); do
+            if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          tail -n 160 "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
