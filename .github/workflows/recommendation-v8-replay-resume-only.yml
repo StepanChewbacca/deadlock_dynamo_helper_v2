@@ -1,0 +1,106 @@
+name: Recommendation V8 Replay Resume Only
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/recommendation-v8-replay-resume-only.yml'
+      - '.github/training-requests/recommendation-v8-replay-resume-only.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-replay-resume-only
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Check one-shot request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-replay-resume-only.json'
+          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify isolated runtime and preserved lineage
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          test "$(sudo docker inspect --format='{{.State.Running}}' "$container")" = 'true'
+          image="$(sudo docker inspect --format='{{.Config.Image}}' "$container")"
+          case "$image" in
+            deadlock-recommendation-v8-replay-streaming-deploy:*|deadlock-recommendation-v8-replay-streaming:*) ;;
+            *) echo "Unexpected isolated image: $image" >&2; exit 1 ;;
+          esac
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423' >/dev/null
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/registry | jq -e '.snapshots[] | select(.snapshotId == "v8-20260722-c1-ff04970fda51")' >/dev/null
+          run_dir="$(readlink -f /home/ubuntu/apps/deadlock_dynamo_helper-training/current)"
+          test -d "$run_dir"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$run_dir/"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$run_dir/status.json")" >> "$GITHUB_ENV"
+
+      - name: Start detached resume supervisor
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          if sudo docker exec "$container" sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
+            echo 'Resume supervisor is already running.'
+          else
+            sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 "$container" node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          fi
+          for attempt in $(seq 1 120); do
+            overall="$(cat "$TRAINING_RUN_DIR/status.json" 2>/dev/null || true)"
+            replay="$(curl --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
+            if echo "$overall" | jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' >/dev/null 2>&1 && echo "$replay" | jq -e '.state == "RUNNING" and (.phase == "PREPARING" or .phase == "PARTITIONING" or .phase == "REPLAYING")' >/dev/null 2>&1; then
+              echo "$overall"
+              echo "$replay"
+              exit 0
+            fi
+            if echo "$overall" | jq -e '.state == "FAILED"' >/dev/null 2>&1 || echo "$replay" | jq -e '.state == "FAILED"' >/dev/null 2>&1; then
+              echo "$overall"
+              echo "$replay"
+              tail -n 180 "$TRAINING_RUN_DIR/training.log" || true
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$container"
+          tail -n 180 "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
+
+      - name: Consume successful request
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-replay-resume-only.json'
+          jq '.state="CONSUMED" | .consumedAt=(now | todate)' "$request" > "$request.tmp"
+          mv "$request.tmp" "$request"
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$request"
+          git commit -m 'chore: consume replay resume request'
+          git fetch origin agent/recommendation-value-v8-passive-shadow-1
+          git rebase origin/agent/recommendation-value-v8-passive-shadow-1
+          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
