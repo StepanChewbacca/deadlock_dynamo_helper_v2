@@ -1,9 +1,9 @@
 {
-  "state": "CONSUMED",
-  "requestedAt": "2026-07-28T19:25:00Z",
-  "reason": "The diagnostic pipeline exited because one status GET timed out while the candidate snapshot continued RUNNING/WRITING. Patch transient GET retries and resume without rebuilding Dataset V3.",
+  "state": "REQUESTED",
+  "operation": "REPLAY_STREAMING_SNAPSHOT",
+  "requestedAt": "2026-07-28T19:40:00Z",
+  "reason": "Historical Replay failed in PREPARING with Invalid string length while readFile(path, utf8) attempted to materialize the full candidate snapshot. Stream and shard policies by hero, preserve the completed Dataset V3 and candidate snapshot, replace only the isolated training API, and resume the diagnostic pipeline.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false,
-  "consumedAt": "2026-07-28T19:30:00Z"
+  "randomizedCanaryAuthorized": false
 }
