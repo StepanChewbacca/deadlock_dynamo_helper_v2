@@ -1,0 +1,8 @@
+{
+  "state": "REQUESTED",
+  "requestedAt": "2026-07-28T20:03:00Z",
+  "reason": "The fixed bounded-memory isolated API is already running and preserved artifacts are available. Start only the detached resume supervisor and verify Historical Replay progresses beyond its prior Invalid string length failure.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
