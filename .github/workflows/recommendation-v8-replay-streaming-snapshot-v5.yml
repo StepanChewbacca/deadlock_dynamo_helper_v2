@@ -36,7 +36,7 @@ jobs:
           fi
           echo 'run=true' >> "$GITHUB_OUTPUT"
 
-      - name: Apply streaming snapshot reader
+      - name: Apply canonical catalog hash fix
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
@@ -56,29 +56,47 @@ jobs:
           sudo docker build -t "$runtime_image" .
           echo "TRAINING_IMAGE=$runtime_image" >> "$GITHUB_ENV"
 
-      - name: Commit validated fix and consume request
+      - name: Commit validated source and regression test
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          request='.github/training-requests/recommendation-v8-replay-streaming-snapshot-v5.json'
-          jq '.state="CONSUMED" | .consumedAt=(now | todate)' "$request" > "$request.tmp"
-          mv "$request.tmp" "$request"
           git config user.name 'Recommendation V8 Recovery'
           git config user.email 'actions@users.noreply.github.com'
-          git add apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts "$request"
-          git commit -m 'fix: stream large candidate snapshots in historical replay'
-          git fetch origin agent/recommendation-value-v8-passive-shadow-1
-          git rebase origin/agent/recommendation-value-v8-passive-shadow-1
-          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
+          git add apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: canonicalize streamed replay catalog hash'
+            git fetch origin agent/recommendation-value-v8-passive-shadow-1
+            git rebase origin/agent/recommendation-value-v8-passive-shadow-1
+            git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
+          fi
 
-      - name: Resolve isolated runtime configuration
+      - name: Verify preserved artifacts and resolve isolated mounts
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           container='deadlock-recommendation-v8-training'
           test "$(sudo docker inspect --format='{{.State.Running}}' "$container")" = 'true'
+          sudo docker exec "$container" node - <<'NODE'
+          const fs = require('fs');
+          const source = JSON.parse(fs.readFileSync('/app/apps/api/storage/build-decision-dataset-v3/manifest.json', 'utf8'));
+          const sourceAudit = JSON.parse(fs.readFileSync('/app/apps/api/storage/build-decision-dataset-v3/audit.json', 'utf8'));
+          const registry = JSON.parse(fs.readFileSync('/app/apps/api/storage/recommendation-candidate-generator-snapshots/registry.json', 'utf8'));
+          const expectedSourceSha = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad';
+          const snapshotId = 'v8-20260722-c1-ff04970fda51';
+          if (source.artifact?.sha256 !== expectedSourceSha || source.artifact?.rowCount !== 6188423 || source.auditPassed !== true || sourceAudit.passed !== true) {
+            throw new Error('Completed Dataset V3 verification failed.');
+          }
+          const entry = registry.snapshots?.find((value) => value.snapshotId === snapshotId);
+          if (!entry) {
+            throw new Error('Completed candidate snapshot registry entry is missing.');
+          }
+          const snapshotPath = `/app/apps/api/storage/recommendation-candidate-generator-snapshots/${entry.fileName}`;
+          if (!fs.statSync(snapshotPath).isFile() || fs.statSync(snapshotPath).size <= 0) {
+            throw new Error('Completed candidate snapshot artifact is unavailable.');
+          }
+          NODE
           storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$container")"
           storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$container")"
           storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$container")"
@@ -86,6 +104,8 @@ jobs:
           test -d "$run_dir"
           test -n "$storage_type"
           test -n "$storage_source"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$run_dir/"
           echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
@@ -97,37 +117,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
-          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null
+          container='deadlock-recommendation-v8-training'
+          sudo docker rm -f "$container" >/dev/null
           mount_args=()
           if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
             mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
-          else
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
             mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
           fi
-          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          sudo docker run -d --name "$container" --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
           for attempt in $(seq 1 90); do
-            curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status >/dev/null && break
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              break
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+              sudo docker logs --tail=300 "$container"
+              exit 1
+            fi
             sleep 2
           done
-          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423'
-          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status | jq -e '.state == "COMPLETE" and .snapshotId == "v8-20260722-c1-ff04970fda51"'
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423' >/dev/null
+          sudo docker exec "$container" node - <<'NODE'
+          const fs = require('fs');
+          const registry = JSON.parse(fs.readFileSync('/app/apps/api/storage/recommendation-candidate-generator-snapshots/registry.json', 'utf8'));
+          const snapshotId = 'v8-20260722-c1-ff04970fda51';
+          const entry = registry.snapshots?.find((value) => value.snapshotId === snapshotId);
+          if (!entry) throw new Error('Candidate snapshot registry entry is missing after isolated API replacement.');
+          const path = `/app/apps/api/storage/recommendation-candidate-generator-snapshots/${entry.fileName}`;
+          if (!fs.statSync(path).isFile() || fs.statSync(path).size <= 0) throw new Error('Candidate snapshot artifact is missing after isolated API replacement.');
+          NODE
 
       - name: Resume detached diagnostic pipeline
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$TRAINING_RUN_DIR/"
-          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$TRAINING_RUN_DIR/"
-          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
-          for attempt in $(seq 1 30); do
-            if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null; then
-              cat "$TRAINING_RUN_DIR/status.json"
-              curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status
+          container='deadlock-recommendation-v8-training'
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 "$container" node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          for attempt in $(seq 1 180); do
+            overall="$(cat "$TRAINING_RUN_DIR/status.json" 2>/dev/null || true)"
+            replay="$(curl --silent --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
+            if echo "$overall" | jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' >/dev/null 2>&1 && echo "$replay" | jq -e '.state == "RUNNING" and (.phase == "PARTITIONING" or .phase == "REPLAYING" or .phase == "FINALIZING")' >/dev/null 2>&1; then
+              echo "$overall"
+              echo "$replay"
               exit 0
             fi
-            sleep 1
+            if echo "$overall" | jq -e '.state == "FAILED"' >/dev/null 2>&1 || echo "$replay" | jq -e '.state == "FAILED"' >/dev/null 2>&1; then
+              echo "$overall"
+              echo "$replay"
+              tail -n 200 "$TRAINING_RUN_DIR/training.log" || true
+              exit 1
+            fi
+            sleep 2
           done
-          tail -n 120 "$TRAINING_RUN_DIR/training.log" || true
+          sudo docker logs --tail=300 "$container"
+          tail -n 200 "$TRAINING_RUN_DIR/training.log" || true
           exit 1
+
+      - name: Consume successful request
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-replay-streaming-snapshot-v5.json'
+          jq '.state="CONSUMED" | .consumedAt=(now | todate)' "$request" > "$request.tmp"
+          mv "$request.tmp" "$request"
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$request"
+          git commit -m 'chore: consume canonical replay hash recovery'
+          git fetch origin agent/recommendation-value-v8-passive-shadow-1
+          git rebase origin/agent/recommendation-value-v8-passive-shadow-1
+          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
