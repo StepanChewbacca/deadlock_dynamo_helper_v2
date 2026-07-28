@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "requestedAt": "2026-07-28T05:12:00.000Z",
-  "operation": "AUDIT_AND_DELETE_EXACT_OBSOLETE_RECOMMENDATION_ARTIFACTS",
-  "preserveProductionRuntime": true,
-  "preserveActiveTraining": true,
-  "productionRankingChangeAuthorized": false
-}
