@@ -12,4 +12,9 @@ source = source.replace(
     "    r'''      await writeAll(\n        handle,\n        Buffer.from(`${JSON.stringify(row)}\\n`, 'utf8'),\n      );''',",
     1,
 )
+source = source.replace(
+    "  if (!header || !policyHash || mode !== 'TAIL' || policyDepth !== 0) {",
+    "  if (!header || !policyHash || (mode as string) !== 'TAIL' || policyDepth !== 0) {",
+    1,
+)
 exec(compile(source, str(path), 'exec'))
