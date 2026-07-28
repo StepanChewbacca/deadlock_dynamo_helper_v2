@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: recommendation-v8-replay-streaming-deploy
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy-and-resume:
@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           request='.github/training-requests/recommendation-v8-replay-streaming-deploy.json'
-          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ]; then
+          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ] || [ "$(jq -r '.operation // empty' "$request")" != 'POSTGRES_TIMELINE_REPLAY' ]; then
             echo 'run=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -42,11 +42,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image="deadlock-recommendation-v8-replay-streaming-deploy:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="deadlock-recommendation-v8-postgres-replay:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           sudo docker build -t "$image" .
           echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
 
-      - name: Verify preserved artifacts inside current container
+      - name: Verify preserved immutable inputs
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
@@ -80,13 +80,23 @@ jobs:
           test -n "$storage_type"
           test -n "$storage_source"
           test -d "$run_dir"
+          test -s "$run_dir/resolved-training-config.json"
           cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
           cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$run_dir/"
           echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
           echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
-          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$run_dir/status.json")" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=postgres-replay-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Remove only invalid replay descendants
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          sudo docker exec "$container" sh -lc "rm -rf /app/apps/api/storage/recommendation-historical-pro-replay-v1 /app/apps/api/storage/recommendation-pro-decision-dataset-v6-1 /app/apps/api/storage/recommendation-behavioral-v5-1 /app/apps/api/storage/recommendation-value-v8-diagnostic-1 && rm -f /app/apps/api/storage/match-timeline-events-v1/postgres-cache-manifest.json"
+          sudo docker exec "$container" sh -lc "test -s /app/apps/api/storage/build-decision-dataset-v3/dataset.ndjson && test -s /app/apps/api/storage/recommendation-candidate-generator-snapshots/registry.json"
 
       - name: Replace only isolated training API
         if: steps.request.outputs.run == 'true'
@@ -117,31 +127,32 @@ jobs:
             sleep 2
           done
           curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423' >/dev/null
-          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status | jq -e '.state == "COMPLETE" and .snapshotId == "v8-20260722-c1-ff04970fda51"' >/dev/null
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/registry | jq -e '.snapshots | any(.snapshotId == "v8-20260722-c1-ff04970fda51")' >/dev/null
 
-      - name: Resume detached diagnostic pipeline
+      - name: Start PostgreSQL-backed replay pipeline
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           container='deadlock-recommendation-v8-training'
           sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 "$container" node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 90); do
             status="$(curl --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
-            if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null && echo "$status" | jq -e '.state == "RUNNING" and (.phase == "PREPARING" or .phase == "PARTITIONING" or .phase == "REPLAYING")' >/dev/null; then
+            if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null && echo "$status" | jq -e '.state == "RUNNING" and .phase == "PREPARING"' >/dev/null; then
               cat "$TRAINING_RUN_DIR/status.json"
               echo "$status"
               exit 0
             fi
             if echo "$status" | jq -e '.state == "FAILED"' >/dev/null 2>&1; then
               echo "$status"
-              tail -n 160 "$TRAINING_RUN_DIR/training.log" || true
+              tail -n 200 "$TRAINING_RUN_DIR/training.log" || true
+              sudo docker logs --tail=300 "$container" || true
               exit 1
             fi
             sleep 2
           done
           sudo docker logs --tail=300 "$container"
-          tail -n 160 "$TRAINING_RUN_DIR/training.log" || true
+          tail -n 200 "$TRAINING_RUN_DIR/training.log" || true
           exit 1
 
       - name: Consume successful request
@@ -150,12 +161,12 @@ jobs:
         run: |
           set -euo pipefail
           request='.github/training-requests/recommendation-v8-replay-streaming-deploy.json'
-          jq '.state="CONSUMED" | .consumedAt=(now | todate)' "$request" > "$request.tmp"
+          jq '.state="CONSUMED" | .consumedAt=(now | todate) | .deployedCommit=env.GITHUB_SHA' "$request" > "$request.tmp"
           mv "$request.tmp" "$request"
           git config user.name 'Recommendation V8 Recovery'
           git config user.email 'actions@users.noreply.github.com'
           git add "$request"
-          git commit -m 'chore: consume replay streaming deploy request'
+          git commit -m 'chore: consume PostgreSQL replay request'
           git fetch origin agent/recommendation-value-v8-passive-shadow-1
           git rebase origin/agent/recommendation-value-v8-passive-shadow-1
           git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
