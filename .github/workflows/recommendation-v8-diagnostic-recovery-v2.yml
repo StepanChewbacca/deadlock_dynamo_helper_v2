@@ -1,0 +1,170 @@
+name: Recommendation V8 Diagnostic Recovery V2
+
+on:
+  push:
+    paths:
+      - '.github/training-requests/recommendation-v8-diagnostic-recovery-v2.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: recommendation-v8-diagnostic-recovery-v2
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resume bounded diagnostic pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker='.github/training-requests/recommendation-v8-diagnostic-recovery-v2.json'
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          current="$run_root/current"
+          container='deadlock-recommendation-v8-training'
+          report="$RUNNER_TEMP/recommendation-v8-diagnostic-recovery-v2.md"
+
+          if [ ! -f "$marker" ]; then
+            echo 'Recovery marker is absent.'
+            exit 0
+          fi
+
+          active_run="$(readlink -f "$current")"
+          test -n "$active_run"
+          test -d "$active_run"
+          test -s "$active_run/status.json"
+          sudo docker inspect "$container" >/dev/null
+          if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+            sudo docker start "$container"
+          fi
+
+          source_status="$(curl --fail --silent --max-time 20 http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status)"
+          test "$(printf '%s' "$source_status" | jq -r '.state')" = 'COMPLETE'
+
+          if sudo docker exec "$container" sh -lc "pgrep -f 'run-recommendation-v8-(training|diagnostic-recovery)-supervisor|run-recommendation-v8-real-data-v2|run-recommendation-v8-pipeline' >/dev/null"; then
+            echo 'A Recommendation V8 supervisor or pipeline is already running.' >&2
+            exit 1
+          fi
+
+          cp scripts/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs "$active_run/"
+          chmod 0644 "$active_run/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs"
+          sudo docker exec "$container" node --check /runner/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs
+
+          run_id="$(jq -r '.runId // empty' "$active_run/status.json")"
+          if [ -z "$run_id" ]; then
+            run_id="$(basename "$active_run")"
+          fi
+
+          {
+            echo
+            echo "[$(date --iso-8601=seconds)] Starting bounded diagnostic recovery after candidate snapshot string-size failure."
+            echo "[$(date --iso-8601=seconds)] Reusing Dataset V3 and limiting only policy snapshot corpus to 5 percent of matches."
+          } >> "$active_run/training.log"
+
+          sudo docker exec -d \
+            -e API_BASE_URL=http://127.0.0.1:3000 \
+            -e TRAINING_RUN_ID="$run_id" \
+            -e TRAINING_LOG_PATH=/runner/training.log \
+            -e TRAINING_STATUS_PATH=/runner/status.json \
+            -e TRAINING_CONFIG_PATH=/runner/resolved-training-config.json \
+            -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-real-data-v2.mjs \
+            -e MINIMUM_SOURCE_MATCH_COUNT=25000 \
+            -e DIAGNOSTIC_POLICY_TRAINING_QUANTILE=0.05 \
+            -e DIAGNOSTIC_MAX_ROWS=10000 \
+            -e PIPELINE_POLL_INTERVAL_MS=15000 \
+            -e PIPELINE_TIMEOUT_MS=172800000 \
+            "$container" \
+            node /runner/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs
+
+          started=false
+          for attempt in $(seq 1 60); do
+            schema="$(jq -r '.schemaVersion // 0' "$active_run/status.json" 2>/dev/null || echo 0)"
+            state="$(jq -r '.state // "UNKNOWN"' "$active_run/status.json" 2>/dev/null || echo UNKNOWN)"
+            stage="$(jq -r '.stage // "UNKNOWN"' "$active_run/status.json" 2>/dev/null || echo UNKNOWN)"
+            if [ "$schema" = '3' ] && [ "$state" = 'RUNNING' ] && [ "$stage" = 'OFFLINE_V8_PIPELINE_DIAGNOSTIC_NON_RELEASE' ]; then
+              started=true
+              break
+            fi
+            if [ "$schema" = '3' ] && [ "$state" = 'FAILED' ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          {
+            echo '# Recommendation V8 bounded diagnostic recovery'
+            echo
+            echo "Generated: $(date --iso-8601=seconds)"
+            echo
+            echo '## Status'
+            echo '```json'
+            cat "$active_run/status.json"
+            echo '```'
+            echo
+            echo '## Candidate snapshot status'
+            echo '```json'
+            curl --silent --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status || true
+            echo
+            echo '```'
+            echo
+            echo '## Process'
+            echo '```text'
+            sudo docker exec "$container" sh -lc "ps -ef | grep -E 'run-recommendation-v8-(diagnostic-recovery|pipeline|real-data)' | grep -v grep || true"
+            echo '```'
+            echo
+            echo '## Recent training log'
+            echo '```text'
+            tail -n 100 "$active_run/training.log"
+            echo '```'
+          } > "$report"
+          echo "RECOVERY_V2_REPORT=$report" >> "$GITHUB_ENV"
+
+          if [ "$started" != 'true' ]; then
+            cat "$report"
+            exit 1
+          fi
+
+      - name: Publish recovery status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          RECOVERY_V2_REPORT: ${{ env.RECOVERY_V2_REPORT }}
+        with:
+          script: |
+            const fs = require('fs');
+            const title = '[status] Recommendation V8 bounded diagnostic recovery';
+            const path = process.env.RECOVERY_V2_REPORT;
+            const body = path && fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `Recovery V2 failed before producing a report.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100,
+            });
+            const existing = data.find((issue) => !issue.pull_request && issue.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+                state: 'open',
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
