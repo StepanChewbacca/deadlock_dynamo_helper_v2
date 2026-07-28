@@ -10,25 +10,34 @@ permissions:
   contents: read
 
 jobs:
-  release-stuck-diagnostic:
+  release-stale-recoveries:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel only stale diagnostic run
+      - name: Cancel only superseded recovery runs
         uses: actions/github-script@v7
         with:
           script: |
-            const staleRunId = 30400339075;
-            try {
-              await github.rest.actions.cancelWorkflowRun({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: staleRunId,
-              });
-              core.notice(`Cancellation requested for stale diagnostic run ${staleRunId}.`);
-            } catch (error) {
-              if (error.status === 409 || error.status === 404) {
-                core.notice(`Diagnostic run ${staleRunId} is already terminal or unavailable.`);
-              } else {
-                throw error;
+            const staleRunIds = [
+              30401396801,
+              30401396747,
+              30401396668,
+              30401396785,
+              30401396750,
+              30401396736,
+            ];
+            for (const runId of staleRunIds) {
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runId,
+                });
+                core.notice(`Cancellation requested for superseded run ${runId}.`);
+              } catch (error) {
+                if (error.status === 409 || error.status === 404) {
+                  core.notice(`Run ${runId} is already terminal or unavailable.`);
+                } else {
+                  throw error;
+                }
               }
             }
