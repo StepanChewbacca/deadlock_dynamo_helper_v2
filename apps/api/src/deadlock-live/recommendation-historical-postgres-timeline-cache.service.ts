@@ -1,13 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import {
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import type {
@@ -25,6 +18,14 @@ const RAW_METADATA_BATCH_SIZE = 250;
 export interface RecommendationHistoricalPostgresTimelineData {
   snapshots: MatchTimelinePlayerSnapshot[];
   objectives: MatchTimelineObjectiveEvent[];
+}
+
+export interface RecommendationHistoricalPostgresTimelineCacheProgress {
+  processedMatchCount: number;
+  exportedMatchCount: number;
+  playerSnapshotCount: number;
+  objectiveEventCount: number;
+  invalidPayloadCount: number;
 }
 
 export interface RecommendationHistoricalPostgresTimelineCacheManifest {
@@ -52,14 +53,6 @@ interface RawMetadataRow {
   fetchedAt: Date | string;
 }
 
-interface CacheProgress {
-  processedMatchCount: number;
-  exportedMatchCount: number;
-  playerSnapshotCount: number;
-  objectiveEventCount: number;
-  invalidPayloadCount: number;
-}
-
 @Injectable()
 export class RecommendationHistoricalPostgresTimelineCacheService {
   private readonly logger = new Logger(
@@ -76,7 +69,9 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
   constructor(private readonly dataSource: DataSource) {}
 
   async ensureCache(
-    onProgress?: (progress: Readonly<CacheProgress>) => void,
+    onProgress?: (
+      progress: Readonly<RecommendationHistoricalPostgresTimelineCacheProgress>,
+    ) => void,
   ): Promise<RecommendationHistoricalPostgresTimelineCacheManifest> {
     await mkdir(this.timelineDirectory, { recursive: true });
     const sourceBoundary = await this.loadSourceBoundary();
@@ -99,7 +94,7 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
       return existing;
     }
 
-    const progress: CacheProgress = {
+    const progress: RecommendationHistoricalPostgresTimelineCacheProgress = {
       processedMatchCount: 0,
       exportedMatchCount: 0,
       playerSnapshotCount: 0,
@@ -126,11 +121,13 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
         afterMatchId = Math.max(afterMatchId, matchId);
         progress.processedMatchCount += 1;
 
+        const rawMetadataId = positiveSafeInteger(row.id) ?? 0;
+        const fetchedAt = toIsoTimestamp(row.fetchedAt);
         const timeline = extractRecommendationHistoricalPostgresTimeline({
           matchId,
           payload: row.payload,
-          fetchedAt: toIsoTimestamp(row.fetchedAt),
-          rawMetadataId: positiveSafeInteger(row.id) ?? 0,
+          fetchedAt,
+          rawMetadataId,
         });
         if (timeline.snapshots.length === 0) {
           progress.invalidPayloadCount += 1;
@@ -139,8 +136,8 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
 
         await this.writeMatchTimeline({
           matchId,
-          rawMetadataId: positiveSafeInteger(row.id) ?? 0,
-          fetchedAt: toIsoTimestamp(row.fetchedAt),
+          rawMetadataId,
+          fetchedAt,
           timeline,
         });
         progress.exportedMatchCount += 1;
@@ -243,8 +240,8 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
     const objectivesPath = join(directory, 'objective-events.ndjson');
     const manifestPath = join(directory, 'manifest.json');
     const auditPath = join(directory, 'audit.json');
-    const snapshotsRaw = ndjson(input.timeline.snapshots);
-    const objectivesRaw = ndjson(input.timeline.objectives);
+    const snapshotsRaw = toNdjson(input.timeline.snapshots);
+    const objectivesRaw = toNdjson(input.timeline.objectives);
 
     await Promise.all([
       atomicText(snapshotsPath, snapshotsRaw),
@@ -313,7 +310,9 @@ export function extractRecommendationHistoricalPostgresTimeline(input: {
     const teamId = sourceTeam === undefined ? undefined : liveTeamId(sourceTeam);
     const accountId = positiveSafeInteger(player.account_id);
     const playerSlot = nonNegativeSafeInteger(player.player_slot);
-    const steamId = String(accountId ?? playerSlot ?? `${heroId}:${sourceTeam ?? -1}`);
+    const steamId = String(
+      accountId ?? playerSlot ?? `${heroId}:${sourceTeam ?? -1}`,
+    );
     const playerStats = records(player.stats);
 
     for (let index = 0; index < playerStats.length; index += 1) {
@@ -373,7 +372,11 @@ export function extractRecommendationHistoricalPostgresTimeline(input: {
       const gameTimeS = nonNegativeFiniteNumber(
         objective.destroyed_time_s ?? objective.game_time_s,
       );
-      if (objectiveId === undefined || gameTimeS === undefined || gameTimeS <= 0) {
+      if (
+        objectiveId === undefined ||
+        gameTimeS === undefined ||
+        gameTimeS <= 0
+      ) {
         return [];
       }
       const identitySha = createHash('sha256')
@@ -507,7 +510,7 @@ function toIsoTimestamp(value: unknown): string {
   return date.toISOString();
 }
 
-function ndjson(values: readonly unknown[]): string {
+function toNdjson(values: readonly unknown[]): string {
   return values.length === 0
     ? ''
     : `${values.map((value) => JSON.stringify(value)).join('\n')}\n`;
@@ -539,9 +542,10 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 }
 
 function isMissingFileError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
   return (
-    Boolean(error) &&
-    typeof error === 'object' &&
     'code' in error &&
     (error as { code?: string }).code === 'ENOENT'
   );
