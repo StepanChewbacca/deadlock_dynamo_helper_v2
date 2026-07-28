@@ -135,19 +135,26 @@ export function prepareRecommendationValueV6DatasetV6Row(
     row.state.previousActionKeys.slice(-PREVIOUS_ACTION_TAIL_SIZE).join('>') ||
     'EMPTY';
   const baseKey = `${heroId}|${timeBucket}`;
+  const netWorth = finiteNumber(row.state.netWorth);
+  const kills = finiteNumber(row.state.kills);
+  const assists = finiteNumber(row.state.assists);
+  const deaths = finiteNumber(row.state.deaths);
+  const kda =
+    kills !== undefined && assists !== undefined && deaths !== undefined
+      ? kills + assists - deaths
+      : undefined;
   const stateKeys = unique([
     `HERO:${heroId}`,
     `HERO_TIME:${baseKey}`,
     `HERO_TEAM_TIME:${baseKey}|${row.state.team}`,
     `HERO_TIME_INVENTORY:${baseKey}|${inventoryStateKey}`,
     `HERO_TIME_PREVIOUS:${baseKey}|${previousTail}`,
-    Number.isFinite(row.state.netWorth)
-      ? `TIMELINE_NET_WORTH:${heroId}|${bucket(row.state.netWorth, 1_000)}`
-      : undefined,
-    `TIMELINE_KDA:${heroId}|${bucket(
-      row.state.kills + row.state.assists - row.state.deaths,
-      2,
-    )}`,
+    netWorth === undefined
+      ? undefined
+      : `TIMELINE_NET_WORTH:${heroId}|${bucket(netWorth, 1_000)}`,
+    kda === undefined
+      ? undefined
+      : `TIMELINE_KDA:${heroId}|${bucket(kda, 2)}`,
     ...row.state.alliedHeroIds.map(
       (allyHeroId) => `ALLY:${baseKey}|${allyHeroId}`,
     ),
@@ -155,26 +162,32 @@ export function prepareRecommendationValueV6DatasetV6Row(
       (enemyHeroId) => `ENEMY:${baseKey}|${enemyHeroId}`,
     ),
   ]);
-  const candidateActionKeys = new Map(
-    row.candidates.map((candidate) => [
-      candidate.actionKey,
-      unique([
-        `HERO_TIME_ACTION:${heroId}|${timeBucket}|${candidate.actionKey}`,
-        `HERO_TIME_INVENTORY_ACTION:${heroId}|${timeBucket}|${inventoryStateKey}|${candidate.actionKey}`,
-        `HERO_TIME_PREVIOUS_ACTION:${heroId}|${timeBucket}|${previousTail}|${candidate.actionKey}`,
-        candidate.slotType
-          ? `HERO_SLOT:${heroId}|${candidate.slotType}`
-          : undefined,
-        candidate.tier > 0
-          ? `HERO_TIER:${heroId}|${candidate.tier}`
-          : undefined,
-        candidate.cost > 0
-          ? `HERO_COST_BUCKET:${heroId}|${bucket(candidate.cost, 500)}`
-          : undefined,
-        candidate.isActiveItem ? `HERO_ACTIVE_ITEM:${heroId}` : undefined,
-        ...candidate.tags.map((tag) => `HERO_ITEM_TAG:${heroId}|${tag}`),
-      ]),
-    ]),
+  const candidateActionKeys = new Map<string, string[]>(
+    row.candidates.map((candidate) => {
+      const tier = finiteNumber(candidate.tier);
+      const cost = finiteNumber(candidate.cost);
+      return [
+        candidate.actionKey,
+        unique([
+          `HERO_TIME_ACTION:${heroId}|${timeBucket}|${candidate.actionKey}`,
+          `HERO_TIME_INVENTORY_ACTION:${heroId}|${timeBucket}|${inventoryStateKey}|${candidate.actionKey}`,
+          `HERO_TIME_PREVIOUS_ACTION:${heroId}|${timeBucket}|${previousTail}|${candidate.actionKey}`,
+          candidate.slotType
+            ? `HERO_SLOT:${heroId}|${candidate.slotType}`
+            : undefined,
+          tier !== undefined && tier > 0
+            ? `HERO_TIER:${heroId}|${tier}`
+            : undefined,
+          cost !== undefined && cost > 0
+            ? `HERO_COST_BUCKET:${heroId}|${bucket(cost, 500)}`
+            : undefined,
+          candidate.isActiveItem ? `HERO_ACTIVE_ITEM:${heroId}` : undefined,
+          ...(candidate.tags ?? []).map(
+            (tag) => `HERO_ITEM_TAG:${heroId}|${tag}`,
+          ),
+        ]),
+      ];
+    }),
   );
   const observedActionKeys = candidateActionKeys.get(row.observedActionKey);
   if (!observedActionKeys) {
@@ -293,6 +306,10 @@ function validateCount(count: RecommendationValueV6Count, label: string): void {
   ) {
     throw new Error(`Frozen V6 count ${label} is invalid.`);
   }
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
 function unique(values: Array<string | undefined>): string[] {
