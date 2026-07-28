@@ -13,15 +13,15 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import type {
-  RecommendationBehavioralV5PropensityRow,
-} from './recommendation-behavioral-v5-training.service';
+import type { RecommendationBehavioralV5PropensityRow } from './recommendation-behavioral-v5-training.service';
 import type {
   RecommendationProDecisionDatasetV6ArtifactAudit,
   RecommendationProDecisionDatasetV6ArtifactManifest,
 } from './recommendation-pro-decision-dataset-v6-artifact.service';
 import {
+  RECOMMENDATION_PRO_DECISION_DATASET_V6_SCHEMA_VERSION,
   RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION,
+  type RecommendationDatasetV6Split,
   type RecommendationProDecisionDatasetV6Row,
 } from './recommendation-pro-decision-dataset-v6';
 import {
@@ -29,36 +29,33 @@ import {
   createRecommendationValueV8StateModel,
   predictRecommendationValueV8CandidateSet,
   predictRecommendationValueV8State,
+  recommendationValueV8FoldId,
   recommendationValueV8Targets,
-  trainRecommendationValueV8ActionDecision,
-  trainRecommendationValueV8StateDecision,
   RECOMMENDATION_VALUE_V8_ACTION_MODEL_VERSION,
+  RECOMMENDATION_VALUE_V8_DIAGNOSTIC_SCHEMA_VERSION,
   RECOMMENDATION_VALUE_V8_FEATURE_VERSION,
   RECOMMENDATION_VALUE_V8_STATE_MODEL_VERSION,
+  trainRecommendationValueV8ActionDecision,
+  trainRecommendationValueV8StateDecision,
   type RecommendationValueV8ActionModel,
   type RecommendationValueV8ActionTrainingOptions,
-  type RecommendationValueV8HorizonValues,
+  type RecommendationValueV8DiagnosticGate,
   type RecommendationValueV8StateModel,
   type RecommendationValueV8StateTrainingOptions,
 } from './recommendation-value-v8-diagnostic';
-import type {
-  RecommendationValueV8DiagnosticTrainingAudit,
-  RecommendationValueV8DiagnosticTrainingManifest,
-} from './recommendation-value-v8-diagnostic-training.service';
 import {
   buildRecommendationValueV8ReleaseGate,
   createRecommendationValueV8EvaluationAccumulator,
   evaluateRecommendationValueV8Decision,
   finalizeRecommendationValueV8Evaluation,
+  observeRecommendationValueV8Evaluation,
   selectRecommendationValueV8Configuration,
   validateRecommendationV6ShortOnlyBaselineManifest,
-  validateRecommendationV6ShortOnlyBaselineRow,
   RECOMMENDATION_VALUE_V8_FULL_EVALUATION_SCHEMA_VERSION,
   RECOMMENDATION_VALUE_V8_FULL_EVALUATION_VERSION,
   type RecommendationV6ShortOnlyBaselineManifest,
   type RecommendationV6ShortOnlyBaselineRow,
   type RecommendationValueV8Configuration,
-  type RecommendationValueV8DecisionEvaluation,
   type RecommendationValueV8EvaluationMetrics,
   type RecommendationValueV8ReleaseGate,
   type RecommendationValueV8ReleaseThresholds,
@@ -75,13 +72,12 @@ const DEFAULT_BASELINE_DIRECTORY =
   '/app/apps/api/storage/recommendation-v6-short-only-dataset-v6-baseline-1';
 const DEFAULT_OUTPUT_DIRECTORY =
   '/app/apps/api/storage/recommendation-value-v8-full-evaluation-1';
-
-const DATASET_FILE_NAME = 'dataset.ndjson';
 const PROPENSITY_FILE_NAME = 'propensities.ndjson';
 const BASELINE_FILE_NAME = 'predictions.ndjson';
 const PREDICTION_FILE_NAME = 'predictions.ndjson';
 
 export interface RecommendationValueV8FullEvaluationStartRequest {
+  foldCount?: number;
   stateEpochs?: number;
   actionEpochs?: number;
   hashDimension?: number;
@@ -105,6 +101,7 @@ export interface RecommendationValueV8FullEvaluationStartRequest {
 }
 
 export interface RecommendationValueV8FullEvaluationOptions {
+  foldCount: number;
   stateEpochs: number;
   actionEpochs: number;
   hashDimension: number;
@@ -125,7 +122,8 @@ export interface RecommendationValueV8FullEvaluationStatus {
   state: 'IDLE' | 'RUNNING' | 'COMPLETE' | 'FAILED';
   phase:
     | 'PREPARING'
-    | 'TRAINING_STATE'
+    | 'TRAINING_STATE_FOLDS'
+    | 'TRAINING_STATE_FINAL'
     | 'TRAINING_ACTION'
     | 'SELECTING'
     | 'EVALUATING_FUTURE_TEST'
@@ -167,8 +165,16 @@ export interface RecommendationValueV8FullEvaluationAudit {
   };
   diagnostic: {
     auditPassed: true;
+    diagnosticGatePassed: true;
     fullTrainingRecommended: true;
     futureTestUsed: false;
+  };
+  crossFitting: {
+    unit: 'MATCH';
+    foldCount: number;
+    foldMatchCounts: number[];
+    trainingMatchExclusionVerified: true;
+    actionResidualUsesOofStatePrediction: true;
   };
   split: {
     descriptorSha256: string;
@@ -212,7 +218,10 @@ export interface RecommendationValueV8FullEvaluationManifest {
   };
   trainingContract: {
     stateModelTrainSplitOnly: true;
+    stateCrossFittingUnit: 'MATCH';
+    actionResidualUsesOofStatePrediction: true;
     actionModelTrainSplitOnly: true;
+    actionObservedCandidateOnly: true;
     tuningUsedForConfigurationSelectionOnly: true;
     futureTestUsedForTraining: false;
     futureTestUsedForSelection: false;
@@ -241,6 +250,35 @@ interface ArtifactDescriptor {
   byteLength: number;
 }
 
+interface DiagnosticTrainingManifest {
+  schemaVersion: typeof RECOMMENDATION_VALUE_V8_DIAGNOSTIC_SCHEMA_VERSION;
+  source: {
+    dataset: { sha256: string };
+    behavioral: { sha256: string };
+  };
+  diagnosticOnly: true;
+  futureTestUsed: false;
+  auditPassed: boolean;
+  diagnosticGatePassed: boolean;
+  fullTrainingRecommended: boolean;
+}
+
+interface DiagnosticTrainingAudit {
+  schemaVersion: typeof RECOMMENDATION_VALUE_V8_DIAGNOSTIC_SCHEMA_VERSION;
+  passed: boolean;
+  fullTrainingRecommended: boolean;
+  source: {
+    datasetSha256: string;
+    behavioralPropensitySha256: string;
+  };
+  leakage: {
+    futureTestUsedForTraining: false;
+    futureTestUsedForSelection: false;
+    finalOutcomeUsedForTraining: false;
+  };
+  diagnosticGate: RecommendationValueV8DiagnosticGate;
+}
+
 interface LoadedSources {
   dataset: {
     path: string;
@@ -253,10 +291,9 @@ interface LoadedSources {
     sha256: string;
   };
   diagnostic: {
-    manifestPath: string;
     manifestSha256: string;
-    manifest: RecommendationValueV8DiagnosticTrainingManifest;
-    audit: RecommendationValueV8DiagnosticTrainingAudit;
+    manifest: DiagnosticTrainingManifest;
+    audit: DiagnosticTrainingAudit;
   };
   baseline: {
     path: string;
@@ -274,12 +311,11 @@ interface SourceIndex {
 
 interface SourceSummary {
   sourceRowCount: number;
-  trainRows: RecommendationProDecisionDatasetV6Row[];
-  tuningRows: RecommendationProDecisionDatasetV6Row[];
-  futureTestRows: RecommendationProDecisionDatasetV6Row[];
+  eligibleBySplit: Record<RecommendationDatasetV6Split, number>;
   duplicateDatasetDecisionCount: number;
   missingBehavioralPropensityCount: number;
   missingBaselineCount: number;
+  trainMatchIdsByFold: Array<Set<string>>;
 }
 
 @Injectable()
@@ -374,11 +410,15 @@ export class RecommendationValueV8FullEvaluationTrainingService
       state: 'RUNNING',
       phase: 'PREPARING',
       currentPass: 0,
-      totalPasses: options.stateEpochs + options.actionEpochs + 2,
+      totalPasses:
+        options.foldCount * options.stateEpochs +
+        options.stateEpochs +
+        options.actionEpochs +
+        2,
       startedAt,
       options,
     };
-    this.runPromise = this.run(options, startedAt);
+    this.runPromise = this.run(options);
     return this.getStatus();
   }
 
@@ -408,10 +448,10 @@ export class RecommendationValueV8FullEvaluationTrainingService
 
   private async run(
     options: RecommendationValueV8FullEvaluationOptions,
-    startedAt: string,
   ): Promise<void> {
     try {
       const sources = await this.loadSources(options);
+      await mkdir(this.outputDirectory, { recursive: true });
       await this.clearOutputs();
       this.manifest = undefined;
       this.audit = undefined;
@@ -419,33 +459,60 @@ export class RecommendationValueV8FullEvaluationTrainingService
       this.model = undefined;
 
       const index = await buildSourceIndex(sources);
-      const summary = await collectSourceSummary(sources, index);
-      validateSourceSummary(summary, index);
+      const summary = await scanDataset(sources, index, options.foldCount);
+      validateSourceSummary(summary, index, sources.dataset.rowCount);
       this.status = {
         ...this.status,
         sourceRowCount: summary.sourceRowCount,
-        trainDecisionCount: summary.trainRows.length,
-        tuningDecisionCount: summary.tuningRows.length,
-        futureTestDecisionCount: summary.futureTestRows.length,
+        trainDecisionCount: summary.eligibleBySplit.TRAIN,
+        tuningDecisionCount: summary.eligibleBySplit.TUNING,
+        futureTestDecisionCount: summary.eligibleBySplit.FUTURE_TEST,
       };
 
-      const stateModel = createRecommendationValueV8StateModel(
+      const foldStateModels: RecommendationValueV8StateModel[] = [];
+      let currentPass = 0;
+      for (let holdoutFold = 0; holdoutFold < options.foldCount; holdoutFold += 1) {
+        const model = createRecommendationValueV8StateModel(options.hashDimension);
+        for (let epoch = 0; epoch < options.stateEpochs; epoch += 1) {
+          currentPass += 1;
+          this.status = {
+            ...this.status,
+            phase: 'TRAINING_STATE_FOLDS',
+            currentPass,
+          };
+          await eachDatasetRow(sources.dataset.path, async (row) => {
+            if (
+              row.split === 'TRAIN' &&
+              row.eligibility.stateModel &&
+              recommendationValueV8FoldId(row.matchId, options.foldCount) !==
+                holdoutFold
+            ) {
+              trainRecommendationValueV8StateDecision(model, row, options.state);
+            }
+          });
+        }
+        foldStateModels.push(model);
+      }
+
+      const finalStateModel = createRecommendationValueV8StateModel(
         options.hashDimension,
       );
-      let currentPass = 0;
       for (let epoch = 0; epoch < options.stateEpochs; epoch += 1) {
         currentPass += 1;
         this.status = {
           ...this.status,
-          phase: 'TRAINING_STATE',
+          phase: 'TRAINING_STATE_FINAL',
           currentPass,
         };
-        for (const row of summary.trainRows) {
-          if (row.eligibility.stateModel) {
-            trainRecommendationValueV8StateDecision(stateModel, row, options.state);
+        await eachDatasetRow(sources.dataset.path, async (row) => {
+          if (row.split === 'TRAIN' && row.eligibility.stateModel) {
+            trainRecommendationValueV8StateDecision(
+              finalStateModel,
+              row,
+              options.state,
+            );
           }
-        }
-        await tick();
+        });
       }
 
       const actionModel = createRecommendationValueV8ActionModel(
@@ -458,25 +525,33 @@ export class RecommendationValueV8FullEvaluationTrainingService
           phase: 'TRAINING_ACTION',
           currentPass,
         };
-        for (const row of summary.trainRows) {
-          if (!isActionEligible(row)) {
-            continue;
+        await eachDatasetRow(sources.dataset.path, async (row) => {
+          if (row.split !== 'TRAIN' || !isActionEligible(row)) {
+            return;
           }
-          const propensity = requiredPropensity(index, row);
-          const statePrediction = predictRecommendationValueV8State(
-            stateModel,
+          const foldId = recommendationValueV8FoldId(
+            row.matchId,
+            options.foldCount,
+          );
+          const propensity = requiredPropensity(index, row, sources.dataset.sha256);
+          if (propensity.predictionSource !== 'CROSS_FITTED_OOF') {
+            throw new Error(
+              `TRAIN propensity is not cross-fitted for ${row.decisionId}.`,
+            );
+          }
+          const statePredictions = predictRecommendationValueV8State(
+            foldStateModels[foldId],
             row,
             options.state.maximumAbsolutePrediction,
           );
           trainRecommendationValueV8ActionDecision(
             actionModel,
             row,
-            statePrediction,
+            statePredictions,
             propensity.observedActionProbability,
             options.action,
           );
-        }
-        await tick();
+        });
       }
 
       currentPass += 1;
@@ -485,12 +560,11 @@ export class RecommendationValueV8FullEvaluationTrainingService
         phase: 'SELECTING',
         currentPass,
       };
-      const tuningSelection = evaluateTuningConfigurations({
-        rows: summary.tuningRows,
-        stateModel,
-        actionModel,
-        index,
+      const selection = await evaluateTuningConfigurations({
         sources,
+        index,
+        stateModel: finalStateModel,
+        actionModel,
         options,
       });
 
@@ -500,71 +574,58 @@ export class RecommendationValueV8FullEvaluationTrainingService
         phase: 'EVALUATING_FUTURE_TEST',
         currentPass,
       };
-      const predictionWriter = await LineWriter.create(
-        `${this.paths.predictions}.partial`,
-      );
-      const futureAccumulator = createRecommendationValueV8EvaluationAccumulator(
-        'FUTURE_TEST',
-      );
-      let predictionRowCount = 0;
-      try {
-        for (const row of summary.futureTestRows) {
-          const decision = evaluateRow({
-            row,
-            stateModel,
-            actionModel,
-            configuration: tuningSelection.selected.configuration,
-            index,
-            sources,
-            options,
-          });
-          await predictionWriter.write(decision);
-          predictionRowCount += 1;
-          observeDecision(futureAccumulator, decision);
-        }
-        await predictionWriter.close();
-        await rename(
-          `${this.paths.predictions}.partial`,
-          this.paths.predictions,
-        );
-      } catch (error) {
-        await predictionWriter.abort();
-        await rm(`${this.paths.predictions}.partial`, { force: true });
-        throw error;
-      }
-      const futureMetrics = finalizeRecommendationValueV8Evaluation(
-        futureAccumulator,
-        options.cohortMinimumDecisions,
-        options.criticalCohortRmseTolerance,
-      );
+      const future = await evaluateFutureTest({
+        sources,
+        index,
+        stateModel: finalStateModel,
+        actionModel,
+        configuration: selection.selected.configuration,
+        options,
+        predictionPath: this.paths.predictions,
+      });
       const releaseGate = buildRecommendationValueV8ReleaseGate(
-        sources.diagnostic.audit.gate,
-        futureMetrics,
+        future.metrics,
+        sources.diagnostic.audit.diagnosticGate.passed,
         options.releaseThresholds,
       );
 
-      this.status = {
-        ...this.status,
-        phase: 'FINALIZING',
-      };
+      this.status = { ...this.status, phase: 'FINALIZING' };
       const generatedAt = new Date().toISOString();
-      const modelArtifact = buildModelArtifact({
+      const modelArtifact = {
+        schemaVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_SCHEMA_VERSION,
+        evaluationVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_VERSION,
         generatedAt,
-        sources,
-        stateModel,
-        actionModel,
-        selection: tuningSelection,
+        stateModelVersion: RECOMMENDATION_VALUE_V8_STATE_MODEL_VERSION,
+        actionModelVersion: RECOMMENDATION_VALUE_V8_ACTION_MODEL_VERSION,
+        featureVersion: RECOMMENDATION_VALUE_V8_FEATURE_VERSION,
+        source: {
+          datasetSha256: sources.dataset.sha256,
+          behavioralPropensitySha256: sources.propensities.sha256,
+          diagnosticManifestSha256: sources.diagnostic.manifestSha256,
+          baselineSha256: sources.baseline.sha256,
+        },
+        trainingContract: {
+          stateCrossFittingUnit: 'MATCH',
+          actionResidualUsesOofStatePrediction: true,
+          finalStateModelTrainSplitOnly: true,
+          actionModelTrainSplitOnly: true,
+          actionObservedCandidateOnly: true,
+          finalOutcomeUsedForTraining: false,
+        },
+        selectedConfiguration: selection.selected.configuration,
+        selectedOn: 'TUNING_ONLY',
         options,
-      });
+        finalStateModel,
+        actionModel,
+      };
       const evaluation = {
         schemaVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_SCHEMA_VERSION,
         evaluationVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_VERSION,
         generatedAt,
-        selectedOn: 'TUNING_ONLY',
-        tuning: tuningSelection,
+        selection,
         futureTest: {
           evaluationPassCount: 1,
-          metrics: futureMetrics,
+          metrics: future.metrics,
         },
         releaseGate,
         interpretation: {
@@ -600,14 +661,24 @@ export class RecommendationValueV8FullEvaluationTrainingService
         },
         diagnostic: {
           auditPassed: true,
+          diagnosticGatePassed: true,
           fullTrainingRecommended: true,
           futureTestUsed: false,
         },
+        crossFitting: {
+          unit: 'MATCH',
+          foldCount: options.foldCount,
+          foldMatchCounts: summary.trainMatchIdsByFold.map(
+            (matches) => matches.size,
+          ),
+          trainingMatchExclusionVerified: true,
+          actionResidualUsesOofStatePrediction: true,
+        },
         split: {
           descriptorSha256: sources.dataset.splitDescriptorSha256,
-          trainDecisionCount: summary.trainRows.length,
-          tuningDecisionCount: summary.tuningRows.length,
-          futureTestDecisionCount: summary.futureTestRows.length,
+          trainDecisionCount: summary.eligibleBySplit.TRAIN,
+          tuningDecisionCount: summary.eligibleBySplit.TUNING,
+          futureTestDecisionCount: summary.eligibleBySplit.FUTURE_TEST,
           tuningUsedForSelection: true,
           futureTestUsedForSelection: false,
           futureTestEvaluationPassCount: 1,
@@ -624,7 +695,7 @@ export class RecommendationValueV8FullEvaluationTrainingService
         },
         artifacts: {
           predictionSha256,
-          predictionRowCount,
+          predictionRowCount: future.rowCount,
           modelSha256,
           evaluationSha256,
         },
@@ -649,7 +720,10 @@ export class RecommendationValueV8FullEvaluationTrainingService
         },
         trainingContract: {
           stateModelTrainSplitOnly: true,
+          stateCrossFittingUnit: 'MATCH',
+          actionResidualUsesOofStatePrediction: true,
           actionModelTrainSplitOnly: true,
+          actionObservedCandidateOnly: true,
           tuningUsedForConfigurationSelectionOnly: true,
           futureTestUsedForTraining: false,
           futureTestUsedForSelection: false,
@@ -660,33 +734,29 @@ export class RecommendationValueV8FullEvaluationTrainingService
           diagnosticGateRequired: true,
         },
         options,
-        selectedConfiguration: tuningSelection.selected.configuration,
+        selectedConfiguration: selection.selected.configuration,
         artifacts: {
-          predictions: {
-            format: 'NDJSON',
-            fileName: PREDICTION_FILE_NAME,
-            sha256: predictionSha256,
-            byteLength: (await stat(this.paths.predictions)).size,
-            rowCount: predictionRowCount,
-          },
-          model: {
-            format: 'JSON',
-            fileName: 'model.json',
-            sha256: modelSha256,
-            byteLength: (await stat(this.paths.model)).size,
-          },
-          evaluation: {
-            format: 'JSON',
-            fileName: 'evaluation.json',
-            sha256: evaluationSha256,
-            byteLength: (await stat(this.paths.evaluation)).size,
-          },
-          audit: {
-            format: 'JSON',
-            fileName: 'audit.json',
-            sha256: await hashFile(this.paths.audit),
-            byteLength: (await stat(this.paths.audit)).size,
-          },
+          predictions: await artifactDescriptor(
+            this.paths.predictions,
+            PREDICTION_FILE_NAME,
+            'NDJSON',
+            future.rowCount,
+          ),
+          model: await artifactDescriptor(
+            this.paths.model,
+            'model.json',
+            'JSON',
+          ),
+          evaluation: await artifactDescriptor(
+            this.paths.evaluation,
+            'evaluation.json',
+            'JSON',
+          ),
+          audit: await artifactDescriptor(
+            this.paths.audit,
+            'audit.json',
+            'JSON',
+          ),
         },
         releaseGatePassed: releaseGate.passed,
         passiveShadowAuthorized,
@@ -703,7 +773,7 @@ export class RecommendationValueV8FullEvaluationTrainingService
         state: 'COMPLETE',
         phase: 'COMPLETE',
         completedAt: generatedAt,
-        predictionRowCount,
+        predictionRowCount: future.rowCount,
         manifestAvailable: true,
         auditAvailable: true,
         evaluationAvailable: true,
@@ -713,8 +783,8 @@ export class RecommendationValueV8FullEvaluationTrainingService
         randomizedCanaryAuthorized: false,
       };
       this.logger.log(
-        `Recommendation Value V8 full evaluation completed with ${predictionRowCount} ` +
-          `future-test predictions; release gate ${releaseGate.passed ? 'PASS' : 'FAIL'}.`,
+        `Recommendation Value V8 full evaluation completed with ${future.rowCount} ` +
+          `future-test decisions; release gate ${releaseGate.passed ? 'PASS' : 'FAIL'}.`,
       );
     } catch (error) {
       const message = errorMessage(error);
@@ -738,18 +808,22 @@ export class RecommendationValueV8FullEvaluationTrainingService
       join(this.datasetDirectory, 'audit.json'),
     );
     if (
+      datasetManifest.schemaVersion !==
+        RECOMMENDATION_PRO_DECISION_DATASET_V6_SCHEMA_VERSION ||
       datasetManifest.datasetVersion !==
         RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION ||
       datasetManifest.auditPassed !== true ||
       datasetManifest.trainingArtifactEligible !== true ||
       datasetAudit.passed !== true ||
-      datasetAudit.trainingArtifactEligible !== true
+      datasetAudit.trainingArtifactEligible !== true ||
+      datasetManifest.featureContract.futureTestEligibleForSelection !== false ||
+      datasetManifest.featureContract.userLiveUsedAsInput !== false
     ) {
-      throw new Error('Recommendation Dataset V6 is not eligible for Value V8 full evaluation.');
+      throw new Error('Recommendation Dataset V6 is not eligible for full Value V8.');
     }
     const datasetPath = join(
       this.datasetDirectory,
-      datasetManifest.artifact.fileName || DATASET_FILE_NAME,
+      datasetManifest.artifact.fileName,
     );
     const datasetSha256 = await verifiedHash(
       datasetPath,
@@ -764,21 +838,30 @@ export class RecommendationValueV8FullEvaluationTrainingService
     const behavioralAudit = await requiredJson<Record<string, unknown>>(
       join(this.behavioralDirectory, 'audit.json'),
     );
+    const behavioralEvaluation = await requiredJson<Record<string, unknown>>(
+      join(this.behavioralDirectory, 'evaluation.json'),
+    );
     if (
+      behavioralManifest.auditPassed !== true ||
+      behavioralManifest.releaseGatePassed !== true ||
       behavioralManifest.trainingArtifactEligible !== true ||
-      behavioralAudit.trainingArtifactEligible !== true
+      behavioralAudit.passed !== true ||
+      behavioralAudit.trainingArtifactEligible !== true ||
+      record(behavioralEvaluation.releaseGate).passed !== true ||
+      record(behavioralManifest.source).sha256 !== datasetSha256
     ) {
-      throw new Error('Behavioral V5 is not eligible for Value V8 full evaluation.');
+      throw new Error('Behavioral V5 is not eligible for full Value V8.');
     }
-    const behavioralArtifacts = record(behavioralManifest.artifacts);
-    const propensityDescriptor = record(behavioralArtifacts.propensities);
+    const propensityArtifact = record(
+      record(behavioralManifest.artifacts).propensities,
+    );
     const propensityPath = join(
       this.behavioralDirectory,
-      text(propensityDescriptor.fileName) || PROPENSITY_FILE_NAME,
+      text(propensityArtifact.fileName) || PROPENSITY_FILE_NAME,
     );
     const propensitySha256 = await verifiedHash(
       propensityPath,
-      requiredSha(propensityDescriptor.sha256, 'Behavioral propensity SHA-256'),
+      requiredSha(propensityArtifact.sha256, 'Behavioral propensity SHA-256'),
       options.expectedBehavioralPropensitySha256,
       'Behavioral V5 propensities',
     );
@@ -787,10 +870,10 @@ export class RecommendationValueV8FullEvaluationTrainingService
       this.diagnosticDirectory,
       'manifest.json',
     );
-    const diagnosticManifest = await requiredJson<RecommendationValueV8DiagnosticTrainingManifest>(
+    const diagnosticManifest = await requiredJson<DiagnosticTrainingManifest>(
       diagnosticManifestPath,
     );
-    const diagnosticAudit = await requiredJson<RecommendationValueV8DiagnosticTrainingAudit>(
+    const diagnosticAudit = await requiredJson<DiagnosticTrainingAudit>(
       join(this.diagnosticDirectory, 'audit.json'),
     );
     const diagnosticManifestSha256 = await hashFile(diagnosticManifestPath);
@@ -801,19 +884,32 @@ export class RecommendationValueV8FullEvaluationTrainingService
       throw new Error('Value V8 diagnostic manifest SHA-256 mismatch.');
     }
     if (
-      diagnosticAudit.passed !== true ||
-      diagnosticAudit.gate.passed !== true ||
-      diagnosticAudit.gate.fullTrainingRecommended !== true ||
+      diagnosticManifest.schemaVersion !==
+        RECOMMENDATION_VALUE_V8_DIAGNOSTIC_SCHEMA_VERSION ||
+      diagnosticAudit.schemaVersion !==
+        RECOMMENDATION_VALUE_V8_DIAGNOSTIC_SCHEMA_VERSION ||
+      diagnosticManifest.auditPassed !== true ||
+      diagnosticManifest.diagnosticGatePassed !== true ||
       diagnosticManifest.fullTrainingRecommended !== true ||
-      diagnosticManifest.source.datasetSha256 !== datasetSha256 ||
-      diagnosticManifest.source.behavioralPropensitySha256 !== propensitySha256
+      diagnosticManifest.diagnosticOnly !== true ||
+      diagnosticManifest.futureTestUsed !== false ||
+      diagnosticAudit.passed !== true ||
+      diagnosticAudit.fullTrainingRecommended !== true ||
+      diagnosticAudit.diagnosticGate.passed !== true ||
+      diagnosticAudit.diagnosticGate.fullTrainingRecommended !== true ||
+      diagnosticAudit.leakage.futureTestUsedForTraining !== false ||
+      diagnosticAudit.leakage.futureTestUsedForSelection !== false ||
+      diagnosticAudit.leakage.finalOutcomeUsedForTraining !== false ||
+      diagnosticManifest.source.dataset.sha256 !== datasetSha256 ||
+      diagnosticManifest.source.behavioral.sha256 !== propensitySha256 ||
+      diagnosticAudit.source.datasetSha256 !== datasetSha256 ||
+      diagnosticAudit.source.behavioralPropensitySha256 !== propensitySha256
     ) {
-      throw new Error('Value V8 real-data diagnostic did not authorize full training.');
+      throw new Error('Real-data Value V8 diagnostic did not authorize full training.');
     }
 
-    const baselineManifestPath = join(this.baselineDirectory, 'manifest.json');
     const baselineManifest = await requiredJson<RecommendationV6ShortOnlyBaselineManifest>(
-      baselineManifestPath,
+      join(this.baselineDirectory, 'manifest.json'),
     );
     validateRecommendationV6ShortOnlyBaselineManifest(
       baselineManifest,
@@ -838,12 +934,8 @@ export class RecommendationValueV8FullEvaluationTrainingService
         rowCount: datasetManifest.artifact.rowCount,
         splitDescriptorSha256: datasetManifest.splitDescriptor.sha256,
       },
-      propensities: {
-        path: propensityPath,
-        sha256: propensitySha256,
-      },
+      propensities: { path: propensityPath, sha256: propensitySha256 },
       diagnostic: {
-        manifestPath: diagnosticManifestPath,
         manifestSha256: diagnosticManifestSha256,
         manifest: diagnosticManifest,
         audit: diagnosticAudit,
@@ -886,117 +978,150 @@ export class RecommendationValueV8FullEvaluationTrainingService
   }
 }
 
-function evaluateTuningConfigurations(input: {
-  rows: readonly RecommendationProDecisionDatasetV6Row[];
+async function evaluateTuningConfigurations(input: {
+  sources: LoadedSources;
+  index: SourceIndex;
   stateModel: RecommendationValueV8StateModel;
   actionModel: RecommendationValueV8ActionModel;
-  index: SourceIndex;
-  sources: LoadedSources;
   options: RecommendationValueV8FullEvaluationOptions;
-}): RecommendationValueV8Selection {
-  const candidates = input.options.actionScales.flatMap((actionScale) =>
-    input.options.policyTemperatures.map((policyTemperature) => {
-      const configuration = { actionScale, policyTemperature };
-      const accumulator = createRecommendationValueV8EvaluationAccumulator(
-        'TUNING',
-      );
-      for (const row of input.rows) {
-        const decision = evaluateRow({
-          row,
-          stateModel: input.stateModel,
-          actionModel: input.actionModel,
-          configuration,
-          index: input.index,
-          sources: input.sources,
-          options: input.options,
-        });
-        observeDecision(accumulator, decision);
-      }
-      return finalizeRecommendationValueV8Evaluation(
-        accumulator,
-        input.options.cohortMinimumDecisions,
-        input.options.criticalCohortRmseTolerance,
-      );
-    }),
+}): Promise<RecommendationValueV8Selection> {
+  const configurations = input.options.actionScales.flatMap((actionScale) =>
+    input.options.policyTemperatures.map((policyTemperature) => ({
+      actionScale,
+      policyTemperature,
+    })),
   );
+  const accumulators = configurations.map((configuration) => ({
+    configuration,
+    accumulator: createRecommendationValueV8EvaluationAccumulator('TUNING'),
+  }));
+  await eachDatasetRow(input.sources.dataset.path, async (row) => {
+    if (row.split !== 'TUNING' || !isEvaluationEligible(row)) {
+      return;
+    }
+    const propensity = requiredPropensity(
+      input.index,
+      row,
+      input.sources.dataset.sha256,
+    );
+    const baseline = requiredBaseline(input.index, row);
+    const statePredictions = predictRecommendationValueV8State(
+      input.stateModel,
+      row,
+      input.options.state.maximumAbsolutePrediction,
+    );
+    const candidatePrediction = predictRecommendationValueV8CandidateSet(
+      input.actionModel,
+      row,
+      input.options.action.maximumAbsoluteResidual,
+    );
+    for (const entry of accumulators) {
+      const evaluation = evaluateRecommendationValueV8Decision({
+        row,
+        propensity,
+        baseline,
+        statePredictions,
+        candidatePrediction,
+        options: evaluationOptions(input.options, entry.configuration),
+        sourceModelSha256:
+          input.sources.baseline.manifest.sourceModel.sha256,
+        sourceDatasetSha256: input.sources.dataset.sha256,
+        splitDescriptorSha256:
+          input.sources.dataset.splitDescriptorSha256,
+      });
+      observeRecommendationValueV8Evaluation(entry.accumulator, evaluation);
+    }
+  });
   return selectRecommendationValueV8Configuration(
-    candidates.map((metrics, index) => ({
-      configuration: {
-        actionScale:
-          input.options.actionScales[
-            Math.floor(index / input.options.policyTemperatures.length)
-          ],
-        policyTemperature:
-          input.options.policyTemperatures[
-            index % input.options.policyTemperatures.length
-          ],
-      },
-      metrics,
+    accumulators.map((entry) => ({
+      configuration: entry.configuration,
+      metrics: finalizeRecommendationValueV8Evaluation(
+        entry.accumulator,
+        evaluationOptions(input.options, entry.configuration),
+      ),
     })),
   );
 }
 
-function evaluateRow(input: {
-  row: RecommendationProDecisionDatasetV6Row;
+async function evaluateFutureTest(input: {
+  sources: LoadedSources;
+  index: SourceIndex;
   stateModel: RecommendationValueV8StateModel;
   actionModel: RecommendationValueV8ActionModel;
   configuration: RecommendationValueV8Configuration;
-  index: SourceIndex;
-  sources: LoadedSources;
   options: RecommendationValueV8FullEvaluationOptions;
-}): RecommendationValueV8DecisionEvaluation {
-  const propensity = requiredPropensity(input.index, input.row);
-  const baseline = requiredBaseline(input.index, input.row);
-  validateRecommendationV6ShortOnlyBaselineRow(
-    baseline,
-    input.row,
-    input.sources.baseline.manifest.sourceModel.sha256,
-    input.sources.dataset.sha256,
-    input.sources.dataset.splitDescriptorSha256,
+  predictionPath: string;
+}): Promise<{ rowCount: number; metrics: RecommendationValueV8EvaluationMetrics }> {
+  const accumulator = createRecommendationValueV8EvaluationAccumulator(
+    'FUTURE_TEST',
   );
-  const statePrediction = predictRecommendationValueV8State(
-    input.stateModel,
-    input.row,
-    input.options.state.maximumAbsolutePrediction,
-  );
-  const candidatePrediction = predictRecommendationValueV8CandidateSet(
-    input.actionModel,
-    input.row,
-    input.options.action.maximumAbsoluteResidual,
-  );
-  return evaluateRecommendationValueV8Decision({
-    row: input.row,
-    statePrediction,
-    candidatePrediction,
-    behavioralPropensity: propensity,
-    baseline,
-    options: {
-      configuration: input.configuration,
-      maximumImportanceWeight: input.options.action.maximumImportanceWeight,
-      cohortMinimumDecisions: input.options.cohortMinimumDecisions,
-      criticalCohortRmseTolerance:
-        input.options.criticalCohortRmseTolerance,
-    },
-  });
+  const partialPath = `${input.predictionPath}.partial`;
+  const writer = await LineWriter.create(partialPath);
+  let rowCount = 0;
+  try {
+    await eachDatasetRow(input.sources.dataset.path, async (row) => {
+      if (row.split !== 'FUTURE_TEST' || !isEvaluationEligible(row)) {
+        return;
+      }
+      const propensity = requiredPropensity(
+        input.index,
+        row,
+        input.sources.dataset.sha256,
+      );
+      const baseline = requiredBaseline(input.index, row);
+      const statePredictions = predictRecommendationValueV8State(
+        input.stateModel,
+        row,
+        input.options.state.maximumAbsolutePrediction,
+      );
+      const candidatePrediction = predictRecommendationValueV8CandidateSet(
+        input.actionModel,
+        row,
+        input.options.action.maximumAbsoluteResidual,
+      );
+      const evaluation = evaluateRecommendationValueV8Decision({
+        row,
+        propensity,
+        baseline,
+        statePredictions,
+        candidatePrediction,
+        options: evaluationOptions(input.options, input.configuration),
+        sourceModelSha256:
+          input.sources.baseline.manifest.sourceModel.sha256,
+        sourceDatasetSha256: input.sources.dataset.sha256,
+        splitDescriptorSha256:
+          input.sources.dataset.splitDescriptorSha256,
+      });
+      observeRecommendationValueV8Evaluation(accumulator, evaluation);
+      await writer.write(evaluation);
+      rowCount += 1;
+    });
+    await writer.close();
+    await rename(partialPath, input.predictionPath);
+  } catch (error) {
+    await writer.abort();
+    await rm(partialPath, { force: true });
+    throw error;
+  }
+  return {
+    rowCount,
+    metrics: finalizeRecommendationValueV8Evaluation(
+      accumulator,
+      evaluationOptions(input.options, input.configuration),
+    ),
+  };
 }
 
-function observeDecision(
-  accumulator: ReturnType<typeof createRecommendationValueV8EvaluationAccumulator>,
-  decision: RecommendationValueV8DecisionEvaluation,
-): void {
-  const fn = (globalThis as unknown as {
-    __recommendationValueV8Observe?: (
-      value: typeof accumulator,
-      row: RecommendationValueV8DecisionEvaluation,
-    ) => void;
-  }).__recommendationValueV8Observe;
-  if (fn) {
-    fn(accumulator, decision);
-    return;
-  }
-  // The core exports a stable observer in the compiled module. This fallback is
-  // intentionally unreachable and prevents silently producing partial metrics.
-  throw new Error('Recommendation Value V8 evaluation observer is unavailable.');
+function evaluationOptions(
+  options: RecommendationValueV8FullEvaluationOptions,
+  configuration: RecommendationValueV8Configuration,
+) {
+  return {
+    configuration,
+    maximumImportanceWeight: options.action.maximumImportanceWeight,
+    cohortMinimumDecisions: options.cohortMinimumDecisions,
+    criticalCohortRmseTolerance: options.criticalCohortRmseTolerance,
+  };
 }
 
 async function buildSourceIndex(sources: LoadedSources): Promise<SourceIndex> {
@@ -1026,74 +1151,88 @@ async function buildSourceIndex(sources: LoadedSources): Promise<SourceIndex> {
   };
 }
 
-async function collectSourceSummary(
+async function scanDataset(
   sources: LoadedSources,
   index: SourceIndex,
+  foldCount: number,
 ): Promise<SourceSummary> {
-  const trainRows: RecommendationProDecisionDatasetV6Row[] = [];
-  const tuningRows: RecommendationProDecisionDatasetV6Row[] = [];
-  const futureTestRows: RecommendationProDecisionDatasetV6Row[] = [];
   const decisionIds = new Set<string>();
+  const eligibleBySplit: Record<RecommendationDatasetV6Split, number> = {
+    TRAIN: 0,
+    TUNING: 0,
+    FUTURE_TEST: 0,
+  };
+  const trainMatchIdsByFold = Array.from(
+    { length: foldCount },
+    () => new Set<string>(),
+  );
   let sourceRowCount = 0;
   let duplicateDatasetDecisionCount = 0;
   let missingBehavioralPropensityCount = 0;
   let missingBaselineCount = 0;
-  for await (const value of ndjson(sources.dataset.path)) {
-    const row = value as RecommendationProDecisionDatasetV6Row;
+  await eachDatasetRow(sources.dataset.path, async (row) => {
     sourceRowCount += 1;
     if (decisionIds.has(row.decisionId)) {
       duplicateDatasetDecisionCount += 1;
     }
     decisionIds.add(row.decisionId);
-    if (isActionEligible(row) && !index.propensities.has(row.decisionId)) {
+    if (!isTrainEligible(row)) {
+      return;
+    }
+    eligibleBySplit[row.split] += 1;
+    if (!index.propensities.has(row.decisionId)) {
       missingBehavioralPropensityCount += 1;
     }
-    if (
-      row.split !== 'TRAIN' &&
-      isEvaluationEligible(row) &&
-      !index.baselines.has(row.decisionId)
-    ) {
+    if (row.split === 'TRAIN') {
+      trainMatchIdsByFold[
+        recommendationValueV8FoldId(row.matchId, foldCount)
+      ].add(row.matchId);
+    } else if (!index.baselines.has(row.decisionId)) {
       missingBaselineCount += 1;
     }
-    if (row.split === 'TRAIN' && isTrainEligible(row)) {
-      trainRows.push(row);
-    } else if (row.split === 'TUNING' && isEvaluationEligible(row)) {
-      tuningRows.push(row);
-    } else if (
-      row.split === 'FUTURE_TEST' &&
-      isEvaluationEligible(row)
-    ) {
-      futureTestRows.push(row);
-    }
-  }
+  });
   return {
     sourceRowCount,
-    trainRows,
-    tuningRows,
-    futureTestRows,
+    eligibleBySplit,
     duplicateDatasetDecisionCount,
     missingBehavioralPropensityCount,
     missingBaselineCount,
+    trainMatchIdsByFold,
   };
 }
 
-function validateSourceSummary(summary: SourceSummary, index: SourceIndex): void {
+function validateSourceSummary(
+  summary: SourceSummary,
+  index: SourceIndex,
+  expectedRowCount: number,
+): void {
   const reasons = structuralReasons(summary, index);
-  if (summary.trainRows.length === 0) {
+  if (summary.sourceRowCount !== expectedRowCount) {
+    reasons.push('Dataset V6 row count does not match its manifest.');
+  }
+  if (summary.eligibleBySplit.TRAIN === 0) {
     reasons.push('No eligible TRAIN decisions are available.');
   }
-  if (summary.tuningRows.length === 0) {
+  if (summary.eligibleBySplit.TUNING === 0) {
     reasons.push('No eligible TUNING decisions are available.');
   }
-  if (summary.futureTestRows.length === 0) {
+  if (summary.eligibleBySplit.FUTURE_TEST === 0) {
     reasons.push('No eligible FUTURE_TEST decisions are available.');
   }
+  if (summary.trainMatchIdsByFold.some((matches) => matches.size === 0)) {
+    reasons.push('Every Value V8 cross-fitting fold must contain a TRAIN match.');
+  }
   if (reasons.length > 0) {
-    throw new Error(`Value V8 full evaluation source validation failed: ${reasons.join(' ')}`);
+    throw new Error(
+      `Value V8 full evaluation source validation failed: ${reasons.join(' ')}`,
+    );
   }
 }
 
-function structuralReasons(summary: SourceSummary, index: SourceIndex): string[] {
+function structuralReasons(
+  summary: SourceSummary,
+  index: SourceIndex,
+): string[] {
   const reasons: string[] = [];
   if (summary.duplicateDatasetDecisionCount > 0) {
     reasons.push('Dataset V6 contains duplicate decision IDs.');
@@ -1105,10 +1244,10 @@ function structuralReasons(summary: SourceSummary, index: SourceIndex): string[]
     reasons.push('Frozen V6 baseline contains duplicate decision IDs.');
   }
   if (summary.missingBehavioralPropensityCount > 0) {
-    reasons.push('Eligible Value V8 decisions are missing Behavioral V5 propensities.');
+    reasons.push('Eligible decisions are missing Behavioral V5 propensities.');
   }
   if (summary.missingBaselineCount > 0) {
-    reasons.push('Evaluation decisions are missing frozen V6 baseline predictions.');
+    reasons.push('Evaluation decisions are missing frozen V6 baseline rows.');
   }
   return reasons;
 }
@@ -1116,6 +1255,7 @@ function structuralReasons(summary: SourceSummary, index: SourceIndex): string[]
 function requiredPropensity(
   index: SourceIndex,
   row: RecommendationProDecisionDatasetV6Row,
+  datasetSha256: string,
 ): RecommendationBehavioralV5PropensityRow {
   const propensity = index.propensities.get(row.decisionId);
   if (!propensity) {
@@ -1125,7 +1265,8 @@ function requiredPropensity(
     propensity.matchId !== row.matchId ||
     propensity.split !== row.split ||
     propensity.observedActionKey !== row.observedActionKey ||
-    propensity.sourceDatasetSha256.length !== 64
+    propensity.sourceDatasetSha256 !== datasetSha256 ||
+    propensity.trainingMatchExcluded !== true
   ) {
     throw new Error(`Behavioral V5 propensity mismatch for ${row.decisionId}.`);
   }
@@ -1152,6 +1293,7 @@ function isActionEligible(row: RecommendationProDecisionDatasetV6Row): boolean {
     row.eligibility.actionModel &&
     row.observedActionInCandidateSet &&
     row.candidates.length >= 2 &&
+    row.candidates.every((candidate) => candidate.catalogMetadataAvailable) &&
     Object.keys(recommendationValueV8Targets(row)).length > 0
   );
 }
@@ -1162,80 +1304,83 @@ function isEvaluationEligible(
   return isTrainEligible(row);
 }
 
-function buildModelArtifact(input: {
-  generatedAt: string;
-  sources: LoadedSources;
-  stateModel: RecommendationValueV8StateModel;
-  actionModel: RecommendationValueV8ActionModel;
-  selection: RecommendationValueV8Selection;
-  options: RecommendationValueV8FullEvaluationOptions;
-}): Record<string, unknown> {
-  return {
-    schemaVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_SCHEMA_VERSION,
-    evaluationVersion: RECOMMENDATION_VALUE_V8_FULL_EVALUATION_VERSION,
-    generatedAt: input.generatedAt,
-    stateModelVersion: RECOMMENDATION_VALUE_V8_STATE_MODEL_VERSION,
-    actionModelVersion: RECOMMENDATION_VALUE_V8_ACTION_MODEL_VERSION,
-    featureVersion: RECOMMENDATION_VALUE_V8_FEATURE_VERSION,
-    source: {
-      datasetSha256: input.sources.dataset.sha256,
-      behavioralPropensitySha256: input.sources.propensities.sha256,
-      diagnosticManifestSha256: input.sources.diagnostic.manifestSha256,
-      baselineSha256: input.sources.baseline.sha256,
-    },
-    selectedConfiguration: input.selection.selected.configuration,
-    selectedOn: 'TUNING_ONLY',
-    options: input.options,
-    stateModel: input.stateModel,
-    actionModel: input.actionModel,
-  };
+async function eachDatasetRow(
+  path: string,
+  callback: (row: RecommendationProDecisionDatasetV6Row) => Promise<void>,
+): Promise<void> {
+  let line = 0;
+  for await (const value of ndjson(path)) {
+    line += 1;
+    const row = datasetRow(value, line);
+    await callback(row);
+    if (line % 10_000 === 0) {
+      await tick();
+    }
+  }
+}
+
+function datasetRow(
+  value: unknown,
+  line: number,
+): RecommendationProDecisionDatasetV6Row {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== RECOMMENDATION_PRO_DECISION_DATASET_V6_SCHEMA_VERSION ||
+    value.datasetVersion !== RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION ||
+    value.dataSource !== 'PRO_HISTORICAL' ||
+    typeof value.decisionId !== 'string' ||
+    typeof value.matchId !== 'string' ||
+    !['TRAIN', 'TUNING', 'FUTURE_TEST'].includes(String(value.split)) ||
+    !Array.isArray(value.candidates) ||
+    !isRecord(value.state) ||
+    !isRecord(value.eligibility)
+  ) {
+    throw new Error(`Invalid Recommendation Dataset V6 row at line ${line}.`);
+  }
+  return value as unknown as RecommendationProDecisionDatasetV6Row;
 }
 
 function normalizeOptions(
   request: RecommendationValueV8FullEvaluationStartRequest,
 ): RecommendationValueV8FullEvaluationOptions {
-  const stateEpochs = integer(request.stateEpochs, 3, 1, 20, 'stateEpochs');
-  const actionEpochs = integer(request.actionEpochs, 3, 1, 20, 'actionEpochs');
-  const hashDimension = integer(
-    request.hashDimension,
-    16_384,
-    256,
-    262_144,
-    'hashDimension',
-  );
-  const state = {
-    learningRate: finite(request.stateLearningRate, 0.03, 1e-6, 1),
-    l2: finite(request.stateL2, 1e-5, 0, 1),
-    maximumAbsolutePrediction: finite(
-      request.maximumAbsolutePrediction,
-      1,
-      0.01,
-      10,
-    ),
-  };
-  const action = {
-    learningRate: finite(request.actionLearningRate, 0.02, 1e-6, 1),
-    l2: finite(request.actionL2, 1e-5, 0, 1),
-    maximumAbsoluteResidual: finite(
-      request.maximumAbsoluteResidual,
-      1,
-      0.01,
-      10,
-    ),
-    propensityFloor: finite(request.propensityFloor, 0.01, 1e-6, 0.5),
-    maximumImportanceWeight: finite(
-      request.maximumImportanceWeight,
-      20,
-      1,
-      1_000,
-    ),
-  };
   return {
-    stateEpochs,
-    actionEpochs,
-    hashDimension,
-    state,
-    action,
+    foldCount: integer(request.foldCount, 5, 2, 20, 'foldCount'),
+    stateEpochs: integer(request.stateEpochs, 3, 1, 20, 'stateEpochs'),
+    actionEpochs: integer(request.actionEpochs, 3, 1, 20, 'actionEpochs'),
+    hashDimension: integer(
+      request.hashDimension,
+      16_384,
+      256,
+      262_144,
+      'hashDimension',
+    ),
+    state: {
+      learningRate: finite(request.stateLearningRate, 0.03, 1e-6, 1),
+      l2: finite(request.stateL2, 1e-5, 0, 1),
+      maximumAbsolutePrediction: finite(
+        request.maximumAbsolutePrediction,
+        1,
+        0.01,
+        10,
+      ),
+    },
+    action: {
+      learningRate: finite(request.actionLearningRate, 0.02, 1e-6, 1),
+      l2: finite(request.actionL2, 1e-5, 0, 1),
+      maximumAbsoluteResidual: finite(
+        request.maximumAbsoluteResidual,
+        1,
+        0.01,
+        10,
+      ),
+      propensityFloor: finite(request.propensityFloor, 0.01, 1e-6, 0.5),
+      maximumImportanceWeight: finite(
+        request.maximumImportanceWeight,
+        20,
+        1,
+        1_000,
+      ),
+    },
     actionScales: numericGrid(
       request.actionScales,
       [0.25, 0.5, 0.75, 1],
@@ -1381,10 +1526,7 @@ function finite(
 }
 
 function optionalSha(value: string | undefined): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return requiredSha(value, 'Expected SHA-256');
+  return value === undefined ? undefined : requiredSha(value, 'Expected SHA-256');
 }
 
 async function verifiedHash(
@@ -1401,6 +1543,36 @@ async function verifiedHash(
     throw new Error(`${label} expected SHA-256 mismatch.`);
   }
   return actual;
+}
+
+async function artifactDescriptor(
+  path: string,
+  fileName: string,
+  format: 'JSON',
+): Promise<ArtifactDescriptor & { format: 'JSON' }>;
+async function artifactDescriptor(
+  path: string,
+  fileName: string,
+  format: 'NDJSON',
+  rowCount: number,
+): Promise<ArtifactDescriptor & { format: 'NDJSON'; rowCount: number }>;
+async function artifactDescriptor(
+  path: string,
+  fileName: string,
+  format: 'JSON' | 'NDJSON',
+  rowCount?: number,
+): Promise<
+  | (ArtifactDescriptor & { format: 'JSON' })
+  | (ArtifactDescriptor & { format: 'NDJSON'; rowCount: number })
+> {
+  const base = {
+    fileName,
+    sha256: await hashFile(path),
+    byteLength: (await stat(path)).size,
+  };
+  return format === 'NDJSON'
+    ? { ...base, format, rowCount: rowCount ?? 0 }
+    : { ...base, format };
 }
 
 async function requiredJson<T>(path: string): Promise<T> {
@@ -1478,10 +1650,12 @@ class LineWriter {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 function text(value: unknown): string | undefined {
