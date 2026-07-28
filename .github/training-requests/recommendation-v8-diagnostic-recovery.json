@@ -1,0 +1,10 @@
+{
+  "requestedAt": "2026-07-28T17:00:00+03:00",
+  "mode": "DIAGNOSTIC_NON_RELEASE",
+  "reuseCompletedSourceDatasetV3": true,
+  "catalogSelectionRule": "CURRENT_CATALOG_FALLBACK_NON_RELEASE",
+  "releaseEligible": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
