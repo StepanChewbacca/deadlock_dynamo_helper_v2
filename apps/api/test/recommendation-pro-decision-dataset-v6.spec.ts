@@ -55,7 +55,7 @@ describe('Recommendation pro decision dataset V6', () => {
       hasAnyOwnedComponent: true,
       hasCompleteRecipeComponents: true,
       alreadyOwnedCount: 0,
-      sameSlotOwnedItemCount: 1,
+      sameSlotOwnedItemCount: 3,
       inventoryTagOverlapCount: 1,
       previousActionCount: 1,
       currentNetWorth: 5_000,
