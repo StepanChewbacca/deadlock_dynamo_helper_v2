@@ -135,18 +135,17 @@ function selectDecisionPlayerSnapshots(
   const matchSnapshots = snapshots.filter(
     (snapshot) => snapshot.matchId === decision.matchId,
   );
-  const playerId = String(decision.playerId);
+  const expectedTeamId = liveTeam(decision.team);
   const exact = matchSnapshots.filter(
-    (snapshot) => snapshot.steamId === playerId,
+    (snapshot) =>
+      snapshot.heroId === decision.heroId &&
+      (expectedTeamId === undefined || snapshot.teamId === expectedTeamId),
   );
   const result =
     exact.length > 0
       ? exact
       : matchSnapshots.filter(
-          (snapshot) =>
-            snapshot.heroId === decision.heroId &&
-            (liveTeam(decision.team) === undefined ||
-              snapshot.teamId === liveTeam(decision.team)),
+          (snapshot) => snapshot.heroId === decision.heroId,
         );
   return [...result].sort(compareSnapshots);
 }
