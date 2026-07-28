@@ -1,8 +1,9 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-07-28T17:53:00Z",
   "reason": "Dataset V3 failed closed because physicalRowCount 5885020 did not match audited rowCount 6186310. Replace FileHandle buffering with WriteStream backpressure and verify each hero file before aggregation.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-28T17:50:00Z"
 }

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
 import {
   mkdir,
@@ -12,7 +13,6 @@ import {
   truncate,
   writeFile,
 } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { In, Repository } from 'typeorm';
@@ -481,6 +481,13 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
           await writer.close();
         }
 
+        const physicalHeroRowCount = await countNdjsonRows(heroFilePath);
+        if (physicalHeroRowCount !== heroAudit.rowCount) {
+          throw new Error(
+            `Contextual V3 hero ${heroId} physical row count ${physicalHeroRowCount} ` +
+              `does not match audited row count ${heroAudit.rowCount}.`,
+          );
+        }
         await pipeline(
           createReadStream(heroFilePath),
           createWriteStream(this.partialDatasetPath, { flags: 'a' }),
@@ -953,14 +960,22 @@ function boundedInteger(
 
 class BufferedNdjsonWriter {
   private buffer = '';
+  private closed = false;
 
-  private constructor(private readonly handle: FileHandle) {}
+  private constructor(
+    private readonly stream: ReturnType<typeof createWriteStream>,
+  ) {}
 
   static async create(path: string): Promise<BufferedNdjsonWriter> {
-    return new BufferedNdjsonWriter(await open(path, 'w'));
+    return new BufferedNdjsonWriter(
+      createWriteStream(path, { flags: 'w', encoding: 'utf8' }),
+    );
   }
 
   async write(row: HeroBuildDecisionDatasetV3Row): Promise<void> {
+    if (this.closed) {
+      throw new Error('Contextual V3 writer is already closed.');
+    }
     this.buffer += `${JSON.stringify(row)}\n`;
     if (Buffer.byteLength(this.buffer) >= NDJSON_BUFFER_LIMIT_BYTES) {
       await this.flush();
@@ -968,28 +983,23 @@ class BufferedNdjsonWriter {
   }
 
   async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     await this.flush();
-    await this.handle.close();
+    this.closed = true;
+    this.stream.end();
+    await once(this.stream, 'close');
   }
 
   private async flush(): Promise<void> {
     if (!this.buffer) {
       return;
     }
-    const value = Buffer.from(this.buffer, 'utf8');
+    const value = this.buffer;
     this.buffer = '';
-    let offset = 0;
-    while (offset < value.length) {
-      const { bytesWritten } = await this.handle.write(
-        value,
-        offset,
-        value.length - offset,
-        null,
-      );
-      if (bytesWritten <= 0) {
-        throw new Error('Contextual V3 writer made no progress while flushing.');
-      }
-      offset += bytesWritten;
+    if (!this.stream.write(value, 'utf8')) {
+      await once(this.stream, 'drain');
     }
   }
 }
