@@ -1,0 +1,594 @@
+name: Recommendation V8 Clean Dataset V3 Rebuild
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-clean-v3-rebuild.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-vps-training
+  cancel-in-progress: false
+
+jobs:
+  fix-validate-clean-and-start:
+    name: Fix known defects, delete old offline artifacts, and rebuild Dataset V3
+    runs-on: self-hosted
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Patch Dataset V3, snapshot streaming, and replay time validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one replacement, found {count}')
+              file.write_text(text.replace(old, new, 1))
+
+          v3 = 'apps/api/src/deadlock-live/hero-build-decision-dataset-v3.service.ts'
+          replace_once(
+              v3,
+              """      await rm(this.datasetPath, { force: true });
+              await rename(this.partialDatasetPath, this.datasetPath);
+              const artifactStat = await stat(this.datasetPath);""",
+              """      await rm(this.datasetPath, { force: true });
+              await rename(this.partialDatasetPath, this.datasetPath);
+              const physicalRowCount = await countNdjsonRows(this.datasetPath);
+              if (physicalRowCount !== checkpoint.audit.rowCount) {
+                throw new Error(
+                  `Contextual V3 physical row count ${physicalRowCount} does not match ` +
+                    `the audited row count ${checkpoint.audit.rowCount}.`,
+                );
+              }
+              const artifactStat = await stat(this.datasetPath);""",
+          )
+          replace_once(
+              v3,
+              """    const value = this.buffer;
+              this.buffer = '';
+              await this.handle.write(value);""",
+              """    const value = Buffer.from(this.buffer, 'utf8');
+              this.buffer = '';
+              let offset = 0;
+              while (offset < value.length) {
+                const { bytesWritten } = await this.handle.write(
+                  value,
+                  offset,
+                  value.length - offset,
+                  null,
+                );
+                if (bytesWritten <= 0) {
+                  throw new Error('Contextual V3 writer made no progress while flushing.');
+                }
+                offset += bytesWritten;
+              }""",
+          )
+          marker = """async function ensureFile(path: string): Promise<void> {"""
+          helper = """async function countNdjsonRows(path: string): Promise<number> {
+            let rowCount = 0;
+            for await (const chunk of createReadStream(path)) {
+              const value = chunk as Buffer;
+              for (let index = 0; index < value.length; index += 1) {
+                if (value[index] === 10) {
+                  rowCount += 1;
+                }
+              }
+            }
+            return rowCount;
+          }
+
+          """
+          replace_once(v3, marker, helper + marker)
+
+          replay = 'apps/api/src/deadlock-live/recommendation-historical-pro-replay.ts'
+          replace_once(
+              replay,
+              """      nonNegativeInteger(
+                outcome.snapshotGameTimeS,
+                `${outcome.horizon} snapshotGameTimeS`,
+              );""",
+              """      nonNegativeFiniteNumber(
+                outcome.snapshotGameTimeS,
+                `${outcome.horizon} snapshotGameTimeS`,
+              );""",
+          )
+          replay_marker = """function nonNegativeInteger(value: unknown, name: string): number {"""
+          replay_helper = """function nonNegativeFiniteNumber(value: unknown, name: string): number {
+            const normalized = finiteNumber(value, name);
+            if (normalized < 0) {
+              throw new Error(`${name} must be non-negative.`);
+            }
+            return normalized;
+          }
+
+          """
+          replace_once(replay, replay_marker, replay_helper + replay_marker)
+
+          snapshot = 'apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot-export.service.ts'
+          replace_once(
+              snapshot,
+              """import {
+            mkdir,
+            readFile,
+            rename,
+            stat,
+            writeFile,
+          } from 'node:fs/promises';""",
+              """import {
+            mkdir,
+            open,
+            readFile,
+            rename,
+            rm,
+            stat,
+            writeFile,
+          } from 'node:fs/promises';
+          import type { FileHandle } from 'node:fs/promises';""",
+          )
+          replace_once(
+              snapshot,
+              """      const artifactPath = this.artifactPath(request.snapshotId);
+              const artifactRaw = `${JSON.stringify(artifact, undefined, 2)}\n`;
+              const artifactSha256 = sha256Text(artifactRaw);
+              const audit = buildAudit({""",
+              """      const artifactPath = this.artifactPath(request.snapshotId);
+              const artifactWrite = await writeCandidateSnapshotPartial(
+                artifactPath,
+                artifact,
+              );
+              const artifactSha256 = artifactWrite.sha256;
+              const audit = buildAudit({""",
+          )
+          replace_once(
+              snapshot,
+              """        artifactFileName: basename(artifactPath),
+                artifactByteLength: Buffer.byteLength(artifactRaw),
+                artifactSha256,
+              });
+              if (!audit.passed) {
+                throw new Error(
+                  `Candidate generator snapshot audit failed: ${audit.reasons.join(' ')}`,
+                );
+              }
+
+              await atomicWrite(artifactPath, artifactRaw);""",
+              """        artifactFileName: basename(artifactPath),
+                artifactByteLength: artifactWrite.byteLength,
+                artifactSha256,
+              });
+              if (!audit.passed) {
+                await rm(artifactWrite.partialPath, { force: true });
+                throw new Error(
+                  `Candidate generator snapshot audit failed: ${audit.reasons.join(' ')}`,
+                );
+              }
+
+              await rename(artifactWrite.partialPath, artifactPath);""",
+          )
+          snapshot_marker = """async function atomicWrite(path: string, content: string): Promise<void> {"""
+          snapshot_helper = r"""const SNAPSHOT_STREAM_BUFFER_LIMIT_BYTES = 1024 * 1024;
+
+          async function writeCandidateSnapshotPartial(
+            path: string,
+            artifact: RecommendationCandidateGeneratorSnapshotArtifact,
+          ): Promise<{ partialPath: string; byteLength: number; sha256: string }> {
+            const partialPath = `${path}.partial`;
+            await rm(partialPath, { force: true });
+            const handle = await open(partialPath, 'w');
+            const writer = new BufferedHashedSnapshotWriter(handle);
+            try {
+              await writer.append(
+                `{"schemaVersion":${artifact.schemaVersion},` +
+                  `"artifactVersion":${JSON.stringify(artifact.artifactVersion)},` +
+                  `"snapshot":${JSON.stringify(artifact.snapshot)},` +
+                  `"generatorOptions":${JSON.stringify(artifact.generatorOptions)},` +
+                  '"policies":[',
+              );
+              for (let policyIndex = 0; policyIndex < artifact.policies.length; policyIndex += 1) {
+                const policy = artifact.policies[policyIndex];
+                if (policyIndex > 0) {
+                  await writer.append(',');
+                }
+                await writer.append(
+                  `{"heroId":${policy.heroId},` +
+                    `"playerCount":${policy.playerCount},` +
+                    `"stateCount":${policy.stateCount},` +
+                    `"transitionCount":${policy.transitionCount},` +
+                    '"states":[',
+                );
+                for (let stateIndex = 0; stateIndex < policy.states.length; stateIndex += 1) {
+                  if (stateIndex > 0) {
+                    await writer.append(',');
+                  }
+                  await writer.append(JSON.stringify(policy.states[stateIndex]));
+                }
+                await writer.append(']}');
+              }
+              await writer.append(`],"catalog":${JSON.stringify(artifact.catalog)}}\n`);
+              const descriptor = await writer.close();
+              return { partialPath, ...descriptor };
+            } catch (error) {
+              await writer.abort();
+              await rm(partialPath, { force: true });
+              throw error;
+            }
+          }
+
+          class BufferedHashedSnapshotWriter {
+            private buffer = '';
+            private readonly hash = createHash('sha256');
+            private byteLength = 0;
+            private closed = false;
+
+            constructor(private readonly handle: FileHandle) {}
+
+            async append(value: string): Promise<void> {
+              if (this.closed) {
+                throw new Error('Candidate snapshot writer is already closed.');
+              }
+              this.buffer += value;
+              if (Buffer.byteLength(this.buffer) >= SNAPSHOT_STREAM_BUFFER_LIMIT_BYTES) {
+                await this.flush();
+              }
+            }
+
+            async close(): Promise<{ byteLength: number; sha256: string }> {
+              if (this.closed) {
+                throw new Error('Candidate snapshot writer is already closed.');
+              }
+              await this.flush();
+              await this.handle.sync();
+              await this.handle.close();
+              this.closed = true;
+              return {
+                byteLength: this.byteLength,
+                sha256: this.hash.digest('hex'),
+              };
+            }
+
+            async abort(): Promise<void> {
+              if (this.closed) {
+                return;
+              }
+              this.closed = true;
+              await this.handle.close().catch(() => undefined);
+            }
+
+            private async flush(): Promise<void> {
+              if (!this.buffer) {
+                return;
+              }
+              const value = Buffer.from(this.buffer, 'utf8');
+              this.buffer = '';
+              let offset = 0;
+              while (offset < value.length) {
+                const { bytesWritten } = await this.handle.write(
+                  value,
+                  offset,
+                  value.length - offset,
+                  null,
+                );
+                if (bytesWritten <= 0) {
+                  throw new Error('Candidate snapshot writer made no progress.');
+                }
+                offset += bytesWritten;
+              }
+              this.hash.update(value);
+              this.byteLength += value.length;
+            }
+          }
+
+          """
+          replace_once(snapshot, snapshot_marker, snapshot_helper + snapshot_marker)
+          replace_once(
+              snapshot,
+              """function sha256Text(value: string): string {
+            return createHash('sha256').update(value).digest('hex');
+          }
+
+          """,
+              '',
+          )
+
+          original = Path('scripts/run-recommendation-v8-training-supervisor.mjs').read_text()
+          clean = original.replace(
+              "const PIPELINE_SCRIPT = process.env.TRAINING_PIPELINE_SCRIPT || '/runner/run-recommendation-v8-real-data-v2.mjs';",
+              "const PIPELINE_SCRIPT = process.env.TRAINING_PIPELINE_SCRIPT || '/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs';",
+              1,
+          )
+          clean = clean.replace(
+              """  currentStage = 'RESOLVING_HISTORICAL_CATALOG';
+            await writeStatus('RUNNING', currentStage);
+            const catalog = await resolveHistoricalCatalog(chronology.trainingWindowEnd);""",
+              """  currentStage = 'RESOLVING_CURRENT_CATALOG_FALLBACK';
+            await writeStatus('RUNNING', currentStage, {
+              runMode: 'DIAGNOSTIC_NON_RELEASE_CURRENT_CATALOG_FALLBACK',
+              releaseEligible: false,
+            });
+            const catalog = await resolveCurrentCatalogFallback();""",
+              1,
+          )
+          clean = clean.replace(
+              """  currentStage = 'OFFLINE_V8_PIPELINE';
+            await writeStatus('RUNNING', currentStage, { resolvedConfig });""",
+              """  currentStage = 'OFFLINE_V8_DIAGNOSTIC_PIPELINE';
+            await writeStatus('RUNNING', currentStage, {
+              resolvedConfig,
+              runMode: 'DIAGNOSTIC_NON_RELEASE_CURRENT_CATALOG_FALLBACK',
+              releaseEligible: false,
+              productionRankingChanged: false,
+              passiveShadowActivated: false,
+              randomizedCanaryAuthorized: false,
+            });""",
+              1,
+          )
+          clean = clean.replace(
+              """  currentStage = 'COMPLETE';
+            await writeStatus('COMPLETE', currentStage, {
+              resolvedConfig,
+              productionRankingChanged: false,
+              passiveShadowActivated: false,
+              randomizedCanaryAuthorized: false,
+            });""",
+              """  currentStage = 'DIAGNOSTIC_NON_RELEASE_COMPLETE';
+            await writeStatus('DIAGNOSTIC_COMPLETE', currentStage, {
+              resolvedConfig,
+              runMode: 'DIAGNOSTIC_NON_RELEASE_CURRENT_CATALOG_FALLBACK',
+              releaseEligible: false,
+              offlineReleaseGateAccepted: false,
+              productionRankingChanged: false,
+              passiveShadowActivated: false,
+              randomizedCanaryAuthorized: false,
+            });""",
+              1,
+          )
+          old_catalog = """async function resolveHistoricalCatalog(trainingWindowEnd) {
+            const client = new Client({
+              host: process.env.DB_HOST,
+              port: Number(process.env.DB_PORT || 5432),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD,
+              database: process.env.DB_NAME,
+            });
+            await client.connect();
+            try {
+              const result = await client.query(
+                `SELECT id, "clientVersion", "contentCatalogVersionId", "importedAt", "isCurrent"
+                 FROM item_catalog_versions
+                 WHERE "importedAt" <= $1
+                 ORDER BY "importedAt" DESC, id DESC
+                 LIMIT 1`,
+                [trainingWindowEnd],
+              );
+              if (result.rows.length !== 1) {
+                throw new Error(`No historical catalog exists at or before ${trainingWindowEnd}.`);
+              }
+              const row = result.rows[0];
+              return {
+                id: Number(row.id),
+                clientVersion: String(row.clientVersion),
+                contentCatalogVersionId:
+                  row.contentCatalogVersionId === null ? undefined : Number(row.contentCatalogVersionId),
+                importedAt: new Date(row.importedAt).toISOString(),
+                isCurrent: row.isCurrent === true,
+                selectionRule: 'LATEST_IMPORTED_AT_OR_BEFORE_POLICY_TRAINING_WINDOW_END',
+              };
+            } finally {
+              await client.end();
+            }
+          }"""
+          new_catalog = """async function resolveCurrentCatalogFallback() {
+            const client = new Client({
+              host: process.env.DB_HOST,
+              port: Number(process.env.DB_PORT || 5432),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD,
+              database: process.env.DB_NAME,
+            });
+            await client.connect();
+            try {
+              const result = await client.query(
+                `SELECT id, "clientVersion", "contentCatalogVersionId", "importedAt", "isCurrent"
+                 FROM item_catalog_versions
+                 ORDER BY "isCurrent" DESC, "importedAt" DESC, id DESC
+                 LIMIT 1`,
+              );
+              if (result.rows.length !== 1) {
+                throw new Error('No item catalog is available for the diagnostic fallback.');
+              }
+              const row = result.rows[0];
+              return {
+                id: Number(row.id),
+                clientVersion: String(row.clientVersion),
+                contentCatalogVersionId:
+                  row.contentCatalogVersionId === null ? undefined : Number(row.contentCatalogVersionId),
+                importedAt: new Date(row.importedAt).toISOString(),
+                isCurrent: row.isCurrent === true,
+                selectionRule: 'CURRENT_CATALOG_FALLBACK_NON_RELEASE',
+                temporalValidationPassed: false,
+                temporalCatalogLeakageRisk: true,
+                releaseEligible: false,
+              };
+            } finally {
+              await client.end();
+            }
+          }"""
+          if old_catalog not in clean:
+              raise SystemExit('clean supervisor: historical catalog function was not found')
+          clean = clean.replace(old_catalog, new_catalog, 1)
+          clean = clean.replace(
+              """  if (chronology.matchCount < MINIMUM_SOURCE_MATCH_COUNT) {""",
+              """  if (chronology.decisionRowCount !== source.manifest.artifact.rowCount) {
+              throw new Error(
+                `Physical Dataset V3 row count ${chronology.decisionRowCount} does not match ` +
+                  `manifest row count ${source.manifest.artifact.rowCount}.`,
+              );
+            }
+            if (chronology.matchCount < MINIMUM_SOURCE_MATCH_COUNT) {""",
+              1,
+          )
+          Path('scripts/run-recommendation-v8-clean-diagnostic-supervisor.mjs').write_text(clean)
+          PY
+          git diff --check
+
+      - name: Build patched builder image
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder_image="deadlock-recommendation-v8-clean-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$builder_image" .
+          echo "BUILDER_IMAGE=$builder_image" >> "$GITHUB_ENV"
+
+      - name: Run targeted regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker run --rm --entrypoint yarn "$BUILDER_IMAGE" workspace @deadlock-live-probe/api test recommendation-historical-pro-replay-fractional-snapshot.spec.ts recommendation-candidate-generator-snapshot-export.spec.ts --runInBand
+
+      - name: Build isolated runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_image="deadlock-recommendation-v8-clean:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build -t "$runtime_image" .
+          echo "TRAINING_IMAGE=$runtime_image" >> "$GITHUB_ENV"
+
+      - name: Commit validated fixes to the training branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/api/src/deadlock-live/hero-build-decision-dataset-v3.service.ts apps/api/src/deadlock-live/recommendation-historical-pro-replay.ts apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot-export.service.ts scripts/run-recommendation-v8-clean-diagnostic-supervisor.mjs
+          git commit -m 'fix: rebuild Recommendation V8 source safely'
+          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
+
+      - name: Resolve isolated storage and stop failed training container
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          production_api_container="$(cd "$deploy_dir" && sudo docker compose ps -q api)"
+          if [ -z "$production_api_container" ]; then
+            echo 'Production API container is not running.' >&2
+            exit 1
+          fi
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_api_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_api_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
+          if [ -z "$storage_type" ] || [ -z "$storage_source" ]; then
+            echo 'Could not resolve the production storage mount.' >&2
+            exit 1
+          fi
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
+
+      - name: Delete old Dataset V3 and all derived offline artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          directories=(
+            build-decision-dataset-v3
+            recommendation-candidate-generator-snapshots
+            recommendation-historical-pro-replay-v1
+            recommendation-pro-decision-dataset-v6-1
+            recommendation-behavioral-v5-1
+            recommendation-value-v8-diagnostic-1
+            recommendation-v6-short-only-dataset-v6-baseline-1
+            recommendation-value-v8-full-evaluation-1
+            recommendation-value-v8-passive-shadow-1
+          )
+          for directory in "${directories[@]}"; do
+            path="$STORAGE_MOUNT_SOURCE/$directory"
+            if [ -e "$path" ]; then
+              echo "Deleting $path ($(sudo du -sh "$path" 2>/dev/null | awk '{print $1}'))"
+              sudo rm -rf --one-file-system "$path"
+            fi
+          done
+          for directory in "${directories[@]}"; do
+            if [ -e "$STORAGE_MOUNT_SOURCE/$directory" ]; then
+              echo "Failed to delete $directory" >&2
+              exit 1
+            fi
+          done
+
+      - name: Prepare a new clean run directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          run_id="clean-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          cp scripts/run-recommendation-v8-clean-diagnostic-supervisor.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
+          ln -sfn "$run_dir" "$run_root/current"
+          : > "$run_dir/training.log"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+
+      - name: Start clean isolated training API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          mount_args=()
+          if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
+            mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
+            mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
+          fi
+          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          exit 1
+
+      - name: Start detached clean Dataset V3 rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e MINIMUM_SOURCE_MATCH_COUNT=25000 -e DIAGNOSTIC_MAX_ROWS=10000 -e TRAINING_POLL_INTERVAL_MS=15000 -e SOURCE_DATASET_TIMEOUT_MS=43200000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-clean-diagnostic-supervisor.mjs
+          for attempt in $(seq 1 30); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-clean-diagnostic-supervisor.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              curl -s http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          cat "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
