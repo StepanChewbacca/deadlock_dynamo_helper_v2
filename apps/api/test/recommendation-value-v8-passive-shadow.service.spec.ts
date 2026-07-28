@@ -43,92 +43,9 @@ describe('Recommendation Value V8 passive shadow service', () => {
   });
 
   it('writes challenger scores without changing displayed ranking', async () => {
-    const artifactDirectory = join(root, 'artifacts');
-    const outputDirectory = join(root, 'shadow');
-    const telemetryDirectory = join(root, 'telemetry');
-    await Promise.all([
-      mkdir(artifactDirectory, { recursive: true }),
-      mkdir(outputDirectory, { recursive: true }),
-      mkdir(telemetryDirectory, { recursive: true }),
-    ]);
-    const model = modelArtifact();
-    const modelRaw = `${JSON.stringify(model, undefined, 2)}\n`;
-    const modelSha256 = sha256(modelRaw);
-    await Promise.all([
-      writeFile(join(artifactDirectory, 'model.json'), modelRaw, 'utf8'),
-      writeJson(join(artifactDirectory, 'manifest.json'), {
-        schemaVersion: 1,
-        evaluationVersion: 'RECOMMENDATION_VALUE_V8_FULL_EVALUATION_1',
-        releaseGatePassed: true,
-        passiveShadowAuthorized: true,
-        randomizedCanaryAuthorized: false,
-        selectedConfiguration: model.selectedConfiguration,
-        artifacts: { model: { sha256: modelSha256 } },
-      }),
-      writeJson(join(artifactDirectory, 'audit.json'), {
-        schemaVersion: 1,
-        evaluationVersion: 'RECOMMENDATION_VALUE_V8_FULL_EVALUATION_1',
-        passed: true,
-        releaseGatePassed: true,
-        passiveShadowAuthorized: true,
-        randomizedCanaryAuthorized: false,
-        artifacts: { modelSha256 },
-      }),
-    ]);
-    const telemetryPath = join(telemetryDirectory, 'events.ndjson');
-    await writeFile(
-      telemetryPath,
-      `${JSON.stringify(servedDecision())}\n`,
-      'utf8',
-    );
-    process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED = 'true';
-    process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_KILL_SWITCH = 'false';
-    process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ARTIFACT_DIR =
-      artifactDirectory;
-    process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_DIR = outputDirectory;
-    process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_EXPECTED_MODEL_SHA256 =
-      modelSha256;
+    const { service, outputDirectory } = await createReadyService(root);
 
-    const telemetry = {
-      getStatus: () => ({ eventLogPath: telemetryPath }),
-    };
-    const catalogVersionRepository = {
-      findOne: jest.fn(async () => ({
-        id: 1,
-        clientVersion: 123,
-        contentCatalogVersionId: undefined,
-        payloadHash: 'b'.repeat(64),
-        isCurrent: true,
-        importedAt: new Date('2026-07-28T00:00:00.000Z'),
-      })),
-    };
-    const catalogItemRepository = {
-      find: jest.fn(async () => [
-        item(50, 'WEAPON', ['WEAPON']),
-        item(100, 'WEAPON', ['DAMAGE']),
-        item(200, 'SPIRIT', ['UTILITY']),
-      ]),
-    };
-    const catalogRecipeRepository = {
-      find: jest.fn(async () => [
-        { parentItemId: 100, componentItemId: 50, componentOrder: 0 },
-      ]),
-    };
-    const service = new RecommendationValueV8PassiveShadowService(
-      telemetry as never,
-      catalogVersionRepository as never,
-      catalogItemRepository as never,
-      catalogRecipeRepository as never,
-    );
-    await service.onModuleInit();
-
-    service.schedule({
-      decisionId: 'decision-1',
-      state: liveState(),
-      localPlayer: liveState().playersBySteamId.player,
-      previousActionKeys: ['BUY:50'],
-      displayedActionKeys: ['BUY:100', 'BUY:200'],
-    });
+    service.schedule(shadowInput('decision-1'));
     await service.waitForIdle();
 
     const events = (await readFile(join(outputDirectory, 'events.ndjson'), 'utf8'))
@@ -157,13 +74,7 @@ describe('Recommendation Value V8 passive shadow service', () => {
     });
 
     service.activateKillSwitch('test');
-    service.schedule({
-      decisionId: 'decision-2',
-      state: liveState(),
-      localPlayer: liveState().playersBySteamId.player,
-      previousActionKeys: ['BUY:50'],
-      displayedActionKeys: ['BUY:100', 'BUY:200'],
-    });
+    service.schedule(shadowInput('decision-2'));
     await service.waitForIdle();
     expect(service.getStatus().state).toBe('KILLED');
     expect(
@@ -172,7 +83,122 @@ describe('Recommendation Value V8 passive shadow service', () => {
         .split('\n'),
     ).toHaveLength(1);
   });
+
+  it('does not count an event when append-only persistence fails', async () => {
+    const { service, outputDirectory } = await createReadyService(root);
+    const eventLogPath = join(outputDirectory, 'events.ndjson');
+    await rm(eventLogPath);
+    await mkdir(eventLogPath);
+
+    service.schedule(shadowInput('decision-1'));
+    await service.waitForIdle();
+
+    expect(service.getStatus()).toMatchObject({
+      state: 'DEGRADED',
+      writeErrorCount: 1,
+      metrics: {
+        decisionCount: 0,
+        matchCount: 0,
+      },
+    });
+  });
 });
+
+async function createReadyService(root: string): Promise<{
+  service: RecommendationValueV8PassiveShadowService;
+  outputDirectory: string;
+}> {
+  const artifactDirectory = join(root, 'artifacts');
+  const outputDirectory = join(root, 'shadow');
+  const telemetryDirectory = join(root, 'telemetry');
+  await Promise.all([
+    mkdir(artifactDirectory, { recursive: true }),
+    mkdir(outputDirectory, { recursive: true }),
+    mkdir(telemetryDirectory, { recursive: true }),
+  ]);
+  const model = modelArtifact();
+  const modelRaw = `${JSON.stringify(model, undefined, 2)}\n`;
+  const modelSha256 = sha256(modelRaw);
+  await Promise.all([
+    writeFile(join(artifactDirectory, 'model.json'), modelRaw, 'utf8'),
+    writeJson(join(artifactDirectory, 'manifest.json'), {
+      schemaVersion: 1,
+      evaluationVersion: 'RECOMMENDATION_VALUE_V8_FULL_EVALUATION_1',
+      releaseGatePassed: true,
+      passiveShadowAuthorized: true,
+      randomizedCanaryAuthorized: false,
+      selectedConfiguration: model.selectedConfiguration,
+      artifacts: { model: { sha256: modelSha256 } },
+    }),
+    writeJson(join(artifactDirectory, 'audit.json'), {
+      schemaVersion: 1,
+      evaluationVersion: 'RECOMMENDATION_VALUE_V8_FULL_EVALUATION_1',
+      passed: true,
+      releaseGatePassed: true,
+      passiveShadowAuthorized: true,
+      randomizedCanaryAuthorized: false,
+      artifacts: { modelSha256 },
+    }),
+  ]);
+  const telemetryPath = join(telemetryDirectory, 'events.ndjson');
+  await writeFile(
+    telemetryPath,
+    `${JSON.stringify(servedDecision())}\n`,
+    'utf8',
+  );
+  process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED = 'true';
+  process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_KILL_SWITCH = 'false';
+  process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ARTIFACT_DIR =
+    artifactDirectory;
+  process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_DIR = outputDirectory;
+  process.env.DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_EXPECTED_MODEL_SHA256 =
+    modelSha256;
+
+  const telemetry = {
+    getStatus: () => ({ eventLogPath: telemetryPath }),
+  };
+  const catalogVersionRepository = {
+    findOne: jest.fn(async () => ({
+      id: 1,
+      clientVersion: 123,
+      contentCatalogVersionId: undefined,
+      payloadHash: 'b'.repeat(64),
+      isCurrent: true,
+      importedAt: new Date('2026-07-28T00:00:00.000Z'),
+    })),
+  };
+  const catalogItemRepository = {
+    find: jest.fn(async () => [
+      item(50, 'WEAPON', ['WEAPON']),
+      item(100, 'WEAPON', ['DAMAGE']),
+      item(200, 'SPIRIT', ['UTILITY']),
+    ]),
+  };
+  const catalogRecipeRepository = {
+    find: jest.fn(async () => [
+      { parentItemId: 100, componentItemId: 50, componentOrder: 0 },
+    ]),
+  };
+  const service = new RecommendationValueV8PassiveShadowService(
+    telemetry as never,
+    catalogVersionRepository as never,
+    catalogItemRepository as never,
+    catalogRecipeRepository as never,
+  );
+  await service.onModuleInit();
+  return { service, outputDirectory };
+}
+
+function shadowInput(decisionId: string) {
+  const state = liveState();
+  return {
+    decisionId,
+    state,
+    localPlayer: state.playersBySteamId.player,
+    previousActionKeys: ['BUY:50'],
+    displayedActionKeys: ['BUY:100', 'BUY:200'],
+  };
+}
 
 function modelArtifact(): RecommendationValueV8RuntimeModelArtifact {
   const actionModel = createRecommendationValueV8ActionModel(256);
