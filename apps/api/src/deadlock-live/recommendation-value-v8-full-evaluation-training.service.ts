@@ -404,7 +404,6 @@ export class RecommendationValueV8FullEvaluationTrainingService
       throw new Error('Recommendation Value V8 full evaluation is already running.');
     }
     const options = normalizeOptions(request);
-    const startedAt = new Date().toISOString();
     this.status = {
       ...this.idleStatus(),
       state: 'RUNNING',
@@ -415,7 +414,7 @@ export class RecommendationValueV8FullEvaluationTrainingService
         options.stateEpochs +
         options.actionEpochs +
         2,
-      startedAt,
+      startedAt: new Date().toISOString(),
       options,
     };
     this.runPromise = this.run(options);
@@ -483,7 +482,7 @@ export class RecommendationValueV8FullEvaluationTrainingService
           await eachDatasetRow(sources.dataset.path, async (row) => {
             if (
               row.split === 'TRAIN' &&
-              row.eligibility.stateModel &&
+              isStateEligible(row) &&
               recommendationValueV8FoldId(row.matchId, options.foldCount) !==
                 holdoutFold
             ) {
@@ -505,7 +504,7 @@ export class RecommendationValueV8FullEvaluationTrainingService
           currentPass,
         };
         await eachDatasetRow(sources.dataset.path, async (row) => {
-          if (row.split === 'TRAIN' && row.eligibility.stateModel) {
+          if (row.split === 'TRAIN' && isStateEligible(row)) {
             trainRecommendationValueV8StateDecision(
               finalStateModel,
               row,
@@ -736,27 +735,17 @@ export class RecommendationValueV8FullEvaluationTrainingService
         options,
         selectedConfiguration: selection.selected.configuration,
         artifacts: {
-          predictions: await artifactDescriptor(
+          predictions: await ndjsonArtifact(
             this.paths.predictions,
             PREDICTION_FILE_NAME,
-            'NDJSON',
             future.rowCount,
           ),
-          model: await artifactDescriptor(
-            this.paths.model,
-            'model.json',
-            'JSON',
-          ),
-          evaluation: await artifactDescriptor(
+          model: await jsonArtifact(this.paths.model, 'model.json'),
+          evaluation: await jsonArtifact(
             this.paths.evaluation,
             'evaluation.json',
-            'JSON',
           ),
-          audit: await artifactDescriptor(
-            this.paths.audit,
-            'audit.json',
-            'JSON',
-          ),
+          audit: await jsonArtifact(this.paths.audit, 'audit.json'),
         },
         releaseGatePassed: releaseGate.passed,
         passiveShadowAuthorized,
@@ -985,16 +974,12 @@ async function evaluateTuningConfigurations(input: {
   actionModel: RecommendationValueV8ActionModel;
   options: RecommendationValueV8FullEvaluationOptions;
 }): Promise<RecommendationValueV8Selection> {
-  const configurations = input.options.actionScales.flatMap((actionScale) =>
+  const entries = input.options.actionScales.flatMap((actionScale) =>
     input.options.policyTemperatures.map((policyTemperature) => ({
-      actionScale,
-      policyTemperature,
+      configuration: { actionScale, policyTemperature },
+      accumulator: createRecommendationValueV8EvaluationAccumulator('TUNING'),
     })),
   );
-  const accumulators = configurations.map((configuration) => ({
-    configuration,
-    accumulator: createRecommendationValueV8EvaluationAccumulator('TUNING'),
-  }));
   await eachDatasetRow(input.sources.dataset.path, async (row) => {
     if (row.split !== 'TUNING' || !isEvaluationEligible(row)) {
       return;
@@ -1013,16 +998,18 @@ async function evaluateTuningConfigurations(input: {
     const candidatePrediction = predictRecommendationValueV8CandidateSet(
       input.actionModel,
       row,
+      row.candidates,
       input.options.action.maximumAbsoluteResidual,
     );
-    for (const entry of accumulators) {
+    for (const entry of entries) {
+      const options = evaluationOptions(input.options, entry.configuration);
       const evaluation = evaluateRecommendationValueV8Decision({
         row,
         propensity,
         baseline,
         statePredictions,
         candidatePrediction,
-        options: evaluationOptions(input.options, entry.configuration),
+        options,
         sourceModelSha256:
           input.sources.baseline.manifest.sourceModel.sha256,
         sourceDatasetSha256: input.sources.dataset.sha256,
@@ -1033,7 +1020,7 @@ async function evaluateTuningConfigurations(input: {
     }
   });
   return selectRecommendationValueV8Configuration(
-    accumulators.map((entry) => ({
+    entries.map((entry) => ({
       configuration: entry.configuration,
       metrics: finalizeRecommendationValueV8Evaluation(
         entry.accumulator,
@@ -1077,15 +1064,17 @@ async function evaluateFutureTest(input: {
       const candidatePrediction = predictRecommendationValueV8CandidateSet(
         input.actionModel,
         row,
+        row.candidates,
         input.options.action.maximumAbsoluteResidual,
       );
+      const options = evaluationOptions(input.options, input.configuration);
       const evaluation = evaluateRecommendationValueV8Decision({
         row,
         propensity,
         baseline,
         statePredictions,
         candidatePrediction,
-        options: evaluationOptions(input.options, input.configuration),
+        options,
         sourceModelSha256:
           input.sources.baseline.manifest.sourceModel.sha256,
         sourceDatasetSha256: input.sources.dataset.sha256,
@@ -1176,18 +1165,19 @@ async function scanDataset(
       duplicateDatasetDecisionCount += 1;
     }
     decisionIds.add(row.decisionId);
-    if (!isTrainEligible(row)) {
+    if (row.split === 'TRAIN' && isStateEligible(row)) {
+      trainMatchIdsByFold[
+        recommendationValueV8FoldId(row.matchId, foldCount)
+      ].add(row.matchId);
+    }
+    if (!isEvaluationEligible(row)) {
       return;
     }
     eligibleBySplit[row.split] += 1;
     if (!index.propensities.has(row.decisionId)) {
       missingBehavioralPropensityCount += 1;
     }
-    if (row.split === 'TRAIN') {
-      trainMatchIdsByFold[
-        recommendationValueV8FoldId(row.matchId, foldCount)
-      ].add(row.matchId);
-    } else if (!index.baselines.has(row.decisionId)) {
+    if (row.split !== 'TRAIN' && !index.baselines.has(row.decisionId)) {
       missingBaselineCount += 1;
     }
   });
@@ -1284,8 +1274,11 @@ function requiredBaseline(
   return baseline;
 }
 
-function isTrainEligible(row: RecommendationProDecisionDatasetV6Row): boolean {
-  return row.eligibility.stateModel && isActionEligible(row);
+function isStateEligible(row: RecommendationProDecisionDatasetV6Row): boolean {
+  return (
+    row.eligibility.stateModel &&
+    Object.keys(recommendationValueV8Targets(row)).length > 0
+  );
 }
 
 function isActionEligible(row: RecommendationProDecisionDatasetV6Row): boolean {
@@ -1301,7 +1294,7 @@ function isActionEligible(row: RecommendationProDecisionDatasetV6Row): boolean {
 function isEvaluationEligible(
   row: RecommendationProDecisionDatasetV6Row,
 ): boolean {
-  return isTrainEligible(row);
+  return isStateEligible(row) && isActionEligible(row);
 }
 
 async function eachDatasetRow(
@@ -1311,8 +1304,7 @@ async function eachDatasetRow(
   let line = 0;
   for await (const value of ndjson(path)) {
     line += 1;
-    const row = datasetRow(value, line);
-    await callback(row);
+    await callback(datasetRow(value, line));
     if (line % 10_000 === 0) {
       await tick();
     }
@@ -1446,13 +1438,13 @@ function normalizeReleaseThresholds(
     minimumStateRmseImprovement: finite(
       value?.minimumStateRmseImprovement,
       0,
-      -1,
+      0,
       1,
     ),
     minimumBaselineRmseImprovement: finite(
       value?.minimumBaselineRmseImprovement,
       0,
-      -1,
+      0,
       1,
     ),
     minimumCandidateSeparation: finite(
@@ -1464,7 +1456,7 @@ function normalizeReleaseThresholds(
     minimumDrUpliftLower95: finite(
       value?.minimumDrUpliftLower95,
       0,
-      -10,
+      0,
       10,
     ),
     maximumCriticallyNegativeMajorCohorts: integer(
@@ -1545,34 +1537,30 @@ async function verifiedHash(
   return actual;
 }
 
-async function artifactDescriptor(
+async function jsonArtifact(
   path: string,
   fileName: string,
-  format: 'JSON',
-): Promise<ArtifactDescriptor & { format: 'JSON' }>;
-async function artifactDescriptor(
-  path: string,
-  fileName: string,
-  format: 'NDJSON',
-  rowCount: number,
-): Promise<ArtifactDescriptor & { format: 'NDJSON'; rowCount: number }>;
-async function artifactDescriptor(
-  path: string,
-  fileName: string,
-  format: 'JSON' | 'NDJSON',
-  rowCount?: number,
-): Promise<
-  | (ArtifactDescriptor & { format: 'JSON' })
-  | (ArtifactDescriptor & { format: 'NDJSON'; rowCount: number })
-> {
-  const base = {
+): Promise<ArtifactDescriptor & { format: 'JSON' }> {
+  return {
     fileName,
+    format: 'JSON',
     sha256: await hashFile(path),
     byteLength: (await stat(path)).size,
   };
-  return format === 'NDJSON'
-    ? { ...base, format, rowCount: rowCount ?? 0 }
-    : { ...base, format };
+}
+
+async function ndjsonArtifact(
+  path: string,
+  fileName: string,
+  rowCount: number,
+): Promise<ArtifactDescriptor & { format: 'NDJSON'; rowCount: number }> {
+  return {
+    fileName,
+    format: 'NDJSON',
+    sha256: await hashFile(path),
+    byteLength: (await stat(path)).size,
+    rowCount,
+  };
 }
 
 async function requiredJson<T>(path: string): Promise<T> {
