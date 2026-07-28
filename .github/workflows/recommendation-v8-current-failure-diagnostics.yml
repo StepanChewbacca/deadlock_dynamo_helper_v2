@@ -14,7 +14,7 @@ permissions:
 jobs:
   capture:
     runs-on: self-hosted
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Capture isolated training failure
         shell: bash
@@ -23,7 +23,9 @@ jobs:
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
           current="$run_root/current"
           container='deadlock-recommendation-v8-training'
+          db_container='aboba-telegramovich-postgres-1'
           report="$RUNNER_TEMP/recommendation-v8-current-failure.md"
+          psql_cmd=(sudo docker exec "$db_container" psql -X -U postgres -d deadlock_builds -v ON_ERROR_STOP=1 -P pager=off)
           {
             echo '# Recommendation V8 current failure diagnostics'
             echo
@@ -57,6 +59,56 @@ jobs:
               echo
               echo '```'
             done
+            echo
+            echo '## PostgreSQL candidate tables'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND (tablename ILIKE '%timeline%' OR tablename ILIKE '%event%' OR tablename ILIKE '%match%' OR tablename ILIKE '%player%') ORDER BY 1;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## PostgreSQL table row estimates'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "SELECT relname || E'\t' || n_live_tup FROM pg_stat_user_tables WHERE relname ILIKE '%timeline%' OR relname ILIKE '%event%' OR relname ILIKE '%match%' OR relname ILIKE '%player%' ORDER BY relname;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Raw metadata source counts'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "SELECT source || E'\t' || COUNT(*) FROM raw_match_metadata GROUP BY source ORDER BY COUNT(*) DESC;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Latest payload top-level keys'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(payload) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Latest match_info keys'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT payload->'match_info' AS info FROM raw_match_metadata WHERE jsonb_typeof(payload->'match_info')='object' ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(info) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Latest player keys'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(player) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Player time/stat fields'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240), keys AS (SELECT DISTINCT key FROM sample CROSS JOIN LATERAL jsonb_object_keys(player) AS key) SELECT key FROM keys WHERE key ~* '(time|stat|gold|worth|damage|kill|death|assist|timeline|history|event)' ORDER BY key;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Player JSON arrays'
+            echo '```text'
+            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_each(player) entry(key,value) WHERE jsonb_typeof(value)='array' GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Example player payload'
+            echo '```json'
+            "${psql_cmd[@]}" -Atc "SELECT jsonb_pretty(player) FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 1;" 2>&1 || true
+            echo '```'
+            echo
+            echo '## Timeline filesystem coverage'
+            echo '```text'
+            sudo docker exec "$container" sh -lc "find /app/apps/api/storage/match-timeline-events-v1 -mindepth 1 -maxdepth 1 -type d | wc -l" 2>&1 || true
+            echo '```'
             echo
             echo '## Recent training log'
             echo '```text'
