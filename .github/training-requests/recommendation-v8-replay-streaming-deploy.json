@@ -1,7 +1,7 @@
 {
-  "state": "REQUESTED",
-  "requestedAt": "2026-07-28T20:00:00Z",
-  "reason": "The bounded-memory Historical Replay implementation built and passed targeted tests in run 30393969479. Deploy that validated code to only the isolated training API, preserve completed Dataset V3 and candidate snapshot, and resume the diagnostic pipeline.",
+  "state": "DEPLOYED_AWAITING_RESUME",
+  "deployedAt": "2026-07-28T20:02:00Z",
+  "reason": "The validated bounded-memory runtime replaced only the isolated training API. The workflow stopped on an obsolete in-memory candidate status assertion; the immutable registry and artifacts remain preserved. Resume is handled separately.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
