@@ -1,10 +1,9 @@
 {
-  "state": "CONSUMED",
+  "state": "REQUESTED",
   "operation": "REPLAY_STREAMING_SNAPSHOT",
-  "requestedAt": "2026-07-28T19:55:00Z",
-  "reason": "Retry the bounded-memory Historical Replay fix after resolving the TypeScript control-flow narrowing error. Preserve the completed Dataset V3 and candidate snapshot; replace only the isolated training API after build and tests pass.",
+  "requestedAt": "2026-07-28T20:32:00Z",
+  "reason": "Historical Replay passed the bounded-memory snapshot reader but failed canonical catalog SHA validation because parsed JSON omitted optional catalog fields that the exporter hashes as normalized undefined values. Reuse the exporter catalog payload canonicalization, preserve Dataset V3 and the completed candidate snapshot, rebuild only the isolated runtime, and resume replay.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false,
-  "consumedAt": "2026-07-28T19:45:00Z"
+  "randomizedCanaryAuthorized": false
 }
