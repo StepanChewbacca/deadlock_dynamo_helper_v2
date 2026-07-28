@@ -325,6 +325,16 @@ function policy(): RecommendationSerializedHeroBuildPolicy {
 }
 
 function catalogItem(itemId: number): RecommendationHistoricalCatalogItem {
+  if (itemId === 1002) {
+    return {
+      itemId,
+      cost: 1_250,
+      tier: 2,
+      slotType: 'WEAPON',
+      tags: [],
+      componentItemIds: [],
+    };
+  }
   return {
     itemId,
     name: `Item ${itemId}`,
