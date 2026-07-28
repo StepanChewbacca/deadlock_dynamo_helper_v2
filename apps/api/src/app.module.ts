@@ -10,6 +10,7 @@ import { RecommendationPolicyV6EvaluationModule } from './deadlock-live/recommen
 import { RecommendationValueV5Module } from './deadlock-live/recommendation-value-v5.module';
 import { RecommendationValueV6Module } from './deadlock-live/recommendation-value-v6.module';
 import { RecommendationValueV8DiagnosticModule } from './deadlock-live/recommendation-value-v8-diagnostic.module';
+import { RecommendationValueV8FullEvaluationModule } from './deadlock-live/recommendation-value-v8-full-evaluation.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RecommendationValueV8DiagnosticModule } from './deadlock-live/recommend
     RecommendationHistoricalProReplayModule,
     RecommendationBehavioralV5Module,
     RecommendationValueV8DiagnosticModule,
+    RecommendationValueV8FullEvaluationModule,
   ],
 })
 export class AppModule {}
