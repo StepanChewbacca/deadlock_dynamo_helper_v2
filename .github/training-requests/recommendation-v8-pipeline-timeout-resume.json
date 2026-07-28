@@ -1,8 +1,8 @@
 {
   "state": "REQUESTED",
   "operation": "REPLAY_STREAMING_SNAPSHOT",
-  "requestedAt": "2026-07-28T19:40:00Z",
-  "reason": "Historical Replay failed in PREPARING with Invalid string length while readFile(path, utf8) attempted to materialize the full candidate snapshot. Stream and shard policies by hero, preserve the completed Dataset V3 and candidate snapshot, replace only the isolated training API, and resume the diagnostic pipeline.",
+  "requestedAt": "2026-07-28T19:55:00Z",
+  "reason": "Retry the bounded-memory Historical Replay fix after resolving the TypeScript control-flow narrowing error. Preserve the completed Dataset V3 and candidate snapshot; replace only the isolated training API after build and tests pass.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
