@@ -1,7 +1,7 @@
 {
-  "state": "SUPERSEDED",
-  "supersededAt": "2026-07-28T19:48:00Z",
-  "reason": "Superseded by the bounded-memory replay recovery that shards policies by hero, validates streaming hashes, caches only prepared hero policies, and preserves the completed Dataset V3 and candidate snapshot.",
+  "state": "REQUESTED",
+  "requestedAt": "2026-07-28T20:39:00Z",
+  "reason": "Historical Replay now streams the multi-GB snapshot but failed catalog SHA validation because parsed JSON omits optional fields restored by exporter canonicalization. Apply the canonical catalog payload, run the missing-optional-field regression, preserve Dataset V3 and snapshot, replace only the isolated training API, and resume.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
