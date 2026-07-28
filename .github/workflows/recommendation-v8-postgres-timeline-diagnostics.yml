@@ -13,38 +13,43 @@ jobs:
   release-stale-recoveries:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel only superseded recovery runs
+      - name: Cancel queued and running retired recoveries
         uses: actions/github-script@v7
         with:
           script: |
-            const staleRunIds = [
-              30402877978,
-              30402878056,
-              30402878246,
-              30402878155,
-              30402878113,
-              30402878591,
-              30402675092,
-              30402675581,
-              30402675109,
-              30402675153,
-              30402675281,
-              30402675571,
-              30402675165,
-            ];
-            for (const runId of staleRunIds) {
-              try {
-                await github.rest.actions.cancelWorkflowRun({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  run_id: runId,
-                });
-                core.notice(`Cancellation requested for superseded run ${runId}.`);
-              } catch (error) {
-                if (error.status === 409 || error.status === 404) {
-                  core.notice(`Run ${runId} is already terminal or unavailable.`);
-                } else {
-                  throw error;
+            const retiredNames = new Set([
+              'Recommendation V8 V3 WriteStream Rebuild V4',
+              'Recommendation V8 Replay Streaming Snapshot Recovery V5',
+              'Recommendation V8 Replay Deploy Resume V6',
+              'Recommendation V8 Replay Resume Only V7',
+              'Recommendation V8 Replay Resume Only',
+              'Recommendation V8 Pipeline Timeout Resume',
+              'Recommendation V8 Current Failure Diagnostics',
+            ]);
+            for (const status of ['queued', 'in_progress', 'pending']) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                status,
+                per_page: 100,
+              });
+              for (const run of data.workflow_runs) {
+                if (!retiredNames.has(run.name)) {
+                  continue;
+                }
+                try {
+                  await github.rest.actions.cancelWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                  });
+                  core.notice(`Cancellation requested for retired ${run.name} run ${run.id}.`);
+                } catch (error) {
+                  if (error.status === 409 || error.status === 404) {
+                    core.notice(`Retired run ${run.id} is already terminal.`);
+                  } else {
+                    throw error;
+                  }
                 }
               }
             }
