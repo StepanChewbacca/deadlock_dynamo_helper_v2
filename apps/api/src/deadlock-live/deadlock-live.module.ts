@@ -86,6 +86,12 @@ import { RecommendationDecisionDatasetV4HistoricalBootstrapService } from './rec
 import { RecommendationDecisionDatasetV4Service } from './recommendation-decision-dataset-v4.service';
 import { RecommendationDecisionTelemetryService } from './recommendation-decision-telemetry.service';
 import { RecommendationOutcomeLinkerService } from './recommendation-outcome-linker.service';
+import { RecommendationValueV8PassiveShadowController } from './recommendation-value-v8-passive-shadow.controller';
+import { RecommendationValueV8PassiveShadowService } from './recommendation-value-v8-passive-shadow.service';
+import {
+  BASE_LIVE_BUILD_RECOMMENDATION_TRAVERSAL,
+  RecommendationValueV8PassiveShadowTraversalFacade,
+} from './recommendation-value-v8-passive-shadow-traversal.facade';
 import { RecipeAwareTimelineReconciliationService } from './recipe-aware-timeline-reconciliation.service';
 import { ReferenceDataController } from './reference-data.controller';
 import { ReferenceDataImportService } from './reference-data-import.service';
@@ -138,6 +144,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
     RecommendationDecisionDatasetV4HistoricalBootstrapController,
     RecommendationDecisionDatasetV4Controller,
     RecommendationDecisionTelemetryController,
+    RecommendationValueV8PassiveShadowController,
     SkillBuildAnalysisController,
     ReferenceDataController,
     IngestStatusController,
@@ -145,7 +152,16 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   providers: [
     LiveMatchStateService,
     LiveInventoryEventNormalizerService,
-    LiveBuildRecommendationTraversalService,
+    {
+      provide: BASE_LIVE_BUILD_RECOMMENDATION_TRAVERSAL,
+      useClass: LiveBuildRecommendationTraversalService,
+    },
+    RecommendationValueV8PassiveShadowService,
+    RecommendationValueV8PassiveShadowTraversalFacade,
+    {
+      provide: LiveBuildRecommendationTraversalService,
+      useExisting: RecommendationValueV8PassiveShadowTraversalFacade,
+    },
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
@@ -222,6 +238,7 @@ import { VersionedRecipeGraphService } from './versioned-recipe-graph.service';
   exports: [
     LiveMatchStateService,
     LiveBuildRecommendationTraversalService,
+    RecommendationValueV8PassiveShadowService,
     InventoryShadowReplayService,
     InventoryTimelineReplayService,
     CanonicalBuildSequenceService,
