@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/patch-recommendation-v8-replay-streaming-snapshot.py
+          python3 scripts/run-patch-recommendation-v8-replay-streaming-snapshot.py
           git diff --check
 
       - name: Build and test patched replay
