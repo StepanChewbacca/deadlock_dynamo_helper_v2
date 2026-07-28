@@ -32,7 +32,7 @@ replace_once(
           createWriteStream(this.partialDatasetPath, { flags: 'a' }),
         );""",
 )
-old_class = """class BufferedNdjsonWriter {
+old_class = r"""class BufferedNdjsonWriter {
   private buffer = '';
 
   private constructor(private readonly handle: FileHandle) {}
@@ -75,7 +75,7 @@ old_class = """class BufferedNdjsonWriter {
   }
 }
 """
-new_class = """class BufferedNdjsonWriter {
+new_class = r"""class BufferedNdjsonWriter {
   private buffer = '';
   private closed = false;
 
