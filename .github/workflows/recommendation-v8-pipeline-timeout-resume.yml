@@ -11,13 +11,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: recommendation-v8-pipeline-timeout-resume
+  group: recommendation-v8-replay-streaming-recovery
   cancel-in-progress: false
 
 jobs:
   patch-and-resume:
     runs-on: self-hosted
-    timeout-minutes: 20
+    timeout-minutes: 180
     steps:
       - name: Checkout training branch
         uses: actions/checkout@v4
@@ -31,277 +31,115 @@ jobs:
         run: |
           set -euo pipefail
           request='.github/training-requests/recommendation-v8-pipeline-timeout-resume.json'
-          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ]; then
+          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ] || [ "$(jq -r '.operation // empty' "$request")" != 'REPLAY_STREAMING_SNAPSHOT' ]; then
             echo 'run=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo 'run=true' >> "$GITHUB_OUTPUT"
 
-      - name: Patch transient request handling
+      - name: Apply streaming snapshot replay fix
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs')
-          text = path.read_text()
-
-          def replace_once(old: str, new: str) -> None:
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'Expected one replacement, found {count}')
-              text = text.replace(old, new, 1)
-
-          replace_once(
-          '''async function runStage({ name, startPath, statusPath, body }) {
-            console.log(`${name}: starting.`);
-            await post(startPath, body);
-            const deadline = Date.now() + config.pipelineTimeoutMs;
-            let previousPhase;
-
-            while (Date.now() < deadline) {
-              const status = await get(statusPath);
-              if (status.phase !== previousPhase) {
-                console.log(`${name}: ${status.state}/${status.phase}.`);
-                previousPhase = status.phase;
-              }
-              if (status.state === 'COMPLETE') {
-                return status;
-              }
-              if (status.state === 'FAILED') {
-                throw new Error(`${name} failed: ${status.error || 'unknown error'}`);
-              }
-              await sleep(config.pollIntervalMs);
-            }
-
-            throw new Error(`${name} exceeded PIPELINE_TIMEOUT_MS.`);
-          }
-          ''',
-          '''async function runStage({ name, startPath, statusPath, body }) {
-            const deadline = Date.now() + config.pipelineTimeoutMs;
-            let status = await get(statusPath);
-            let previousPhase;
-
-            if (status.state === 'COMPLETE') {
-              console.log(`${name}: already COMPLETE/${status.phase}.`);
-              return status;
-            }
-
-            if (status.state === 'RUNNING') {
-              console.log(`${name}: resuming ${status.state}/${status.phase}.`);
-            } else {
-              console.log(`${name}: starting.`);
-              try {
-                await post(startPath, body);
-              } catch (error) {
-                const afterStart = await get(statusPath);
-                if (!['RUNNING', 'COMPLETE'].includes(afterStart.state)) {
-                  throw error;
-                }
-                status = afterStart;
-                console.warn(
-                  `${name}: start request failed after the server accepted the stage; ` +
-                    `continuing from ${status.state}/${status.phase}.`,
-                );
-              }
-            }
-
-            while (Date.now() < deadline) {
-              status = await get(statusPath);
-              if (status.phase !== previousPhase) {
-                console.log(`${name}: ${status.state}/${status.phase}.`);
-                previousPhase = status.phase;
-              }
-              if (status.state === 'COMPLETE') {
-                return status;
-              }
-              if (status.state === 'FAILED') {
-                throw new Error(`${name} failed: ${status.error || 'unknown error'}`);
-              }
-              await sleep(config.pollIntervalMs);
-            }
-
-            throw new Error(`${name} exceeded PIPELINE_TIMEOUT_MS.`);
-          }
-          ''')
-
-          replace_once(
-          '''    pipelineTimeoutMs: optionalInteger(
-                'PIPELINE_TIMEOUT_MS',
-                24 * 60 * 60 * 1000,
-              ),
-              expectedSnapshotSourceSha256: optionalString(
-          ''',
-          '''    pipelineTimeoutMs: optionalInteger(
-                'PIPELINE_TIMEOUT_MS',
-                24 * 60 * 60 * 1000,
-              ),
-              requestTimeoutMs: optionalInteger('PIPELINE_REQUEST_TIMEOUT_MS', 30000),
-              requestRetryCount: optionalInteger('PIPELINE_REQUEST_RETRY_COUNT', 240),
-              requestRetryDelayMs: optionalInteger(
-                'PIPELINE_REQUEST_RETRY_DELAY_MS',
-                5000,
-              ),
-              expectedSnapshotSourceSha256: optionalString(
-          ''')
-
-          replace_once(
-          '''async function get(path) {
-            return request('GET', path);
-          }
-
-          async function post(path, body) {
-            return request('POST', path, body);
-          }
-
-          async function request(method, path, body) {
-            const response = await fetch(`${config.apiBaseUrl}${path}`, {
-              method,
-              headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-              body: body === undefined ? undefined : JSON.stringify(body),
-              signal: AbortSignal.timeout(30000),
-            });
-            const text = await response.text();
-            let value;
-            try {
-              value = text ? JSON.parse(text) : {};
-            } catch {
-              throw new Error(`${method} ${path} returned invalid JSON.`);
-            }
-            if (!response.ok) {
-              throw new Error(
-                `${method} ${path} returned ${response.status}: ${JSON.stringify(value)}`,
-              );
-            }
-            return value;
-          }
-          ''',
-          '''async function get(path) {
-            return requestWithRetry('GET', path);
-          }
-
-          async function post(path, body) {
-            return request('POST', path, body);
-          }
-
-          async function requestWithRetry(method, path, body) {
-            for (let attempt = 1; attempt <= config.requestRetryCount; attempt += 1) {
-              try {
-                return await request(method, path, body);
-              } catch (error) {
-                if (!isTransientRequestError(error) || attempt === config.requestRetryCount) {
-                  throw error;
-                }
-                console.warn(
-                  `${method} ${path} transient failure on attempt ${attempt}: ` +
-                    `${error instanceof Error ? error.message : String(error)}`,
-                );
-                await sleep(config.requestRetryDelayMs);
-              }
-            }
-            throw new Error(`${method} ${path} retry loop exhausted.`);
-          }
-
-          async function request(method, path, body) {
-            const response = await fetch(`${config.apiBaseUrl}${path}`, {
-              method,
-              headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-              body: body === undefined ? undefined : JSON.stringify(body),
-              signal: AbortSignal.timeout(config.requestTimeoutMs),
-            });
-            const text = await response.text();
-            let value;
-            try {
-              value = text ? JSON.parse(text) : {};
-            } catch {
-              throw new Error(`${method} ${path} returned invalid JSON.`);
-            }
-            if (!response.ok) {
-              const error = new Error(
-                `${method} ${path} returned ${response.status}: ${JSON.stringify(value)}`,
-              );
-              error.retryable = response.status === 429 || response.status >= 500;
-              throw error;
-            }
-            return value;
-          }
-
-          function isTransientRequestError(error) {
-            if (error && typeof error === 'object' && error.retryable === true) {
-              return true;
-            }
-            const name = error instanceof Error ? error.name : '';
-            const message = error instanceof Error ? error.message : String(error);
-            return (
-              name === 'TimeoutError' ||
-              name === 'AbortError' ||
-              error instanceof TypeError ||
-              /timeout|fetch failed|socket|ECONNRESET|ECONNREFUSED/i.test(message)
-            );
-          }
-          ''')
-
-          path.write_text(text)
-          PY
+          python3 scripts/patch-recommendation-v8-replay-streaming-snapshot.py
           git diff --check
 
-      - name: Validate patched runners
+      - name: Build and test patched replay
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          image="$(sudo docker inspect --format='{{.Config.Image}}' deadlock-recommendation-v8-training)"
-          sudo docker run --rm --entrypoint node -v "$PWD/scripts:/scripts:ro" "$image" --check /scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs
-          sudo docker run --rm --entrypoint node -v "$PWD/scripts:/scripts:ro" "$image" --check /scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          builder_image="deadlock-recommendation-v8-replay-streaming-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$builder_image" .
+          sudo docker run --rm --entrypoint yarn "$builder_image" workspace @deadlock-live-probe/api test recommendation-candidate-generator-snapshot.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-pro-replay-fractional-snapshot.spec.ts --runInBand
+          runtime_image="deadlock-recommendation-v8-replay-streaming:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build -t "$runtime_image" .
+          echo "TRAINING_IMAGE=$runtime_image" >> "$GITHUB_ENV"
 
-      - name: Commit validated runner fix
+      - name: Commit validated replay fix
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           request='.github/training-requests/recommendation-v8-pipeline-timeout-resume.json'
-          jq '.state="CONSUMED" | .consumedAt="2026-07-28T19:30:00Z"' "$request" > "$request.tmp"
+          jq '.state="CONSUMED" | .consumedAt="2026-07-28T19:45:00Z"' "$request" > "$request.tmp"
           mv "$request.tmp" "$request"
           git config user.name 'Recommendation V8 Recovery'
           git config user.email 'actions@users.noreply.github.com'
-          git add scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$request"
-          git commit -m 'fix: resume Recommendation V8 polling after API timeout'
+          git add apps/api/src/deadlock-live/stable-json.ts apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot.ts apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts "$request"
+          git commit -m 'fix: stream Recommendation replay snapshot policies'
           git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
 
-      - name: Install runners into current isolated run
+      - name: Verify preserved artifacts and resolve mounts
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          production_api_container="$(cd "$deploy_dir" && sudo docker compose ps -q api)"
+          test -n "$production_api_container"
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_api_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_api_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
+          test -n "$storage_type"
+          test -n "$storage_source"
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
-          current="$(readlink -f "$run_root/current")"
-          test -d "$current"
-          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$current/"
-          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$current/"
-          sudo docker exec deadlock-recommendation-v8-training node --check /runner/run-recommendation-v8-diagnostic-only-pipeline.mjs
-          sudo docker exec deadlock-recommendation-v8-training node --check /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
-          echo "TRAINING_RUN_DIR=$current" >> "$GITHUB_ENV"
-          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$current/status.json")" >> "$GITHUB_ENV"
+          run_dir="$(readlink -f "$run_root/current")"
+          test -d "$run_dir"
+          test "$(jq -r '.artifact.sha256' "$storage_source/build-decision-dataset-v3/manifest.json")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          jq -e '.auditPassed == true and .artifact.rowCount == 6188423' "$storage_source/build-decision-dataset-v3/manifest.json" >/dev/null
+          jq -e '.snapshots[] | select(.snapshotId == "v8-20260722-c1-ff04970fda51")' "$storage_source/recommendation-candidate-generator-snapshots/registry.json" >/dev/null
+          test -s "$storage_source/recommendation-candidate-generator-snapshots/v8-20260722-c1-ff04970fda51.json"
+          echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$run_dir/status.json")" >> "$GITHUB_ENV"
+
+      - name: Replace only isolated training API
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          mount_args=()
+          if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
+            mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
+            mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
+          fi
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              break
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq -e '.state == "COMPLETE" and .rowCount == 6188423' >/dev/null
 
       - name: Resume detached diagnostic pipeline
         if: steps.request.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
-            echo 'Resume supervisor is already running.'
-            exit 0
-          fi
           sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 45); do
             if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
               cat "$TRAINING_RUN_DIR/status.json"
+              curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status
               exit 0
             fi
             sleep 1
           done
-          tail -n 120 "$TRAINING_RUN_DIR/training.log" || true
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          tail -n 160 "$TRAINING_RUN_DIR/training.log" || true
           exit 1
