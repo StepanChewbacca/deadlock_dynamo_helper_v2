@@ -1,0 +1,307 @@
+name: Recommendation V8 Pipeline Timeout Resume
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/recommendation-v8-pipeline-timeout-resume.yml'
+      - '.github/training-requests/recommendation-v8-pipeline-timeout-resume.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-pipeline-timeout-resume
+  cancel-in-progress: false
+
+jobs:
+  patch-and-resume:
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Check one-shot request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-pipeline-timeout-resume.json'
+          if [ ! -f "$request" ] || [ "$(jq -r '.state // empty' "$request")" != 'REQUESTED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+      - name: Patch transient request handling
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected one replacement, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''async function runStage({ name, startPath, statusPath, body }) {
+            console.log(`${name}: starting.`);
+            await post(startPath, body);
+            const deadline = Date.now() + config.pipelineTimeoutMs;
+            let previousPhase;
+
+            while (Date.now() < deadline) {
+              const status = await get(statusPath);
+              if (status.phase !== previousPhase) {
+                console.log(`${name}: ${status.state}/${status.phase}.`);
+                previousPhase = status.phase;
+              }
+              if (status.state === 'COMPLETE') {
+                return status;
+              }
+              if (status.state === 'FAILED') {
+                throw new Error(`${name} failed: ${status.error || 'unknown error'}`);
+              }
+              await sleep(config.pollIntervalMs);
+            }
+
+            throw new Error(`${name} exceeded PIPELINE_TIMEOUT_MS.`);
+          }
+          ''',
+          '''async function runStage({ name, startPath, statusPath, body }) {
+            const deadline = Date.now() + config.pipelineTimeoutMs;
+            let status = await get(statusPath);
+            let previousPhase;
+
+            if (status.state === 'COMPLETE') {
+              console.log(`${name}: already COMPLETE/${status.phase}.`);
+              return status;
+            }
+
+            if (status.state === 'RUNNING') {
+              console.log(`${name}: resuming ${status.state}/${status.phase}.`);
+            } else {
+              console.log(`${name}: starting.`);
+              try {
+                await post(startPath, body);
+              } catch (error) {
+                const afterStart = await get(statusPath);
+                if (!['RUNNING', 'COMPLETE'].includes(afterStart.state)) {
+                  throw error;
+                }
+                status = afterStart;
+                console.warn(
+                  `${name}: start request failed after the server accepted the stage; ` +
+                    `continuing from ${status.state}/${status.phase}.`,
+                );
+              }
+            }
+
+            while (Date.now() < deadline) {
+              status = await get(statusPath);
+              if (status.phase !== previousPhase) {
+                console.log(`${name}: ${status.state}/${status.phase}.`);
+                previousPhase = status.phase;
+              }
+              if (status.state === 'COMPLETE') {
+                return status;
+              }
+              if (status.state === 'FAILED') {
+                throw new Error(`${name} failed: ${status.error || 'unknown error'}`);
+              }
+              await sleep(config.pollIntervalMs);
+            }
+
+            throw new Error(`${name} exceeded PIPELINE_TIMEOUT_MS.`);
+          }
+          ''')
+
+          replace_once(
+          '''    pipelineTimeoutMs: optionalInteger(
+                'PIPELINE_TIMEOUT_MS',
+                24 * 60 * 60 * 1000,
+              ),
+              expectedSnapshotSourceSha256: optionalString(
+          ''',
+          '''    pipelineTimeoutMs: optionalInteger(
+                'PIPELINE_TIMEOUT_MS',
+                24 * 60 * 60 * 1000,
+              ),
+              requestTimeoutMs: optionalInteger('PIPELINE_REQUEST_TIMEOUT_MS', 30000),
+              requestRetryCount: optionalInteger('PIPELINE_REQUEST_RETRY_COUNT', 240),
+              requestRetryDelayMs: optionalInteger(
+                'PIPELINE_REQUEST_RETRY_DELAY_MS',
+                5000,
+              ),
+              expectedSnapshotSourceSha256: optionalString(
+          ''')
+
+          replace_once(
+          '''async function get(path) {
+            return request('GET', path);
+          }
+
+          async function post(path, body) {
+            return request('POST', path, body);
+          }
+
+          async function request(method, path, body) {
+            const response = await fetch(`${config.apiBaseUrl}${path}`, {
+              method,
+              headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+              body: body === undefined ? undefined : JSON.stringify(body),
+              signal: AbortSignal.timeout(30000),
+            });
+            const text = await response.text();
+            let value;
+            try {
+              value = text ? JSON.parse(text) : {};
+            } catch {
+              throw new Error(`${method} ${path} returned invalid JSON.`);
+            }
+            if (!response.ok) {
+              throw new Error(
+                `${method} ${path} returned ${response.status}: ${JSON.stringify(value)}`,
+              );
+            }
+            return value;
+          }
+          ''',
+          '''async function get(path) {
+            return requestWithRetry('GET', path);
+          }
+
+          async function post(path, body) {
+            return request('POST', path, body);
+          }
+
+          async function requestWithRetry(method, path, body) {
+            for (let attempt = 1; attempt <= config.requestRetryCount; attempt += 1) {
+              try {
+                return await request(method, path, body);
+              } catch (error) {
+                if (!isTransientRequestError(error) || attempt === config.requestRetryCount) {
+                  throw error;
+                }
+                console.warn(
+                  `${method} ${path} transient failure on attempt ${attempt}: ` +
+                    `${error instanceof Error ? error.message : String(error)}`,
+                );
+                await sleep(config.requestRetryDelayMs);
+              }
+            }
+            throw new Error(`${method} ${path} retry loop exhausted.`);
+          }
+
+          async function request(method, path, body) {
+            const response = await fetch(`${config.apiBaseUrl}${path}`, {
+              method,
+              headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+              body: body === undefined ? undefined : JSON.stringify(body),
+              signal: AbortSignal.timeout(config.requestTimeoutMs),
+            });
+            const text = await response.text();
+            let value;
+            try {
+              value = text ? JSON.parse(text) : {};
+            } catch {
+              throw new Error(`${method} ${path} returned invalid JSON.`);
+            }
+            if (!response.ok) {
+              const error = new Error(
+                `${method} ${path} returned ${response.status}: ${JSON.stringify(value)}`,
+              );
+              error.retryable = response.status === 429 || response.status >= 500;
+              throw error;
+            }
+            return value;
+          }
+
+          function isTransientRequestError(error) {
+            if (error && typeof error === 'object' && error.retryable === true) {
+              return true;
+            }
+            const name = error instanceof Error ? error.name : '';
+            const message = error instanceof Error ? error.message : String(error);
+            return (
+              name === 'TimeoutError' ||
+              name === 'AbortError' ||
+              error instanceof TypeError ||
+              /timeout|fetch failed|socket|ECONNRESET|ECONNREFUSED/i.test(message)
+            );
+          }
+          ''')
+
+          path.write_text(text)
+          PY
+          git diff --check
+
+      - name: Validate patched runners
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(sudo docker inspect --format='{{.Config.Image}}' deadlock-recommendation-v8-training)"
+          sudo docker run --rm --entrypoint node -v "$PWD/scripts:/scripts:ro" "$image" --check /scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs
+          sudo docker run --rm --entrypoint node -v "$PWD/scripts:/scripts:ro" "$image" --check /scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+
+      - name: Commit validated runner fix
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-pipeline-timeout-resume.json'
+          jq '.state="CONSUMED" | .consumedAt="2026-07-28T19:30:00Z"' "$request" > "$request.tmp"
+          mv "$request.tmp" "$request"
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$request"
+          git commit -m 'fix: resume Recommendation V8 polling after API timeout'
+          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
+
+      - name: Install runners into current isolated run
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          current="$(readlink -f "$run_root/current")"
+          test -d "$current"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$current/"
+          cp scripts/run-recommendation-v8-resume-diagnostic-supervisor.mjs "$current/"
+          sudo docker exec deadlock-recommendation-v8-training node --check /runner/run-recommendation-v8-diagnostic-only-pipeline.mjs
+          sudo docker exec deadlock-recommendation-v8-training node --check /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          echo "TRAINING_RUN_DIR=$current" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$(jq -r '.runId' "$current/status.json")" >> "$GITHUB_ENV"
+
+      - name: Resume detached diagnostic pipeline
+        if: steps.request.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
+            echo 'Resume supervisor is already running.'
+            exit 0
+          fi
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-resume-diagnostic-supervisor.mjs
+          for attempt in $(seq 1 30); do
+            if jq -e '.state == "RUNNING" and .stage == "OFFLINE_V8_DIAGNOSTIC_PIPELINE_RESUME"' "$TRAINING_RUN_DIR/status.json" >/dev/null && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-resume-diagnostic-supervisor.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 120 "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
