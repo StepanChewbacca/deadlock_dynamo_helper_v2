@@ -1,0 +1,8 @@
+{
+  "state": "REQUESTED",
+  "requestedAt": "2026-07-28T19:47:00Z",
+  "reason": "Historical Replay failed in PREPARING with Invalid string length because the multi-GB candidate snapshot was loaded through readFile(path, utf8). Stream top-level JSON properties and policy objects, preserve the completed Dataset V3 and candidate snapshot, rebuild only the isolated training API, and resume the diagnostic pipeline.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
