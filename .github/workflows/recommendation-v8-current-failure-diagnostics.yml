@@ -60,12 +60,12 @@ jobs:
             echo
             echo '## Recent training log'
             echo '```text'
-            tail -n 300 "$current/training.log" 2>/dev/null || echo 'training.log missing'
+            tail -n 140 "$current/training.log" 2>/dev/null || echo 'training.log missing'
             echo '```'
             echo
             echo '## Container log'
             echo '```text'
-            sudo docker logs --tail=300 "$container" 2>&1 || true
+            sudo docker logs --tail=120 "$container" 2>&1 || true
             echo '```'
             echo
             echo '## Storage files'
@@ -83,7 +83,8 @@ jobs:
           script: |
             const fs = require('fs');
             const title = '[debug] Recommendation V8 current failure';
-            const body = fs.readFileSync(process.env.REPORT, 'utf8');
+            const raw = fs.readFileSync(process.env.REPORT, 'utf8');
+            const body = raw.length > 62000 ? `${raw.slice(0, 62000)}\n\n[truncated]` : raw;
             const { data } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
