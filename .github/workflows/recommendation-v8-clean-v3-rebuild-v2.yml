@@ -7,9 +7,6 @@ on:
       - agent/recommendation-value-v8-passive-shadow-1
     paths:
       - '.github/training-requests/recommendation-v8-clean-v3-rebuild-v2.json'
-  pull_request:
-    paths:
-      - '.github/training-requests/recommendation-v8-clean-v3-rebuild-v2.json'
 
 permissions:
   contents: write
