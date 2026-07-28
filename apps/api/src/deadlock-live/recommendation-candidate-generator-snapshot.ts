@@ -51,6 +51,20 @@ export interface RecommendationCandidateGeneratorSnapshotArtifact {
   };
 }
 
+export type RecommendationCandidateGeneratorSnapshotMetadata = Omit<
+  RecommendationCandidateGeneratorSnapshotArtifact,
+  'policies'
+>;
+
+export interface RecommendationPreparedHeroBuildPolicy {
+  heroId: number;
+  policy: HeroBuildPolicy;
+  parsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
+}
+
 export interface RecommendationCandidateGeneratorSnapshotRegistryEntry {
   fileName: string;
   artifactSha256: string;
@@ -81,6 +95,39 @@ export function candidateGeneratorCatalogPayload(
     version: artifact.catalog.version,
     items: normalizeCatalogItems(artifact.catalog.items),
   };
+}
+
+export function validateRecommendationCandidateGeneratorSnapshotMetadata(
+  artifact: RecommendationCandidateGeneratorSnapshotMetadata,
+): void {
+  if (
+    artifact.schemaVersion !==
+      RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_SCHEMA_VERSION ||
+    artifact.artifactVersion !==
+      RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION
+  ) {
+    throw new Error('Unsupported recommendation candidate generator snapshot.');
+  }
+  validateSnapshotIdentity(artifact.snapshot);
+  validateGeneratorOptions(artifact.generatorOptions);
+  if (
+    !artifact.catalog ||
+    !Array.isArray(artifact.catalog.items) ||
+    !artifact.catalog.version.trim()
+  ) {
+    throw new Error('Candidate generator snapshot catalog is invalid.');
+  }
+  if (artifact.catalog.version !== artifact.snapshot.catalogVersion) {
+    throw new Error('Candidate generator snapshot catalog version does not match metadata.');
+  }
+  const normalizedCatalog = normalizeCatalogItems(artifact.catalog.items);
+  const itemIds = new Set<number>();
+  for (const item of normalizedCatalog) {
+    if (itemIds.has(item.itemId)) {
+      throw new Error(`Candidate generator snapshot duplicates item ${item.itemId}.`);
+    }
+    itemIds.add(item.itemId);
+  }
 }
 
 export function validateRecommendationCandidateGeneratorSnapshotArtifact(
@@ -186,28 +233,31 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
   decision: HeroBuildDecisionDatasetV3Row;
   artifact: RecommendationCandidateGeneratorSnapshotArtifact;
 }): RecommendationHistoricalCandidateInput[] {
-  const matchTime = requiredTimestamp(
-    input.decision.matchStartTime,
-    'decision.matchStartTime',
-  );
-  const trainingEnd = requiredTimestamp(
-    input.artifact.snapshot.trainingWindowEnd,
-    'trainingWindowEnd',
-  );
-  if (trainingEnd >= matchTime) {
-    throw new Error(
-      'Candidate generator snapshot training window must end before the replay match.',
-    );
-  }
-
   const policyValue = input.artifact.policies.find(
     (policy) => policy.heroId === input.decision.heroId,
   );
-  if (!policyValue) {
-    return [];
-  }
+  return generateRecommendationHistoricalCandidatesFromPreparedPolicy({
+    decision: input.decision,
+    snapshot: input.artifact.snapshot,
+    generatorOptions: input.artifact.generatorOptions,
+    catalog: input.artifact.catalog,
+    policy: policyValue
+      ? prepareRecommendationSerializedHeroBuildPolicy(policyValue)
+      : undefined,
+  });
+}
 
-  const policy = deserializePolicy(policyValue);
+export function validateRecommendationSerializedHeroBuildPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): void {
+  validateSerializedPolicy(value);
+}
+
+export function prepareRecommendationSerializedHeroBuildPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): RecommendationPreparedHeroBuildPolicy {
+  validateRecommendationSerializedHeroBuildPolicy(value);
+  const policy = deserializePolicy(value);
   const parsedStates = [...policy.statesByKey.values()]
     .map((state) => ({
       state,
@@ -215,12 +265,47 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
     }))
     .filter(
       (
-        value,
-      ): value is {
+        item,
+      ): item is {
         state: HeroBuildPolicyState;
         itemCounts: ReadonlyMap<number, number>;
-      } => value.itemCounts !== undefined,
+      } => item.itemCounts !== undefined,
     );
+  return {
+    heroId: value.heroId,
+    policy,
+    parsedStates,
+  };
+}
+
+export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(input: {
+  decision: HeroBuildDecisionDatasetV3Row;
+  snapshot: RecommendationFrozenCandidateGeneratorSnapshot;
+  generatorOptions: HeroBuildRecommendationOptions;
+  catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+  policy?: RecommendationPreparedHeroBuildPolicy;
+  componentsByParent?: ReadonlyMap<number, number[]>;
+}): RecommendationHistoricalCandidateInput[] {
+  const matchTime = requiredTimestamp(
+    input.decision.matchStartTime,
+    'decision.matchStartTime',
+  );
+  const trainingEnd = requiredTimestamp(
+    input.snapshot.trainingWindowEnd,
+    'trainingWindowEnd',
+  );
+  if (trainingEnd >= matchTime) {
+    throw new Error(
+      'Candidate generator snapshot training window must end before the replay match.',
+    );
+  }
+  if (!input.policy) {
+    return [];
+  }
+  if (input.policy.heroId !== input.decision.heroId) {
+    throw new Error('Prepared candidate policy hero does not match the replay decision.');
+  }
+
   const inventory = parseInventoryStateKey(
     input.decision.inventoryBeforeStateKey,
   );
@@ -232,24 +317,26 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
   const itemIds = [...inventory.entries()].flatMap(([itemId, count]) =>
     Array.from({ length: count }, () => itemId),
   );
-  const componentsByParent = new Map<number, number[]>(
-    input.artifact.catalog.items.map((item) => [
-      item.itemId,
-      [...item.componentItemIds],
-    ]),
-  );
+  const componentsByParent =
+    input.componentsByParent ??
+    new Map<number, number[]>(
+      input.catalog.items.map((item) => [
+        item.itemId,
+        [...item.componentItemIds],
+      ]),
+    );
   const response = recommendFromPolicy(
     {
       heroId: input.decision.heroId,
       itemIds,
       gameTimeS: input.decision.gameTimeS,
-      limit: input.artifact.generatorOptions.limit,
+      limit: input.generatorOptions.limit,
     },
     input.decision.inventoryBeforeStateKey,
-    policy,
-    parsedStates,
+    input.policy.policy,
+    input.policy.parsedStates,
     (parentItemId) => componentsByParent.get(parentItemId) ?? [],
-    normalizeGeneratorOptions(input.artifact.generatorOptions),
+    normalizeGeneratorOptions(input.generatorOptions),
   );
   return candidateActionsFromRecommendationResponse(response);
 }

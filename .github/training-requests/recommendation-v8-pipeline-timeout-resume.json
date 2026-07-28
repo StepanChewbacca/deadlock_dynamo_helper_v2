@@ -1,9 +1,10 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "operation": "REPLAY_STREAMING_SNAPSHOT",
   "requestedAt": "2026-07-28T19:55:00Z",
   "reason": "Retry the bounded-memory Historical Replay fix after resolving the TypeScript control-flow narrowing error. Preserve the completed Dataset V3 and candidate snapshot; replace only the isolated training API after build and tests pass.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-28T19:45:00Z"
 }

@@ -22,7 +22,7 @@ export function sha256StableJson(value: unknown): string {
   return hash.digest('hex');
 }
 
-function updateStableJsonHash(hash: Hash, value: unknown): void {
+export function updateStableJsonHash(hash: Hash, value: unknown): void {
   if (Array.isArray(value)) {
     hash.update('[');
     for (let index = 0; index < value.length; index += 1) {
