@@ -68,6 +68,8 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git add apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts "$request"
           git commit -m 'fix: stream large candidate snapshots in historical replay'
+          git fetch origin agent/recommendation-value-v8-passive-shadow-1
+          git rebase origin/agent/recommendation-value-v8-passive-shadow-1
           git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
 
       - name: Resolve isolated runtime configuration
