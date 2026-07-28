@@ -18,6 +18,7 @@ export const BASE_LIVE_BUILD_RECOMMENDATION_TRAVERSAL = Symbol(
 export class RecommendationValueV8PassiveShadowTraversalFacade {
   private readonly latestStateByMatchId = new Map<string, MinimalMatchState>();
   private readonly processedDecisionIds = new Set<string>();
+  private readonly pendingMatchIds = new Set<string>();
   private readonly workersByMatchId = new Map<string, Promise<void>>();
 
   constructor(
@@ -32,6 +33,7 @@ export class RecommendationValueV8PassiveShadowTraversalFacade {
     }
     this.base.observeState(state);
     if (state?.matchId && state.matchId !== 'unknown') {
+      this.pendingMatchIds.add(state.matchId);
       this.scheduleAfterBaseline(state.matchId);
     }
   }
@@ -55,7 +57,9 @@ export class RecommendationValueV8PassiveShadowTraversalFacade {
   }
 
   async waitForShadowIdle(matchId: string): Promise<void> {
-    await this.workersByMatchId.get(matchId);
+    while (this.workersByMatchId.has(matchId)) {
+      await this.workersByMatchId.get(matchId);
+    }
     await this.shadowService.waitForIdle();
   }
 
@@ -63,17 +67,19 @@ export class RecommendationValueV8PassiveShadowTraversalFacade {
     if (this.workersByMatchId.has(matchId)) {
       return;
     }
-    const worker = this.captureLatestDecision(matchId).finally(() => {
+    const worker = this.processPendingMatch(matchId).finally(() => {
       this.workersByMatchId.delete(matchId);
-      const snapshot = this.base.getMatchSnapshot(matchId);
-      if (
-        snapshot?.decisionId &&
-        !this.processedDecisionIds.has(snapshot.decisionId)
-      ) {
+      if (this.pendingMatchIds.has(matchId)) {
         this.scheduleAfterBaseline(matchId);
       }
     });
     this.workersByMatchId.set(matchId, worker);
+  }
+
+  private async processPendingMatch(matchId: string): Promise<void> {
+    while (this.pendingMatchIds.delete(matchId)) {
+      await this.captureLatestDecision(matchId);
+    }
   }
 
   private async captureLatestDecision(matchId: string): Promise<void> {
