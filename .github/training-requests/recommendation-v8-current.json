@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "requestedAt": "2026-07-28T05:10:00.000Z",
+  "operation": "AUDIT_CLEAN_AND_START_DETACHED_RECOMMENDATION_V8_TRAINING",
+  "source": "POSTGRESQL_FULL_CORPUS",
+  "minimumSourceMatchCount": 25000,
+  "productionRankingChangeAuthorized": false,
+  "passiveShadowActivationAuthorized": false,
+  "randomizedCanaryAuthorized": false
+}
