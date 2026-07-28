@@ -11,17 +11,20 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: recommendation-v8-current-failure-diagnostics
+  cancel-in-progress: true
+
 jobs:
   capture:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Capture isolated training failure
+      - name: Capture isolated training and PostgreSQL timeline diagnostics
         shell: bash
         run: |
           set -u -o pipefail
-          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
-          current="$run_root/current"
+          current='/home/ubuntu/apps/deadlock_dynamo_helper-training/current'
           container='deadlock-recommendation-v8-training'
           db_container='aboba-telegramovich-postgres-1'
           report="$RUNNER_TEMP/recommendation-v8-current-failure.md"
@@ -36,22 +39,12 @@ jobs:
             cat "$current/status.json" 2>/dev/null || echo '{"error":"status.json missing"}'
             echo '```'
             echo
-            echo '## Container'
+            echo '## Container and processes'
             echo '```text'
             sudo docker ps -a --filter name="$container" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-            echo '```'
-            echo
-            echo '## Processes'
-            echo '```text'
             sudo docker exec "$container" sh -lc "ps -ef | grep -E 'recommendation-v8|node' | grep -v grep" 2>&1 || true
             echo '```'
-            echo
-            echo '## Candidate snapshot status'
-            echo '```json'
-            curl --silent --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status 2>&1 || true
-            echo
-            echo '```'
-            for endpoint in recommendation-historical-pro-replay/status recommendation-pro-decision-dataset-v6/status recommendation-behavioral-v5-training/status recommendation-value-v8-diagnostic/status recommendation-value-v8-full-evaluation/status; do
+            for endpoint in recommendation-historical-pro-replay/status recommendation-pro-decision-dataset-v6/status recommendation-behavioral-v5-training/status recommendation-value-v8-diagnostic/status; do
               echo
               echo "## $endpoint"
               echo '```json'
@@ -62,67 +55,57 @@ jobs:
             echo
             echo '## PostgreSQL candidate tables'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND (tablename ILIKE '%timeline%' OR tablename ILIKE '%event%' OR tablename ILIKE '%match%' OR tablename ILIKE '%player%') ORDER BY 1;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') AND (tablename ILIKE '%timeline%' OR tablename ILIKE '%event%' OR tablename ILIKE '%match%' OR tablename ILIKE '%player%') ORDER BY 1;" 2>&1 || true
             echo '```'
             echo
-            echo '## PostgreSQL table row estimates'
+            echo '## PostgreSQL row estimates'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "SELECT relname || E'\t' || n_live_tup FROM pg_stat_user_tables WHERE relname ILIKE '%timeline%' OR relname ILIKE '%event%' OR relname ILIKE '%match%' OR relname ILIKE '%player%' ORDER BY relname;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; SELECT relname || E'\t' || n_live_tup FROM pg_stat_user_tables WHERE relname ILIKE '%timeline%' OR relname ILIKE '%event%' OR relname ILIKE '%match%' OR relname ILIKE '%player%' ORDER BY relname;" 2>&1 || true
             echo '```'
             echo
-            echo '## Raw metadata source counts'
+            echo '## Raw metadata sources and counts'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "SELECT source || E'\t' || COUNT(*) FROM raw_match_metadata GROUP BY source ORDER BY COUNT(*) DESC;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; SELECT source || E'\t' || COUNT(*) FROM raw_match_metadata GROUP BY source ORDER BY COUNT(*) DESC;" 2>&1 || true
             echo '```'
             echo
             echo '## Latest payload top-level keys'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(payload) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM raw_sample CROSS JOIN LATERAL jsonb_object_keys(payload) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
             echo '```'
             echo
             echo '## Latest match_info keys'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT payload->'match_info' AS info FROM raw_match_metadata WHERE jsonb_typeof(payload->'match_info')='object' ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(info) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata WHERE jsonb_typeof(payload->'match_info')='object' ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20) SELECT key || E'\t' || COUNT(*) FROM raw_sample CROSS JOIN LATERAL jsonb_object_keys(payload->'match_info') AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
             echo '```'
             echo
             echo '## Latest player keys'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_object_keys(player) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20), players AS (SELECT player FROM raw_sample CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(payload#>'{match_info,players}')='array' THEN payload#>'{match_info,players}' ELSE '[]'::jsonb END) player) SELECT key || E'\t' || COUNT(*) FROM players CROSS JOIN LATERAL jsonb_object_keys(player) AS key GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
             echo '```'
             echo
             echo '## Player time/stat fields'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240), keys AS (SELECT DISTINCT key FROM sample CROSS JOIN LATERAL jsonb_object_keys(player) AS key) SELECT key FROM keys WHERE key ~* '(time|stat|gold|worth|damage|kill|death|assist|timeline|history|event)' ORDER BY key;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20), players AS (SELECT player FROM raw_sample CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(payload#>'{match_info,players}')='array' THEN payload#>'{match_info,players}' ELSE '[]'::jsonb END) player), keys AS (SELECT DISTINCT key FROM players CROSS JOIN LATERAL jsonb_object_keys(player) AS key) SELECT key FROM keys WHERE key ~* '(time|stat|gold|worth|damage|kill|death|assist|timeline|history|event)' ORDER BY key;" 2>&1 || true
             echo '```'
             echo
-            echo '## Player JSON arrays'
+            echo '## Player array fields'
             echo '```text'
-            "${psql_cmd[@]}" -Atc "WITH sample AS (SELECT player FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 240) SELECT key || E'\t' || COUNT(*) FROM sample CROSS JOIN LATERAL jsonb_each(player) entry(key,value) WHERE jsonb_typeof(value)='array' GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 20), players AS (SELECT player FROM raw_sample CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(payload#>'{match_info,players}')='array' THEN payload#>'{match_info,players}' ELSE '[]'::jsonb END) player) SELECT key || E'\t' || COUNT(*) FROM players CROSS JOIN LATERAL jsonb_each(player) entry(key,value) WHERE jsonb_typeof(value)='array' GROUP BY key ORDER BY COUNT(*) DESC, key;" 2>&1 || true
             echo '```'
             echo
             echo '## Example player payload'
             echo '```json'
-            "${psql_cmd[@]}" -Atc "SELECT jsonb_pretty(player) FROM raw_match_metadata raw CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload#>'{match_info,players}')='array' THEN raw.payload#>'{match_info,players}' ELSE '[]'::jsonb END) player ORDER BY raw.\"fetchedAt\" DESC, raw.id DESC LIMIT 1;" 2>&1 || true
+            "${psql_cmd[@]}" -Atc "SET statement_timeout='30s'; WITH raw_sample AS (SELECT payload FROM raw_match_metadata ORDER BY \"fetchedAt\" DESC, id DESC LIMIT 1) SELECT jsonb_pretty(player) FROM raw_sample CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(payload#>'{match_info,players}')='array' THEN payload#>'{match_info,players}' ELSE '[]'::jsonb END) player LIMIT 1;" 2>&1 || true
             echo '```'
             echo
-            echo '## Timeline filesystem coverage'
+            echo '## Timeline filesystem match directories'
             echo '```text'
             sudo docker exec "$container" sh -lc "find /app/apps/api/storage/match-timeline-events-v1 -mindepth 1 -maxdepth 1 -type d | wc -l" 2>&1 || true
             echo '```'
             echo
             echo '## Recent training log'
             echo '```text'
-            tail -n 140 "$current/training.log" 2>/dev/null || echo 'training.log missing'
-            echo '```'
-            echo
-            echo '## Container log'
-            echo '```text'
-            sudo docker logs --tail=120 "$container" 2>&1 || true
-            echo '```'
-            echo
-            echo '## Storage files'
-            echo '```text'
-            sudo docker exec "$container" sh -lc "find /app/apps/api/storage/recommendation-candidate-generator-snapshots /app/apps/api/storage/recommendation-historical-pro-replay-v1 -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | sort" 2>&1 || true
+            tail -n 100 "$current/training.log" 2>/dev/null || true
             echo '```'
           } > "$report"
           echo "REPORT=$report" >> "$GITHUB_ENV"
@@ -137,26 +120,10 @@ jobs:
             const title = '[debug] Recommendation V8 current failure';
             const raw = fs.readFileSync(process.env.REPORT, 'utf8');
             const body = raw.length > 62000 ? `${raw.slice(0, 62000)}\n\n[truncated]` : raw;
-            const { data } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100,
-            });
+            const { data } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'all', per_page: 100 });
             const existing = data.find((issue) => !issue.pull_request && issue.title === title);
             if (existing) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                body,
-                state: 'open',
-              });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body, state: 'open' });
             } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                body,
-              });
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body });
             }
