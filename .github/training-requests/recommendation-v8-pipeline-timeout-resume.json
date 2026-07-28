@@ -1,0 +1,8 @@
+{
+  "state": "REQUESTED",
+  "requestedAt": "2026-07-28T19:25:00Z",
+  "reason": "The diagnostic pipeline exited because one status GET timed out while the candidate snapshot continued RUNNING/WRITING. Patch transient GET retries and resume without rebuilding Dataset V3.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
