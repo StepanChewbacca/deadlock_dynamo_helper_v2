@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/patch-recommendation-v8-clean-rebuild.py
+          python3 scripts/run-patch-recommendation-v8-clean-rebuild.py
           git diff --check
 
       - name: Build patched builder image
