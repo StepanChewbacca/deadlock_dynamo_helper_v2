@@ -218,13 +218,36 @@ async function runValueV8Diagnostic(datasetManifest, behavioralManifest) {
 }
 
 async function runStage({ name, startPath, statusPath, body }) {
-  console.log(`${name}: starting.`);
-  await post(startPath, body);
   const deadline = Date.now() + config.pipelineTimeoutMs;
+  let status = await get(statusPath);
   let previousPhase;
 
+  if (status.state === 'COMPLETE') {
+    console.log(`${name}: already COMPLETE/${status.phase}.`);
+    return status;
+  }
+
+  if (status.state === 'RUNNING') {
+    console.log(`${name}: resuming ${status.state}/${status.phase}.`);
+  } else {
+    console.log(`${name}: starting.`);
+    try {
+      await post(startPath, body);
+    } catch (error) {
+      const afterStart = await get(statusPath);
+      if (!['RUNNING', 'COMPLETE'].includes(afterStart.state)) {
+        throw error;
+      }
+      status = afterStart;
+      console.warn(
+        `${name}: start request failed after the server accepted the stage; ` +
+          `continuing from ${status.state}/${status.phase}.`,
+      );
+    }
+  }
+
   while (Date.now() < deadline) {
-    const status = await get(statusPath);
+    status = await get(statusPath);
     if (status.phase !== previousPhase) {
       console.log(`${name}: ${status.state}/${status.phase}.`);
       previousPhase = status.phase;
@@ -258,6 +281,12 @@ function loadConfig() {
       'PIPELINE_TIMEOUT_MS',
       24 * 60 * 60 * 1000,
     ),
+    requestTimeoutMs: optionalInteger('PIPELINE_REQUEST_TIMEOUT_MS', 30000),
+    requestRetryCount: optionalInteger('PIPELINE_REQUEST_RETRY_COUNT', 240),
+    requestRetryDelayMs: optionalInteger(
+      'PIPELINE_REQUEST_RETRY_DELAY_MS',
+      5000,
+    ),
     expectedSnapshotSourceSha256: optionalString(
       'EXPECTED_SNAPSHOT_SOURCE_SHA256',
     ),
@@ -270,11 +299,29 @@ function loadConfig() {
 }
 
 async function get(path) {
-  return request('GET', path);
+  return requestWithRetry('GET', path);
 }
 
 async function post(path, body) {
   return request('POST', path, body);
+}
+
+async function requestWithRetry(method, path, body) {
+  for (let attempt = 1; attempt <= config.requestRetryCount; attempt += 1) {
+    try {
+      return await request(method, path, body);
+    } catch (error) {
+      if (!isTransientRequestError(error) || attempt === config.requestRetryCount) {
+        throw error;
+      }
+      console.warn(
+        `${method} ${path} transient failure on attempt ${attempt}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+      await sleep(config.requestRetryDelayMs);
+    }
+  }
+  throw new Error(`${method} ${path} retry loop exhausted.`);
 }
 
 async function request(method, path, body) {
@@ -282,7 +329,7 @@ async function request(method, path, body) {
     method,
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(config.requestTimeoutMs),
   });
   const text = await response.text();
   let value;
@@ -292,11 +339,27 @@ async function request(method, path, body) {
     throw new Error(`${method} ${path} returned invalid JSON.`);
   }
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       `${method} ${path} returned ${response.status}: ${JSON.stringify(value)}`,
     );
+    error.retryable = response.status === 429 || response.status >= 500;
+    throw error;
   }
   return value;
+}
+
+function isTransientRequestError(error) {
+  if (error && typeof error === 'object' && error.retryable === true) {
+    return true;
+  }
+  const name = error instanceof Error ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    name === 'TimeoutError' ||
+    name === 'AbortError' ||
+    error instanceof TypeError ||
+    /timeout|fetch failed|socket|ECONNRESET|ECONNREFUSED/i.test(message)
+  );
 }
 
 function datasetSha(manifest) {
