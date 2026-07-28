@@ -510,7 +510,7 @@ function normalizeOutcomes(
       finiteNumber(outcome.utility, `${outcome.horizon} utility`);
     }
     if (outcome.snapshotGameTimeS !== undefined) {
-      nonNegativeInteger(
+      nonNegativeFiniteNumber(
         outcome.snapshotGameTimeS,
         `${outcome.horizon} snapshotGameTimeS`,
       );
@@ -680,6 +680,14 @@ function probability(value: unknown, name: string): number {
   const normalized = finiteNumber(value, name);
   if (normalized < 0 || normalized > 1) {
     throw new Error(`${name} must be between 0 and 1.`);
+  }
+  return normalized;
+}
+
+function nonNegativeFiniteNumber(value: unknown, name: string): number {
+  const normalized = finiteNumber(value, name);
+  if (normalized < 0) {
+    throw new Error(`${name} must be non-negative.`);
   }
   return normalized;
 }

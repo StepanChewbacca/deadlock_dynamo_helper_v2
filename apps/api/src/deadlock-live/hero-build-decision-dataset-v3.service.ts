@@ -503,6 +503,13 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       this.status = { ...this.status, phase: 'FINALIZING' };
       await rm(this.datasetPath, { force: true });
       await rename(this.partialDatasetPath, this.datasetPath);
+      const physicalRowCount = await countNdjsonRows(this.datasetPath);
+      if (physicalRowCount !== checkpoint.audit.rowCount) {
+        throw new Error(
+          `Contextual V3 physical row count ${physicalRowCount} does not match ` +
+            `the audited row count ${checkpoint.audit.rowCount}.`,
+        );
+      }
       const artifactStat = await stat(this.datasetPath);
       const generatedAt = new Date().toISOString();
       const audit = buildAudit(checkpoint, generatedAt);
@@ -969,9 +976,21 @@ class BufferedNdjsonWriter {
     if (!this.buffer) {
       return;
     }
-    const value = this.buffer;
+    const value = Buffer.from(this.buffer, 'utf8');
     this.buffer = '';
-    await this.handle.write(value);
+    let offset = 0;
+    while (offset < value.length) {
+      const { bytesWritten } = await this.handle.write(
+        value,
+        offset,
+        value.length - offset,
+        null,
+      );
+      if (bytesWritten <= 0) {
+        throw new Error('Contextual V3 writer made no progress while flushing.');
+      }
+      offset += bytesWritten;
+    }
   }
 }
 
@@ -1024,6 +1043,19 @@ function isCheckpoint(value: DatasetCheckpoint | undefined): value is DatasetChe
     Number.isSafeInteger(value.nextHeroIndex) &&
     Number.isSafeInteger(value.datasetByteLength)
   );
+}
+
+async function countNdjsonRows(path: string): Promise<number> {
+  let rowCount = 0;
+  for await (const chunk of createReadStream(path)) {
+    const value = chunk as Buffer;
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] === 10) {
+        rowCount += 1;
+      }
+    }
+  }
+  return rowCount;
 }
 
 async function ensureFile(path: string): Promise<void> {
