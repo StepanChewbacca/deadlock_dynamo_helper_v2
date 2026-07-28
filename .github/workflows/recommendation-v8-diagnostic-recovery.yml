@@ -24,9 +24,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate recovery supervisor
-        run: node --check scripts/run-recommendation-v8-diagnostic-recovery-supervisor.mjs
-
       - name: Resume diagnostic pipeline with current catalog
         id: recover
         shell: bash
@@ -65,13 +62,15 @@ jobs:
             echo "Source Dataset V3 is not complete: $source_status" >&2
             exit 1
           fi
-          if sudo docker exec "$container" sh -lc "pgrep -f 'run-recommendation-v8-(training|diagnostic-recovery)-supervisor.mjs|run-recommendation-v8-real-data-v2.mjs|run-recommendation-v8-pipeline.mjs' >/dev/null"; then
+          if sudo docker exec "$container" sh -lc "pgrep -f '[r]un-recommendation-v8-training-supervisor.mjs|[r]un-recommendation-v8-diagnostic-recovery-supervisor.mjs|[r]un-recommendation-v8-real-data-v2.mjs|[r]un-recommendation-v8-pipeline.mjs' >/dev/null"; then
             echo 'A Recommendation V8 supervisor or pipeline process is already running; refusing duplicate start.' >&2
             exit 1
           fi
 
           cp scripts/run-recommendation-v8-diagnostic-recovery-supervisor.mjs "$active_run/"
           chmod 0644 "$active_run/run-recommendation-v8-diagnostic-recovery-supervisor.mjs"
+          sudo docker exec "$container" node --check /runner/run-recommendation-v8-diagnostic-recovery-supervisor.mjs
+
           run_id="$(jq -r '.runId // empty' "$active_run/status.json")"
           if [ -z "$run_id" ]; then
             run_id="$(basename "$active_run")"
