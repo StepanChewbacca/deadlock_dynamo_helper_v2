@@ -13,6 +13,7 @@
     "db:migrate": "yarn workspace @deadlock-live-probe/api migration:run",
     "db:revert": "yarn workspace @deadlock-live-probe/api migration:revert",
     "db:migrations": "yarn workspace @deadlock-live-probe/api migration:show",
-    "db:generate": "yarn workspace @deadlock-live-probe/api migration:generate"
+    "db:generate": "yarn workspace @deadlock-live-probe/api migration:generate",
+    "recommendation:v8:real-data": "node scripts/run-recommendation-v8-real-data.mjs"
   }
 }
