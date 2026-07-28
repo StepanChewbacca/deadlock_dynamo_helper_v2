@@ -24,7 +24,7 @@ const ENV_NAMES = [
   'DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_EXPECTED_MODEL_SHA256',
 ] as const;
 
- describe('Recommendation Value V8 passive shadow service', () => {
+describe('Recommendation Value V8 passive shadow service', () => {
   let root: string;
   const previousEnvironment = new Map<string, string | undefined>();
 
@@ -141,9 +141,9 @@ const ENV_NAMES = [
       rolloutMode: 'SHADOW',
       displayedActionKeys: ['BUY:100', 'BUY:200'],
       candidateActionKeys: ['BUY:100', 'BUY:200'],
-      fallbackReason: undefined,
       randomizedCanaryAuthorized: false,
     });
+    expect(events[0]).not.toHaveProperty('fallbackReason');
     expect(events[0].challengerScores[0].actionKey).toBe('BUY:100');
     expect(service.getStatus()).toMatchObject({
       state: 'READY',
