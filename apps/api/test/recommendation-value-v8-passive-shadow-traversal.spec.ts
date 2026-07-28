@@ -5,20 +5,11 @@ import type {
 } from '../src/deadlock-live/live-build-recommendation-traversal.service';
 import { RecommendationValueV8PassiveShadowTraversalFacade } from '../src/deadlock-live/recommendation-value-v8-passive-shadow-traversal.facade';
 
- describe('Recommendation Value V8 passive shadow traversal facade', () => {
+describe('Recommendation Value V8 passive shadow traversal facade', () => {
   it('returns baseline traversal behavior and schedules shadow after baseline idle', async () => {
     const snapshot = traversalSnapshot();
-    const base = {
-      observeState: jest.fn(),
-      getMatchSnapshot: jest.fn(() => snapshot),
-      getAllSnapshots: jest.fn(() => [snapshot]),
-      getStatus: jest.fn(() => traversalStatus()),
-      waitForIdle: jest.fn(async () => undefined),
-    };
-    const shadow = {
-      schedule: jest.fn(),
-      waitForIdle: jest.fn(async () => undefined),
-    };
+    const base = baseTraversal(() => snapshot);
+    const shadow = shadowService();
     const facade = new RecommendationValueV8PassiveShadowTraversalFacade(
       base as never,
       shadow as never,
@@ -40,9 +31,78 @@ import { RecommendationValueV8PassiveShadowTraversalFacade } from '../src/deadlo
       }),
     );
   });
+
+  it('does not retry a stale snapshot without another observation', async () => {
+    const snapshot = traversalSnapshot('decision-1', 50);
+    const base = baseTraversal(() => snapshot);
+    const shadow = shadowService();
+    const facade = new RecommendationValueV8PassiveShadowTraversalFacade(
+      base as never,
+      shadow as never,
+    );
+
+    facade.observeState(state(60));
+    await expect(
+      Promise.race([
+        facade.waitForShadowIdle('match-1').then(() => 'IDLE'),
+        delay(250).then(() => 'TIMEOUT'),
+      ]),
+    ).resolves.toBe('IDLE');
+
+    expect(base.waitForIdle).toHaveBeenCalledTimes(1);
+    expect(shadow.schedule).not.toHaveBeenCalled();
+  });
+
+  it('processes the latest decision queued while baseline is running', async () => {
+    let snapshot = traversalSnapshot('decision-1', 50);
+    let resolveBaseline!: () => void;
+    const baselineIdle = new Promise<void>((resolve) => {
+      resolveBaseline = resolve;
+    });
+    const base = baseTraversal(() => snapshot, () => baselineIdle);
+    const shadow = shadowService();
+    const facade = new RecommendationValueV8PassiveShadowTraversalFacade(
+      base as never,
+      shadow as never,
+    );
+
+    facade.observeState(state(50));
+    snapshot = traversalSnapshot('decision-2', 60);
+    facade.observeState(state(60));
+    resolveBaseline();
+    await facade.waitForShadowIdle('match-1');
+
+    expect(shadow.schedule).toHaveBeenCalledTimes(1);
+    expect(shadow.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionId: 'decision-2',
+        displayedActionKeys: ['BUY:100', 'BUY:200'],
+      }),
+    );
+  });
 });
 
-function state(): MinimalMatchState {
+function baseTraversal(
+  getSnapshot: () => LiveBuildRecommendationTraversalSnapshot,
+  waitForIdle: () => Promise<void> = async () => undefined,
+) {
+  return {
+    observeState: jest.fn(),
+    getMatchSnapshot: jest.fn(getSnapshot),
+    getAllSnapshots: jest.fn(() => [getSnapshot()]),
+    getStatus: jest.fn(() => traversalStatus()),
+    waitForIdle: jest.fn(waitForIdle),
+  };
+}
+
+function shadowService() {
+  return {
+    schedule: jest.fn(),
+    waitForIdle: jest.fn(async () => undefined),
+  };
+}
+
+function state(itemId = 50): MinimalMatchState {
   return {
     matchId: 'match-1',
     gameTimeSec: 600,
@@ -57,9 +117,9 @@ function state(): MinimalMatchState {
         souls: 8_000,
         items: [
           {
-            id: 50,
+            id: itemId,
             name: 'Item',
-            className: 'item_50',
+            className: `item_${itemId}`,
             enhanced: false,
           },
         ],
@@ -68,22 +128,25 @@ function state(): MinimalMatchState {
   };
 }
 
-function traversalSnapshot(): LiveBuildRecommendationTraversalSnapshot {
+function traversalSnapshot(
+  decisionId = 'decision-1',
+  itemId = 50,
+): LiveBuildRecommendationTraversalSnapshot {
   return {
     state: 'READY',
     matchId: 'match-1',
     steamId: 'player',
     heroId: 1,
     teamId: 0,
-    itemIds: [50],
+    itemIds: [itemId],
     alliedHeroIds: [1],
     enemyHeroIds: [2],
-    previousActionKeys: ['BUY:50'],
-    inventoryStateKey: '50x1',
+    previousActionKeys: [`BUY:${itemId}`],
+    inventoryStateKey: `${itemId}x1`,
     gameTimeS: 600,
     timeBucket: 5,
-    traversalKey: 'key-1',
-    decisionId: 'decision-1',
+    traversalKey: `key-${decisionId}`,
+    decisionId,
     isStale: false,
     recommendation: {
       action: { actionKey: 'BUY:100' },
@@ -109,4 +172,8 @@ function traversalStatus(): LiveBuildRecommendationTraversalStatus {
     totalCacheHitCount: 0,
     totalDiscardedResultCount: 0,
   };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
