@@ -11,7 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type {
   RecommendationProDecisionDatasetV6ArtifactAudit,
