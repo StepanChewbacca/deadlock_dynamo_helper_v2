@@ -21,6 +21,7 @@ jobs:
           set -u -o pipefail
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
           current="$run_root/current"
+          container='deadlock-recommendation-v8-training'
           report="$RUNNER_TEMP/recommendation-v8-status.md"
           {
             echo '# Recommendation V8 training snapshot'
@@ -34,7 +35,12 @@ jobs:
             echo
             echo '## Container'
             echo '```text'
-            sudo docker ps -a --filter name=deadlock-recommendation-v8-training --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+            sudo docker ps -a --filter name="$container" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+            echo '```'
+            echo
+            echo '## Historical catalog coverage'
+            echo '```json'
+            sudo docker exec "$container" node -e 'const {Client}=require("pg"); (async()=>{const c=new Client({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||5432),user:process.env.DB_USER,password:process.env.DB_PASSWORD,database:process.env.DB_NAME});await c.connect();const r=await c.query(`SELECT id, "clientVersion", "contentCatalogVersionId", "importedAt", "isCurrent" FROM item_catalog_versions ORDER BY "importedAt" ASC, id ASC`);console.log(JSON.stringify({count:r.rowCount,rows:r.rows},null,2));await c.end()})().catch((error)=>{console.error(error);process.exit(1)})' 2>&1 || true
             echo '```'
             echo
             echo '## Stage endpoints'
