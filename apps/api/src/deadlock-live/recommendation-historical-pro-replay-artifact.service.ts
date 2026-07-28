@@ -23,6 +23,7 @@ import type {
   MatchTimelinePlayerSnapshot,
 } from './match-timeline-collector.service';
 import {
+  candidateGeneratorCatalogPayload,
   generateRecommendationHistoricalCandidatesFromPreparedPolicy,
   prepareRecommendationSerializedHeroBuildPolicy,
   validateRecommendationCandidateGeneratorSnapshotMetadata,
@@ -938,10 +939,12 @@ async function loadPreparedSnapshotArtifact(input: {
         `${metadata.snapshot.policySha256}.`,
     );
   }
-  const actualCatalogSha256 = sha256StableJson({
-    version: metadata.catalog.version,
-    items: metadata.catalog.items,
-  });
+  const actualCatalogSha256 = sha256StableJson(
+    candidateGeneratorCatalogPayload({
+      ...metadata,
+      policies: [],
+    }),
+  );
   if (actualCatalogSha256 !== metadata.snapshot.catalogSha256) {
     throw new Error(
       `Candidate generator catalog SHA-256 mismatch: ${actualCatalogSha256} versus ` +
