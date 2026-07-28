@@ -45,54 +45,28 @@ describe('Recommendation Value V8 full evaluation', () => {
   });
 
   it('evaluates V8, frozen V6, OPE, and cohorts on the same decision', () => {
-    const value = row('FUTURE_TEST');
-    const evaluation = evaluateRecommendationValueV8Decision({
-      row: value,
-      propensity: propensity(value),
-      baseline: baseline(value),
-      statePredictions: { '3m': 0.1, '5m': 0.1, '10m': 0.1 },
-      candidatePrediction: candidatePrediction(),
-      options: {
-        configuration: { actionScale: 1, policyTemperature: 0.5 },
-        maximumImportanceWeight: 20,
-        cohortMinimumDecisions: 1,
-        criticalCohortRmseTolerance: 0,
-      },
-      sourceModelSha256: MODEL_SHA,
-      sourceDatasetSha256: DATASET_SHA,
-      splitDescriptorSha256: SPLIT_SHA,
-    });
-    const accumulator = createRecommendationValueV8EvaluationAccumulator(
-      'FUTURE_TEST',
-    );
-    observeRecommendationValueV8Evaluation(accumulator, evaluation);
-    const metrics = finalizeRecommendationValueV8Evaluation(accumulator, {
-      cohortMinimumDecisions: 1,
-      criticalCohortRmseTolerance: 0,
-    });
+    const metrics = metricsFor(row('FUTURE_TEST'), 1, 1);
 
-    expect(evaluation.targetPolicy[0].actionKey).toBe('BUY:100');
     expect(metrics.candidateCoverage).toBe(1);
     expect(metrics.behaviorSupport).toBe(1);
     expect(metrics.v8Rmse).toBeLessThan(metrics.stateRmse);
     expect(metrics.v8Rmse).toBeLessThan(metrics.baselineRmse);
     expect(metrics.averageCandidateSeparation).toBeGreaterThan(0);
     expect(metrics.ope.targetEssRatio).toBe(1);
+    expect(metrics.ope.drUpliftLower95).toBeGreaterThan(0);
     expect(metrics.cohorts).toHaveLength(4);
   });
 
   it('selects configuration using TUNING metrics only', () => {
     const value = row('TUNING');
-    const weak = metricsFor(value, 0);
-    const strong = metricsFor(value, 1);
     const selection = selectRecommendationValueV8Configuration([
       {
         configuration: { actionScale: 0, policyTemperature: 1 },
-        metrics: weak,
+        metrics: metricsFor(value, 0, 2),
       },
       {
         configuration: { actionScale: 1, policyTemperature: 0.5 },
-        metrics: strong,
+        metrics: metricsFor(value, 1, 2),
       },
     ]);
 
@@ -105,18 +79,21 @@ describe('Recommendation Value V8 full evaluation', () => {
   });
 
   it('authorizes passive shadow but never randomized canary', () => {
-    const metrics = metricsFor(row('FUTURE_TEST'), 1);
-    const gate = buildRecommendationValueV8ReleaseGate(metrics, true, {
-      minimumCandidateCoverage: 0.99,
-      minimumBehaviorSupport: 0.9,
-      minimumEssRatio: 0.5,
-      maximumClippedWeightRate: 0.05,
-      minimumStateRmseImprovement: 0,
-      minimumBaselineRmseImprovement: 0,
-      minimumCandidateSeparation: 0.001,
-      minimumDrUpliftLower95: -1,
-      maximumCriticallyNegativeMajorCohorts: 0,
-    });
+    const gate = buildRecommendationValueV8ReleaseGate(
+      metricsFor(row('FUTURE_TEST'), 1, 2),
+      true,
+      {
+        minimumCandidateCoverage: 0.99,
+        minimumBehaviorSupport: 0.9,
+        minimumEssRatio: 0.5,
+        maximumClippedWeightRate: 0.05,
+        minimumStateRmseImprovement: 0,
+        minimumBaselineRmseImprovement: 0,
+        minimumCandidateSeparation: 0.001,
+        minimumDrUpliftLower95: 0,
+        maximumCriticallyNegativeMajorCohorts: 0,
+      },
+    );
 
     expect(gate.passed).toBe(true);
     expect(gate.passiveShadowAuthorized).toBe(true);
@@ -127,6 +104,7 @@ describe('Recommendation Value V8 full evaluation', () => {
 function metricsFor(
   value: RecommendationProDecisionDatasetV6Row,
   actionScale: number,
+  cohortMinimumDecisions: number,
 ) {
   const evaluation = evaluateRecommendationValueV8Decision({
     row: value,
@@ -137,7 +115,7 @@ function metricsFor(
     options: {
       configuration: { actionScale, policyTemperature: 0.5 },
       maximumImportanceWeight: 20,
-      cohortMinimumDecisions: 2,
+      cohortMinimumDecisions,
       criticalCohortRmseTolerance: 0,
     },
     sourceModelSha256: MODEL_SHA,
@@ -149,7 +127,7 @@ function metricsFor(
   );
   observeRecommendationValueV8Evaluation(accumulator, evaluation);
   return finalizeRecommendationValueV8Evaluation(accumulator, {
-    cohortMinimumDecisions: 2,
+    cohortMinimumDecisions,
     criticalCohortRmseTolerance: 0,
   });
 }
@@ -206,25 +184,22 @@ function propensity(
     supported: true,
     propensityFloor: 0.01,
     candidates: [
-      {
-        actionKey: 'BUY:100',
-        itemId: 100,
-        score: 0,
-        rawProbability: 0.5,
-        probability: 0.5,
-        rank: 1,
-      },
-      {
-        actionKey: 'BUY:200',
-        itemId: 200,
-        score: 0,
-        rawProbability: 0.5,
-        probability: 0.5,
-        rank: 2,
-      },
+      candidatePropensity('BUY:100', 100, 1),
+      candidatePropensity('BUY:200', 200, 2),
     ],
     modelArtifactSha256: 'e'.repeat(64),
     sourceDatasetSha256: DATASET_SHA,
+  };
+}
+
+function candidatePropensity(actionKey: string, itemId: number, rank: number) {
+  return {
+    actionKey,
+    itemId,
+    score: 0,
+    rawProbability: 0.5,
+    probability: 0.5,
+    rank,
   };
 }
 
@@ -266,26 +241,36 @@ function baseline(
 function candidatePrediction(): RecommendationValueV8CandidateSetPrediction {
   return {
     candidates: [
-      {
-        actionKey: 'BUY:100',
-        itemId: 100,
-        rawResiduals: { '3m': 0.3, '5m': 0.3, '10m': 0.3 },
-        advantages: { '3m': 0.3, '5m': 0.3, '10m': 0.3 },
-        aggregateAdvantage: 0.3,
-        rank: 1,
-      },
-      {
-        actionKey: 'BUY:200',
-        itemId: 200,
-        rawResiduals: { '3m': -0.3, '5m': -0.3, '10m': -0.3 },
-        advantages: { '3m': -0.3, '5m': -0.3, '10m': -0.3 },
-        aggregateAdvantage: -0.3,
-        rank: 2,
-      },
+      predictedCandidate('BUY:100', 100, 0.3, 1),
+      predictedCandidate('BUY:200', 200, -0.3, 2),
     ],
     meanRawResiduals: { '3m': 0, '5m': 0, '10m': 0 },
     candidateSeparation: 0.6,
     maximumAbsoluteCenteredMean: 0,
+  };
+}
+
+function predictedCandidate(
+  actionKey: string,
+  itemId: number,
+  advantage: number,
+  rank: number,
+) {
+  return {
+    actionKey,
+    itemId,
+    rawResiduals: {
+      '3m': advantage,
+      '5m': advantage,
+      '10m': advantage,
+    },
+    advantages: {
+      '3m': advantage,
+      '5m': advantage,
+      '10m': advantage,
+    },
+    aggregateAdvantage: advantage,
+    rank,
   };
 }
 
@@ -324,7 +309,10 @@ function row(
       maxHealth: 1_000,
       level: 8,
     },
-    candidates: [candidate('BUY:100', 100, 3, 3_000), candidate('BUY:200', 200, 1, 500)],
+    candidates: [
+      candidate('BUY:100', 100, 3, 3_000),
+      candidate('BUY:200', 200, 1, 500),
+    ],
     observedActionKey: 'BUY:100',
     observedActionInCandidateSet: true,
     shortHorizonOutcomes: {
