@@ -1,7 +1,8 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-07-28T20:39:00Z",
-  "reason": "Historical Replay now streams the multi-GB snapshot but failed catalog SHA validation because parsed JSON omits optional fields restored by exporter canonicalization. Apply the canonical catalog payload, run the missing-optional-field regression, preserve Dataset V3 and snapshot, replace only the isolated training API, and resume.",
+  "consumedAt": "2026-07-29T00:00:00Z",
+  "reason": "Historical Replay streaming and canonical catalog SHA fixes were validated and deployed. The replay completed; the remaining audit failure is data-source coverage, not the previous runtime failure.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
