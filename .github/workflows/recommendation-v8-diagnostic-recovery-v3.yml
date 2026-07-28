@@ -1,0 +1,169 @@
+name: Recommendation V8 Repaired Source Diagnostic Recovery
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-diagnostic-recovery-v3.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-vps-training
+  cancel-in-progress: false
+
+jobs:
+  repair-and-resume:
+    name: Repair Dataset V3 metadata and resume diagnostic-only pipeline
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve active training run
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          run_dir="$(readlink -f "$run_root/current")"
+          container='deadlock-recommendation-v8-training'
+          if [ ! -d "$run_dir" ]; then
+            echo 'Active training run directory is missing.' >&2
+            exit 1
+          fi
+          if ! sudo docker inspect "$container" >/dev/null 2>&1; then
+            echo 'Training container is missing.' >&2
+            exit 1
+          fi
+          if [ ! -s "$run_dir/status.json" ]; then
+            echo 'Training status file is missing.' >&2
+            exit 1
+          fi
+          state="$(jq -r '.state // empty' "$run_dir/status.json")"
+          if [ "$state" != 'FAILED' ]; then
+            echo "Expected FAILED training state before repair, found: $state" >&2
+            exit 1
+          fi
+          run_id="$(jq -r '.runId // empty' "$run_dir/status.json")"
+          if [ -z "$run_id" ]; then
+            echo 'Training run ID is missing.' >&2
+            exit 1
+          fi
+          cp scripts/repair-recommendation-v8-source-v3-manifest.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs "$run_dir/"
+          echo "TRAINING_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "TRAINING_CONTAINER=$container" >> "$GITHUB_ENV"
+
+      - name: Verify exact failure before repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status)"
+          echo "$status" | jq
+          test "$(echo "$status" | jq -r '.state')" = 'FAILED'
+          test "$(echo "$status" | jq -r '.phase')" = 'WRITING'
+          test "$(echo "$status" | jq -r '.sourceRowCount')" = '5326109'
+          test "$(echo "$status" | jq -r '.selectedRowCount')" = '286244'
+          test "$(echo "$status" | jq -r '.invalidSourceRowCount')" = '0'
+          test "$(echo "$status" | jq -r '.error')" = 'Candidate generator snapshot audit failed: Scanned source row count does not match the source manifest.'
+
+      - name: Repair diagnostic source metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker exec \
+            -e EXPECTED_ACTUAL_ROW_COUNT=5326109 \
+            "$TRAINING_CONTAINER" \
+            node /runner/repair-recommendation-v8-source-v3-manifest.mjs /app/apps/api/storage/build-decision-dataset-v3 \
+            | tee "$TRAINING_RUN_DIR/source-v3-diagnostic-repair.json"
+
+      - name: Restart isolated training API
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker restart "$TRAINING_CONTAINER" >/dev/null
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              echo 'Training API restarted.'
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$TRAINING_CONTAINER")" != 'true' ]; then
+              sudo docker logs --tail=300 "$TRAINING_CONTAINER"
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$TRAINING_CONTAINER"
+          echo 'Training API did not restart.' >&2
+          exit 1
+
+      - name: Verify repaired metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status)"
+          manifest="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/manifest)"
+          audit="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/audit)"
+          echo "$status" | jq
+          echo "$manifest" | jq '.artifact, .diagnosticRepair'
+          echo "$audit" | jq '.decisions, .diagnosticRepair'
+          test "$(echo "$status" | jq -r '.state')" = 'COMPLETE'
+          test "$(echo "$status" | jq -r '.rowCount')" = '5326109'
+          test "$(echo "$manifest" | jq -r '.artifact.rowCount')" = '5326109'
+          test "$(echo "$manifest" | jq -r '.diagnosticRepair.releaseEligible')" = 'false'
+          test "$(echo "$audit" | jq -r '.decisions.rowCount')" = '5326109'
+          test "$(echo "$audit" | jq -r '.diagnosticRepair.releaseEligible')" = 'false'
+
+      - name: Start detached diagnostic-only supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n[%s] Starting repaired-source diagnostic-only recovery.\n' "$(date --iso-8601=seconds)" >> "$TRAINING_RUN_DIR/training.log"
+          sudo docker exec -d \
+            -e API_BASE_URL=http://127.0.0.1:3000 \
+            -e TRAINING_RUN_ID="$TRAINING_RUN_ID" \
+            -e TRAINING_LOG_PATH=/runner/training.log \
+            -e TRAINING_STATUS_PATH=/runner/status.json \
+            -e TRAINING_CONFIG_PATH=/runner/resolved-training-config.json \
+            -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs \
+            -e MINIMUM_SOURCE_MATCH_COUNT=25000 \
+            -e DIAGNOSTIC_POLICY_TRAINING_QUANTILE_PERCENT=5 \
+            -e DIAGNOSTIC_MAX_ROWS=10000 \
+            -e PIPELINE_POLL_INTERVAL_MS=15000 \
+            -e PIPELINE_TIMEOUT_MS=172800000 \
+            "$TRAINING_CONTAINER" \
+            node /runner/run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs
+
+          for attempt in $(seq 1 40); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ]; then
+              state="$(jq -r '.state // empty' "$TRAINING_RUN_DIR/status.json")"
+              schema="$(jq -r '.schemaVersion // empty' "$TRAINING_RUN_DIR/status.json")"
+              if [ "$state" = 'RUNNING' ] && [ "$schema" = '3' ] && sudo docker exec "$TRAINING_CONTAINER" sh -lc "pgrep -f 'run-recommendation-v8-diagnostic-recovery-supervisor-v2.mjs' >/dev/null"; then
+                cat "$TRAINING_RUN_DIR/status.json"
+                echo 'Detached diagnostic-only supervisor is running.'
+                exit 0
+              fi
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 "$TRAINING_CONTAINER"
+          tail -n 200 "$TRAINING_RUN_DIR/training.log" || true
+          echo 'Diagnostic-only supervisor did not start.' >&2
+          exit 1
+
+      - name: Print monitoring commands
+        shell: bash
+        run: |
+          echo "Follow training: sudo tail -f $TRAINING_RUN_ROOT/current/training.log"
+          echo "Read status: sudo cat $TRAINING_RUN_ROOT/current/status.json | jq"
+          echo 'Candidate snapshot: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status | jq'
+          echo 'Historical replay: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq'
+          echo 'Dataset V6: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status | jq'
+          echo 'Behavioral V5: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status | jq'
+          echo 'Value V8 diagnostic: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status | jq'
