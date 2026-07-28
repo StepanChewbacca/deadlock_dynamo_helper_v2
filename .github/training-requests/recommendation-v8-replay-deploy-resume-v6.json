@@ -1,7 +1,7 @@
 {
-  "state": "REQUESTED",
-  "requestedAt": "2026-07-28T19:57:00Z",
-  "reason": "The bounded-memory Historical Replay fix is already committed and tested. Build the current branch, replace only the isolated training API, preserve Dataset V3 and the completed candidate snapshot, and resume the diagnostic pipeline.",
+  "state": "SUPERSEDED",
+  "supersededAt": "2026-07-28T20:01:00Z",
+  "reason": "Superseded by Recommendation V8 Replay Streaming Deploy, which verifies preserved artifacts inside the container and avoids direct Docker volume permission failures.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
