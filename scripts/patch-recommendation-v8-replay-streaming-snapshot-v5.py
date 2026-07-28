@@ -1,224 +1,88 @@
 from pathlib import Path
 
-path = Path('apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts')
-text = path.read_text()
+replay_path = Path(
+    'apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts'
+)
+replay = replay_path.read_text()
 
-old = '''    const artifactRaw = await readFile(path, 'utf8');
-    const artifactSha256 = createHash('sha256')
-      .update(artifactRaw)
-      .digest('hex');
-    if (artifactSha256 !== requiredSha(entry.artifactSha256, 'artifactSha256')) {
-      throw new Error(
-        `Candidate generator artifact ${entry.fileName} SHA-256 mismatch.`,
-      );
-    }
-    const artifact = JSON.parse(
-      artifactRaw,
-    ) as RecommendationCandidateGeneratorSnapshotArtifact;
-'''
-new = '''    const artifactSha256 = await hashFile(path);
-    if (artifactSha256 !== requiredSha(entry.artifactSha256, 'artifactSha256')) {
-      throw new Error(
-        `Candidate generator artifact ${entry.fileName} SHA-256 mismatch.`,
-      );
-    }
-    const artifact = await readLargeSnapshotArtifact(path);
-'''
-if text.count(old) != 1:
-    raise SystemExit(f'Expected one snapshot loader replacement, found {text.count(old)}')
-text = text.replace(old, new, 1)
+import_old = '''import {
+  generateRecommendationHistoricalCandidatesFromPreparedPolicy,'''
+import_new = '''import {
+  candidateGeneratorCatalogPayload,
+  generateRecommendationHistoricalCandidatesFromPreparedPolicy,'''
+if import_new not in replay:
+    if replay.count(import_old) != 1:
+        raise SystemExit(
+            f'Expected one candidate snapshot import anchor, found {replay.count(import_old)}'
+        )
+    replay = replay.replace(import_old, import_new, 1)
 
-anchor = '''async function partitionSource(input: {
-'''
-helper = r'''async function readLargeSnapshotArtifact(
-  path: string,
-): Promise<RecommendationCandidateGeneratorSnapshotArtifact> {
-  const properties: Record<string, unknown> = {};
-  const policies: unknown[] = [];
-  let mode: 'KEY' | 'COLON' | 'VALUE' | 'POLICIES' | 'DONE' = 'KEY';
-  let key = '';
-  let token = '';
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let topLevelStarted = false;
-  let policiesArrayStarted = false;
+hash_old = '''  const actualCatalogSha256 = sha256StableJson({
+    version: metadata.catalog.version,
+    items: metadata.catalog.items,
+  });'''
+hash_new = '''  const actualCatalogSha256 = sha256StableJson(
+    candidateGeneratorCatalogPayload({
+      ...metadata,
+      policies: [],
+    }),
+  );'''
+if hash_new not in replay:
+    if replay.count(hash_old) != 1:
+        raise SystemExit(
+            f'Expected one raw catalog hash block, found {replay.count(hash_old)}'
+        )
+    replay = replay.replace(hash_old, hash_new, 1)
 
-  const finishValue = (): void => {
-    if (!key || !token.trim()) {
-      return;
-    }
-    properties[key] = JSON.parse(token) as unknown;
-    key = '';
-    token = '';
-    depth = 0;
-    inString = false;
-    escaped = false;
-    mode = 'KEY';
+replay_path.write_text(replay)
+
+test_path = Path(
+    'apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts'
+)
+test = test_path.read_text()
+helper_old = '''function catalogItem(itemId: number): RecommendationHistoricalCatalogItem {
+  return {
+    itemId,
+    name: `Item ${itemId}`,
+    cost: 1_250,
+    tier: 2,
+    slotType: 'WEAPON',
+    itemType: 'UPGRADE',
+    isActiveItem: false,
+    activationType: 'PASSIVE',
+    tags: ['DAMAGE'],
+    componentItemIds: [],
   };
-
-  const finishPolicy = (): void => {
-    if (!token.trim()) {
-      return;
-    }
-    policies.push(JSON.parse(token) as unknown);
-    token = '';
-    depth = 0;
-    inString = false;
-    escaped = false;
+}'''
+helper_new = '''function catalogItem(itemId: number): RecommendationHistoricalCatalogItem {
+  if (itemId === 1002) {
+    return {
+      itemId,
+      cost: 1_250,
+      tier: 2,
+      slotType: 'WEAPON',
+      tags: [],
+      componentItemIds: [],
+    };
+  }
+  return {
+    itemId,
+    name: `Item ${itemId}`,
+    cost: 1_250,
+    tier: 2,
+    slotType: 'WEAPON',
+    itemType: 'UPGRADE',
+    isActiveItem: false,
+    activationType: 'PASSIVE',
+    tags: ['DAMAGE'],
+    componentItemIds: [],
   };
+}'''
+if helper_new not in test:
+    if test.count(helper_old) != 1:
+        raise SystemExit(
+            f'Expected one catalog test helper, found {test.count(helper_old)}'
+        )
+    test = test.replace(helper_old, helper_new, 1)
 
-  for await (const chunk of createReadStream(path, {
-    encoding: 'utf8',
-    highWaterMark: 1024 * 1024,
-  })) {
-    for (const character of chunk as string) {
-      if (mode === 'DONE') {
-        continue;
-      }
-      if (!topLevelStarted) {
-        if (character === '{') {
-          topLevelStarted = true;
-        }
-        continue;
-      }
-      if (mode === 'KEY') {
-        if (/\s|,/.test(character)) {
-          continue;
-        }
-        if (character === '}') {
-          mode = 'DONE';
-          continue;
-        }
-        if (character !== '"') {
-          throw new Error(`Invalid snapshot JSON key in ${path}.`);
-        }
-        token = '"';
-        mode = 'COLON';
-        inString = true;
-        continue;
-      }
-      if (mode === 'COLON') {
-        if (inString) {
-          token += character;
-          if (escaped) {
-            escaped = false;
-          } else if (character === '\\') {
-            escaped = true;
-          } else if (character === '"') {
-            inString = false;
-            key = JSON.parse(token) as string;
-            token = '';
-          }
-          continue;
-        }
-        if (/\s/.test(character)) {
-          continue;
-        }
-        if (character !== ':') {
-          throw new Error(`Invalid snapshot JSON separator in ${path}.`);
-        }
-        mode = key === 'policies' ? 'POLICIES' : 'VALUE';
-        continue;
-      }
-      if (mode === 'POLICIES') {
-        if (!policiesArrayStarted) {
-          if (/\s/.test(character)) {
-            continue;
-          }
-          if (character !== '[') {
-            throw new Error(`Snapshot policies must be an array in ${path}.`);
-          }
-          policiesArrayStarted = true;
-          continue;
-        }
-        if (!token && /\s|,/.test(character)) {
-          continue;
-        }
-        if (!token && character === ']') {
-          properties.policies = policies;
-          key = '';
-          policiesArrayStarted = false;
-          mode = 'KEY';
-          continue;
-        }
-        token += character;
-        if (inString) {
-          if (escaped) {
-            escaped = false;
-          } else if (character === '\\') {
-            escaped = true;
-          } else if (character === '"') {
-            inString = false;
-          }
-          continue;
-        }
-        if (character === '"') {
-          inString = true;
-          continue;
-        }
-        if (character === '{' || character === '[') {
-          depth += 1;
-        } else if (character === '}' || character === ']') {
-          depth -= 1;
-        }
-        if (depth === 0 && character === '}') {
-          finishPolicy();
-        }
-        continue;
-      }
-      if (mode === 'VALUE') {
-        if (!token && /\s/.test(character)) {
-          continue;
-        }
-        if (!token && (character === ',' || character === '}')) {
-          throw new Error(`Snapshot property ${key} has no value in ${path}.`);
-        }
-        token += character;
-        if (inString) {
-          if (escaped) {
-            escaped = false;
-          } else if (character === '\\') {
-            escaped = true;
-          } else if (character === '"') {
-            inString = false;
-          }
-          continue;
-        }
-        if (character === '"') {
-          inString = true;
-          continue;
-        }
-        if (character === '{' || character === '[') {
-          depth += 1;
-          continue;
-        }
-        if (character === '}' || character === ']') {
-          if (depth > 0) {
-            depth -= 1;
-            continue;
-          }
-        }
-        if (depth === 0 && character === ',') {
-          token = token.slice(0, -1);
-          finishValue();
-        } else if (depth === 0 && character === '}') {
-          token = token.slice(0, -1);
-          finishValue();
-          mode = 'DONE';
-        }
-      }
-    }
-  }
-
-  if (mode !== 'DONE') {
-    throw new Error(`Snapshot JSON ended unexpectedly in ${path}.`);
-  }
-  return properties as unknown as RecommendationCandidateGeneratorSnapshotArtifact;
-}
-
-'''
-if text.count(anchor) != 1:
-    raise SystemExit(f'Expected one helper anchor, found {text.count(anchor)}')
-text = text.replace(anchor, helper + anchor, 1)
-path.write_text(text)
+test_path.write_text(test)
