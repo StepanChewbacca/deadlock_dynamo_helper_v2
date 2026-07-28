@@ -249,7 +249,9 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
     };
   }
 
-  activateKillSwitch(reason = 'MANUAL_KILL_SWITCH'): RecommendationValueV8PassiveShadowStatus {
+  activateKillSwitch(
+    reason = 'MANUAL_KILL_SWITCH',
+  ): RecommendationValueV8PassiveShadowStatus {
     this.killSwitchActive = true;
     this.state = 'KILLED';
     this.lastErrorAt = new Date().toISOString();
@@ -299,7 +301,9 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
       requiredJson<RecommendationValueV8PassiveShadowAuthorizationManifest>(
         manifestPath,
       ),
-      requiredJson<RecommendationValueV8PassiveShadowAuthorizationAudit>(auditPath),
+      requiredJson<RecommendationValueV8PassiveShadowAuthorizationAudit>(
+        auditPath,
+      ),
       requiredJson<RecommendationValueV8RuntimeModelArtifact>(modelPath),
     ]);
     const modelSha256 = await hashFile(modelPath);
@@ -333,7 +337,9 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
       );
       const row = buildRuntimeRow(input, decision, catalog);
       if (row.candidates.length < 2) {
-        throw new Error('Shadow candidate set has fewer than two supported item actions.');
+        throw new Error(
+          'Shadow candidate set has fewer than two supported item actions.',
+        );
       }
       const prediction = predictRecommendationValueV8Runtime({
         row,
@@ -407,12 +413,16 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
       catalogArtifactSha256: input.catalog?.artifactSha256,
       stateFeatureVersion: 'RECOMMENDATION_VALUE_V8_FEATURES_1',
       baselineModelVersion:
-        input.decision?.modelVersion ?? input.decision?.recommendationModel ?? 'UNKNOWN',
+        input.decision?.modelVersion ??
+        input.decision?.recommendationModel ??
+        'UNKNOWN',
       baselineModelSha256: input.decision?.modelSha256,
       challengerModelVersion: 'RECOMMENDATION_VALUE_V8_FULL_EVALUATION_1',
       challengerModelSha256: requiredSha(this.modelSha256),
       policyVersion: input.decision?.candidateSetPolicy ?? 'UNKNOWN',
-      candidateActionKeys: input.baselineScores.map((candidate) => candidate.actionKey),
+      candidateActionKeys: input.baselineScores.map(
+        (candidate) => candidate.actionKey,
+      ),
       baselineScores: input.baselineScores,
       challengerScores: input.challengerScores,
       displayedActionKeys: [...input.input.displayedActionKeys],
@@ -458,6 +468,23 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
   private async persistEvent(
     event: RecommendationValueV8PassiveShadowEvent,
   ): Promise<void> {
+    const line = `${JSON.stringify(event)}\n`;
+    this.writeQueue = this.writeQueue
+      .then(async () => {
+        await appendFile(this.eventLogPath, line, 'utf8');
+        this.observePersistedEvent(event);
+      })
+      .catch((error: unknown) => {
+        this.writeErrorCount += 1;
+        this.recordServiceError(error);
+        this.state = 'DEGRADED';
+      });
+    await this.writeQueue;
+  }
+
+  private observePersistedEvent(
+    event: RecommendationValueV8PassiveShadowEvent,
+  ): void {
     observeRecommendationValueV8PassiveShadow(this.accumulator, {
       decisionId: event.decisionId,
       matchId: event.matchId,
@@ -473,15 +500,6 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
       catalogVersion: event.catalogVersion,
       modelSha256: event.challengerModelSha256,
     });
-    const line = `${JSON.stringify(event)}\n`;
-    this.writeQueue = this.writeQueue
-      .then(() => appendFile(this.eventLogPath, line, 'utf8'))
-      .catch((error: unknown) => {
-        this.writeErrorCount += 1;
-        this.recordServiceError(error);
-        this.state = 'DEGRADED';
-      });
-    await this.writeQueue;
   }
 
   private async replayPersistedEvents(): Promise<void> {
@@ -498,23 +516,10 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
         ) {
           continue;
         }
-        observeRecommendationValueV8PassiveShadow(this.accumulator, {
-          decisionId: event.decisionId,
-          matchId: event.matchId,
-          expectedCandidateCount: event.candidateActionKeys.length,
-          scoredCandidateCount: event.challengerScores.length,
-          missingFeature: event.missingFeature,
-          fallback: event.fallbackReason !== undefined,
-          criticalError: event.criticalError,
-          latencyMs: event.latencyMs,
-          heapUsedBytes: event.heapUsedBytes,
-          candidateSeparation: event.candidateSeparation,
-          changedTop1: event.changedTop1,
-          catalogVersion: event.catalogVersion,
-          modelSha256: event.challengerModelSha256,
-        });
+        this.observePersistedEvent(event);
         if (
-          this.accumulator.latencySamplesMs.length > MAX_REPLAYED_LATENCY_SAMPLES
+          this.accumulator.latencySamplesMs.length >
+          MAX_REPLAYED_LATENCY_SAMPLES
         ) {
           this.accumulator.latencySamplesMs.length =
             MAX_REPLAYED_LATENCY_SAMPLES;
@@ -555,8 +560,9 @@ export class RecommendationValueV8PassiveShadowService implements OnModuleInit {
     const catalogVersionId = getCatalogContentVersionId(catalog);
     const candidateItemIds = candidates
       .map((candidate) => candidate.itemId)
-      .filter((itemId): itemId is number =>
-        Number.isSafeInteger(itemId) && Number(itemId) > 0,
+      .filter(
+        (itemId): itemId is number =>
+          Number.isSafeInteger(itemId) && Number(itemId) > 0,
       );
     const inventoryItemIds = localPlayer.items
       .map((item) => Number(item.id))
@@ -621,15 +627,25 @@ function buildRuntimeRow(
   const state: RecommendationDatasetV6StateFeatures = {
     heroId: Number(input.localPlayer.heroId),
     team: input.localPlayer.teamId ?? 0,
-    phase: getHeroBuildEvaluationPhase(normalizeGameTime(input.state.gameTimeSec)),
+    phase: getHeroBuildEvaluationPhase(
+      normalizeGameTime(input.state.gameTimeSec),
+    ),
     gameTimeS: normalizeGameTime(input.state.gameTimeSec),
     inventoryStateKey: createInventoryStateKeyFromItemIds(itemIds),
     inventoryItemCounts: [...inventoryCounts.entries()]
       .map(([itemId, count]) => ({ itemId, count }))
       .sort((left, right) => left.itemId - right.itemId),
     previousActionKeys: [...input.previousActionKeys],
-    alliedHeroIds: heroIdsForTeam(input.state, input.localPlayer.teamId, true),
-    enemyHeroIds: heroIdsForTeam(input.state, input.localPlayer.teamId, false),
+    alliedHeroIds: heroIdsForTeam(
+      input.state,
+      input.localPlayer.teamId,
+      true,
+    ),
+    enemyHeroIds: heroIdsForTeam(
+      input.state,
+      input.localPlayer.teamId,
+      false,
+    ),
     inventoryTagCounts,
     timelineJoined: true,
     kills: input.localPlayer.kills,
@@ -641,7 +657,10 @@ function buildRuntimeRow(
     maxHealth: input.localPlayer.maxHealth,
     level: input.localPlayer.level,
   };
-  const uniqueCandidates = new Map<string, RecommendationTelemetryCandidateAction>();
+  const uniqueCandidates = new Map<
+    string,
+    RecommendationTelemetryCandidateAction
+  >();
   for (const candidate of decision.candidateActions) {
     if (
       !uniqueCandidates.has(candidate.actionKey) &&
@@ -710,7 +729,8 @@ function buildCandidate(input: {
     ),
     hasAnyOwnedComponent: ownedComponentCount > 0,
     hasCompleteRecipeComponents:
-      requiredComponentCount > 0 && ownedComponentCount >= requiredComponentCount,
+      requiredComponentCount > 0 &&
+      ownedComponentCount >= requiredComponentCount,
     alreadyOwnedCount: input.inventoryCounts.get(itemId) ?? 0,
     sameSlotOwnedItemCount: metadata
       ? countSameSlotItems(
@@ -728,7 +748,9 @@ function buildCandidate(input: {
     ).length,
     currentNetWorth,
     costToNetWorthRatio:
-      cost !== undefined && currentNetWorth !== undefined && currentNetWorth > 0
+      cost !== undefined &&
+      currentNetWorth !== undefined &&
+      currentNetWorth > 0
         ? cost / currentNetWorth
         : undefined,
   };
@@ -991,7 +1013,9 @@ function ratio(numerator: number, denominator: number): number {
 function cloneScheduleInput(
   input: RecommendationValueV8PassiveShadowScheduleInput,
 ): RecommendationValueV8PassiveShadowScheduleInput {
-  return JSON.parse(JSON.stringify(input)) as RecommendationValueV8PassiveShadowScheduleInput;
+  return JSON.parse(
+    JSON.stringify(input),
+  ) as RecommendationValueV8PassiveShadowScheduleInput;
 }
 
 function delay(milliseconds: number): Promise<void> {
