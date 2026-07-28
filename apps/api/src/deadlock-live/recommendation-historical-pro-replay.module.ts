@@ -7,6 +7,8 @@ import { RecommendationCandidateGeneratorSnapshotExportController } from './reco
 import { RecommendationCandidateGeneratorSnapshotExportService } from './recommendation-candidate-generator-snapshot-export.service';
 import { RecommendationHistoricalProReplayArtifactService } from './recommendation-historical-pro-replay-artifact.service';
 import { RecommendationHistoricalProReplayController } from './recommendation-historical-pro-replay.controller';
+import { RecommendationProDecisionDatasetV6ArtifactService } from './recommendation-pro-decision-dataset-v6-artifact.service';
+import { RecommendationProDecisionDatasetV6Controller } from './recommendation-pro-decision-dataset-v6.controller';
 
 @Module({
   imports: [
@@ -19,14 +21,17 @@ import { RecommendationHistoricalProReplayController } from './recommendation-hi
   controllers: [
     RecommendationHistoricalProReplayController,
     RecommendationCandidateGeneratorSnapshotExportController,
+    RecommendationProDecisionDatasetV6Controller,
   ],
   providers: [
     RecommendationHistoricalProReplayArtifactService,
     RecommendationCandidateGeneratorSnapshotExportService,
+    RecommendationProDecisionDatasetV6ArtifactService,
   ],
   exports: [
     RecommendationHistoricalProReplayArtifactService,
     RecommendationCandidateGeneratorSnapshotExportService,
+    RecommendationProDecisionDatasetV6ArtifactService,
   ],
 })
 export class RecommendationHistoricalProReplayModule {}
