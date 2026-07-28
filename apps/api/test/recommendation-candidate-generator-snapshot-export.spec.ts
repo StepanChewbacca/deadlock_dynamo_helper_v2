@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Repository } from 'typeorm';
+import type { ObjectLiteral, Repository } from 'typeorm';
 import type { HeroBuildDecisionDatasetV3Row } from '../src/deadlock-live/hero-build-decision-dataset-v3.service';
 import { ItemCatalogItem } from '../src/deadlock-live/entities/item-catalog-item.entity';
 import { ItemCatalogRecipe } from '../src/deadlock-live/entities/item-catalog-recipe.entity';
@@ -239,7 +239,9 @@ function catalogRecipes(): ItemCatalogRecipe[] {
   ];
 }
 
-function repository<T>(methods: Partial<Repository<T>>): Repository<T> {
+function repository<T extends ObjectLiteral>(
+  methods: Partial<Repository<T>>,
+): Repository<T> {
   return methods as Repository<T>;
 }
 
