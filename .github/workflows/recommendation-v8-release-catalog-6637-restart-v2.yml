@@ -1,0 +1,272 @@
+name: Recommendation V8 Release Catalog 6637 Restart V2
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-release-catalog-6637-restart-v2.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-vps-training
+  cancel-in-progress: false
+
+jobs:
+  request-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-release-catalog-6637-restart-v2.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'RELEASE_CATALOG_6637_RESTART_V2'
+          test "$(jq -r '.clientVersion' "$request")" = '6637'
+          test "$(jq -r '.sourceDatasetSha256' "$request")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+  restart:
+    needs: request-gate
+    if: needs.request-gate.outputs.run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 120
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify historical catalog lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres='aboba-telegramovich-postgres-1'
+          row="$(sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion", c."payloadHash", c."importedAt", r."validFrom", r."validTo", r.status, r.source FROM item_catalog_versions c JOIN game_rulesets r ON r.id = c."rulesetId" WHERE c."clientVersion" = 6637;')"
+          test -n "$row"
+          catalog_id="$(echo "$row" | cut -d'|' -f1)"
+          client_version="$(echo "$row" | cut -d'|' -f2)"
+          payload_hash="$(echo "$row" | cut -d'|' -f3)"
+          imported_at="$(echo "$row" | cut -d'|' -f4)"
+          valid_from="$(echo "$row" | cut -d'|' -f5)"
+          valid_to="$(echo "$row" | cut -d'|' -f6)"
+          status="$(echo "$row" | cut -d'|' -f7)"
+          source="$(echo "$row" | cut -d'|' -f8)"
+          test "$client_version" = '6637'
+          test "${#payload_hash}" = '64'
+          test "$status" = 'active'
+          test -n "$valid_from"
+          test -n "$valid_to"
+          sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -A -t -c "SELECT CASE WHEN TIMESTAMPTZ '2026-07-22T09:32:54Z' >= TIMESTAMPTZ '$valid_from' AND TIMESTAMPTZ '2026-07-22T09:32:54Z' < TIMESTAMPTZ '$valid_to' THEN 'true' ELSE 'false' END;" | tr -d '[:space:]' | grep -Fx true
+          echo "CATALOG_VERSION_ID=$catalog_id" >> "$GITHUB_ENV"
+          echo "CATALOG_PAYLOAD_HASH=$payload_hash" >> "$GITHUB_ENV"
+          echo "CATALOG_IMPORTED_AT=$imported_at" >> "$GITHUB_ENV"
+          echo "CATALOG_VALID_FROM=$valid_from" >> "$GITHUB_ENV"
+          echo "CATALOG_VALID_TO=$valid_to" >> "$GITHUB_ENV"
+          echo "CATALOG_RULESET_SOURCE=$source" >> "$GITHUB_ENV"
+
+      - name: Resolve storage and create release config
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          old_run_dir="$(readlink -f "$run_root/current")"
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          test -s "$old_run_dir/resolved-training-config.json"
+          sudo test -s "$storage/build-decision-dataset-v3/manifest.json"
+          source_sha="$(sudo cat "$storage/build-decision-dataset-v3/manifest.json" | jq -r '.artifact.sha256')"
+          source_rows="$(sudo cat "$storage/build-decision-dataset-v3/manifest.json" | jq -r '.artifact.rowCount')"
+          test "$source_sha" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$source_rows" = '6188423'
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-release-c6637-v2"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          cp "$old_run_dir/resolved-training-config.json" "$run_dir/resolved-training-config.json"
+          cp scripts/run-recommendation-v8-replay-audit-recovery-v2.mjs "$run_dir/"
+          export RUN_DIR="$run_dir"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ['RUN_DIR']) / 'resolved-training-config.json'
+          value = json.loads(path.read_text())
+          source_sha = value['source']['sha256']
+          catalog_id = int(os.environ['CATALOG_VERSION_ID'])
+          value['previousNonReleaseSnapshotId'] = value.get('snapshotId')
+          value['snapshotId'] = f"v8-20260722-c{catalog_id}-{source_sha[:12]}-release"
+          value['catalog'] = {
+              'id': catalog_id,
+              'clientVersion': '6637',
+              'payloadHash': os.environ['CATALOG_PAYLOAD_HASH'],
+              'importedAt': os.environ['CATALOG_IMPORTED_AT'],
+              'rulesetValidFrom': os.environ['CATALOG_VALID_FROM'],
+              'rulesetValidTo': os.environ['CATALOG_VALID_TO'],
+              'rulesetSource': os.environ['CATALOG_RULESET_SOURCE'],
+              'selectionRule': 'RULESET_WINDOW_CONTAINS_POLICY_TRAINING_WINDOW_END',
+              'temporalValidationPassed': True,
+              'temporalCatalogLeakageRisk': False,
+              'releaseEligible': True,
+              'evidence': {
+                  'endpoint': '/v1/assets/steam-info/all',
+                  'sourceRevision': 10836828,
+                  'versionDatetime': '2026-07-20T13:25:04',
+                  'nextClientVersion': 6638,
+                  'nextVersionDatetime': '2026-07-23T15:12:47',
+                  'policyTrainingWindowEnd': value['chronology']['trainingWindowEnd'],
+                  'minimumBoundaryMarginHours': 24,
+                  'timestampTimezoneBasis': 'STEAM_INFO_NAIVE_INTERPRETED_AS_UTC',
+              },
+          }
+          value['releaseRecovery'] = {
+              'version': 'RECOMMENDATION_V8_RELEASE_CATALOG_6637_RESTART_V2',
+              'startedFromCommit': os.environ['GITHUB_SHA'],
+              'productionRankingChanged': False,
+              'passiveShadowActivated': False,
+              'randomizedCanaryAuthorized': False,
+          }
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          jq -e '.catalog.clientVersion == "6637" and .catalog.releaseEligible == true and .catalog.temporalValidationPassed == true and .catalog.temporalCatalogLeakageRisk == false' "$run_dir/resolved-training-config.json" >/dev/null
+          echo "TRAINING_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Archive current non-release attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          archive="$storage/recommendation-v8-failed-artifacts/nonrelease-c6640-${GITHUB_RUN_ID}"
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          sudo mkdir -p "$archive"
+          partial="$storage/recommendation-candidate-generator-snapshots/v8-20260722-c1-ff04970fda51-support-v2.json.partial"
+          if sudo test -e "$partial"; then
+            sudo mv "$partial" "$archive/"
+          fi
+          for directory in recommendation-historical-pro-replay-v1 recommendation-pro-decision-dataset-v6-1 recommendation-behavioral-v5-1 recommendation-value-v8-diagnostic-1 recommendation-v6-short-only-dataset-v6-baseline-1 recommendation-value-v8-full-evaluation-1; do
+            source="$storage/$directory"
+            if sudo test -e "$source"; then
+              sudo mv "$source" "$archive/"
+            fi
+          done
+          sudo test -s "$storage/build-decision-dataset-v3/dataset.ndjson"
+          sudo test -s "$storage/recommendation-candidate-generator-snapshots/registry.json"
+          {
+            echo "archive=$archive"
+            echo "catalogClientVersion=6640"
+            echo "releaseEligible=false"
+            echo "stoppedOnlyIsolatedContainer=true"
+            sudo du -sh "$archive" 2>/dev/null || true
+          } | tee "$TRAINING_RUN_DIR/nonrelease-archive.txt"
+
+      - name: Build release-eligible isolated image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}-release-c6637-v2"
+          sudo docker build -t "$image" .
+          echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Start side-effect-disabled isolated API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          container='deadlock-recommendation-v8-training'
+          sudo docker run -d --name "$container" --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+              sudo docker logs --tail=300 "$container"
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$container"
+          exit 1
+
+      - name: Verify release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_manifest="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/manifest)"
+          registry="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/registry)"
+          test "$(echo "$source_manifest" | jq -r '.artifact.sha256')" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(echo "$source_manifest" | jq -r '.artifact.rowCount')" = '6188423'
+          test "$(echo "$registry" | jq -r '[.snapshots[] | select(.snapshotId == "v8-20260722-c1-ff04970fda51")] | length')" = '1'
+          test "$(jq -r '.catalog.clientVersion' "$TRAINING_RUN_DIR/resolved-training-config.json")" = '6637'
+          test "$(jq -r '.catalog.releaseEligible' "$TRAINING_RUN_DIR/resolved-training-config.json")" = 'true'
+
+      - name: Start detached gated release supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$TRAINING_RUN_DIR/training.log"
+          ln -sfn "$TRAINING_RUN_DIR" "$TRAINING_RUN_ROOT/current"
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e REPLAY_PARTITION_COUNT=64 -e REPLAY_SNAPSHOT_STALENESS_S=300 -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=604800000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-replay-audit-recovery-v2.mjs
+          for attempt in $(seq 1 60); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-replay-audit-recovery-v2.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          tail -n 300 "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
+
+      - name: Consume request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('.github/training-requests/recommendation-v8-release-catalog-6637-restart-v2.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          value['catalogVersionId'] = int('${{ env.CATALOG_VERSION_ID }}')
+          value['catalogPayloadHash'] = '${{ env.CATALOG_PAYLOAD_HASH }}'
+          value['deployedCommit'] = '${{ github.sha }}'
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/training-requests/recommendation-v8-release-catalog-6637-restart-v2.json
+          git commit -m 'chore: consume release catalog 6637 restart request'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Upload release launch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-release-c6637-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.TRAINING_RUN_DIR }}/resolved-training-config.json
+            ${{ env.TRAINING_RUN_DIR }}/nonrelease-archive.txt
+            ${{ env.TRAINING_RUN_DIR }}/status.json
+            ${{ env.TRAINING_RUN_DIR }}/training.log
+          if-no-files-found: warn
+          retention-days: 30
