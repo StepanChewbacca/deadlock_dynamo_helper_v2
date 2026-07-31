@@ -1,5 +1,5 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "operation": "REPLAY_AUDIT_RECOVERY_V2",
   "requestedAt": "2026-07-31T13:24:00Z",
   "retry": 2,
@@ -18,5 +18,7 @@
   "archiveAlreadyPartiallyCompleted": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T13:29:02.103928Z",
+  "supersededBy": "REPLAY_RECOVERY_RESUME_V3"
 }
