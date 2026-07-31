@@ -94,6 +94,26 @@ async function main() {
     return;
   }
 
+  if (resolvedConfig.catalog?.releaseEligible !== true) {
+    await writeStatus(
+      'DIAGNOSTIC_COMPLETE',
+      'NON_RELEASE_CATALOG_GATE',
+      {
+        resolvedConfig,
+        diagnosticStatus,
+        fullTrainingStarted: false,
+        releaseEligible: false,
+        releaseBlockReason:
+          'Historical catalog lineage is not temporally validated.',
+      },
+    );
+    await log(
+      'Diagnostic passed, but full training was blocked because historical ' +
+        'catalog lineage is not release eligible.',
+    );
+    return;
+  }
+
   await writeStatus('RUNNING', 'FULL_OFFLINE_PIPELINE', {
     resolvedConfig,
     diagnosticStatus,
