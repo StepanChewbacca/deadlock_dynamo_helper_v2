@@ -1,7 +1,8 @@
 {
   "state": "REQUESTED",
   "operation": "APPLY_ISOLATED_RUNTIME_GUARDS_V1",
-  "requestedAt": "2026-07-31T13:43:00Z",
+  "requestedAt": "2026-07-31T13:49:00Z",
+  "retry": 2,
   "guards": [
     "DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED",
     "DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED",
