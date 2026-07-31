@@ -1,0 +1,215 @@
+name: Recommendation V8 Snapshot OOM Restart V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-snapshot-oom-restart-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-snapshot-oom-restart-v1
+  cancel-in-progress: false
+
+jobs:
+  request-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-snapshot-oom-restart-v1.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'RESTART_RECOMMENDATION_V8_AFTER_SNAPSHOT_OOM_V1'
+          test "$(jq -r '.sourceDatasetSha256' "$request")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(jq -r '.catalogClientVersion' "$request")" = '6637'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+  restart:
+    needs: request-gate
+    if: needs.request-gate.outputs.run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 120
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify validated memory fix and immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-snapshot-oom-restart-v1.json'
+          validated="$(jq -r '.validatedSourceCommit' "$request")"
+          git merge-base --is-ancestor "$validated" HEAD
+          grep -Fq 'createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies' apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot.ts
+          grep -Fq 'accumulator.release();' apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot-export.service.ts
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          sudo test -s "$storage/build-decision-dataset-v3/dataset.ndjson"
+          test "$(sudo jq -r '.artifact.sha256' "$storage/build-decision-dataset-v3/manifest.json")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(sudo jq -r '.artifact.rowCount' "$storage/build-decision-dataset-v3/manifest.json")" = '6188423'
+          row="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion", c."payloadHash", r."validFrom", r."validTo", r.status FROM item_catalog_versions c JOIN game_rulesets r ON r.id = c."rulesetId" WHERE c."clientVersion" = 6637;')"
+          test -n "$row"
+          test "$(echo "$row" | cut -d'|' -f2)" = '6637'
+          test "$(echo "$row" | cut -d'|' -f6)" = 'active'
+          echo "CATALOG_VERSION_ID=$(echo "$row" | cut -d'|' -f1)" >> "$GITHUB_ENV"
+          echo "CATALOG_PAYLOAD_HASH=$(echo "$row" | cut -d'|' -f3)" >> "$GITHUB_ENV"
+          echo "CATALOG_VALID_FROM=$(echo "$row" | cut -d'|' -f4)" >> "$GITHUB_ENV"
+          echo "CATALOG_VALID_TO=$(echo "$row" | cut -d'|' -f5)" >> "$GITHUB_ENV"
+
+      - name: Create OOM recovery run
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          old_run_dir="$(readlink -f "$run_root/current")"
+          test -s "$old_run_dir/resolved-training-config.json"
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-snapshot-oom-recovery-v1"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          cp "$old_run_dir/resolved-training-config.json" "$run_dir/resolved-training-config.json"
+          cp scripts/run-recommendation-v8-replay-audit-recovery-v2.mjs "$run_dir/"
+          export RUN_DIR="$run_dir"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUN_DIR']) / 'resolved-training-config.json'
+          value = json.loads(path.read_text())
+          value['previousSnapshotId'] = value.get('snapshotId')
+          value['snapshotId'] = 'v8-20260722-c2-ff04970fda51-release-memory-v3'
+          value['catalog']['id'] = int(os.environ['CATALOG_VERSION_ID'])
+          value['catalog']['clientVersion'] = '6637'
+          value['catalog']['payloadHash'] = os.environ['CATALOG_PAYLOAD_HASH']
+          value['catalog']['rulesetValidFrom'] = os.environ['CATALOG_VALID_FROM']
+          value['catalog']['rulesetValidTo'] = os.environ['CATALOG_VALID_TO']
+          value['catalog']['releaseEligible'] = True
+          value['catalog']['temporalValidationPassed'] = True
+          value['catalog']['temporalCatalogLeakageRisk'] = False
+          value['memoryRecovery'] = {
+              'version': 'RECOMMENDATION_V8_SNAPSHOT_OOM_RECOVERY_V1',
+              'observedExitCode': 137,
+              'candidateAccumulatorReleasedBeforeSerialization': True,
+              'normalizedPolicyGraphReusedWithoutClone': True,
+              'nodeOldSpaceMiB': 6144,
+              'containerMemoryMiB': 8192,
+              'productionRankingChanged': False,
+              'passiveShadowActivated': False,
+              'randomizedCanaryAuthorized': False,
+          }
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          jq -e '.catalog.releaseEligible == true and .memoryRecovery.observedExitCode == 137' "$run_dir/resolved-training-config.json" >/dev/null
+          echo "TRAINING_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Archive failed OOM attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          archive="$storage/recommendation-v8-failed-artifacts/snapshot-oom-137-${GITHUB_RUN_ID}"
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          sudo mkdir -p "$archive"
+          partial="$storage/recommendation-candidate-generator-snapshots/v8-20260722-c2-ff04970fda51-release-support-v2.json.partial"
+          if sudo test -e "$partial"; then
+            sudo mv "$partial" "$archive/"
+          fi
+          for directory in recommendation-historical-pro-replay-v1 recommendation-pro-decision-dataset-v6-1 recommendation-behavioral-v5-1 recommendation-value-v8-diagnostic-1 recommendation-v6-short-only-dataset-v6-baseline-1 recommendation-value-v8-full-evaluation-1; do
+            source="$storage/$directory"
+            if sudo test -e "$source"; then
+              sudo mv "$source" "$archive/"
+            fi
+          done
+          sudo test -s "$storage/build-decision-dataset-v3/dataset.ndjson"
+          sudo test -s "$storage/recommendation-candidate-generator-snapshots/registry.json"
+          sudo du -sh "$archive" | tee "$TRAINING_RUN_DIR/oom-archive-size.txt"
+
+      - name: Build fixed isolated image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}-snapshot-oom-v1"
+          sudo docker build -t "$image" .
+          echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Start bounded isolated API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          container='deadlock-recommendation-v8-training'
+          sudo docker run -d --name "$container" --restart=no --memory=8g --memory-swap=8g --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=6144 --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+              sudo docker logs --tail=300 "$container"
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$container"
+          exit 1
+
+      - name: Start gated supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$TRAINING_RUN_DIR/training.log"
+          ln -sfn "$TRAINING_RUN_DIR" "$TRAINING_RUN_ROOT/current"
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e REPLAY_PARTITION_COUNT=64 -e REPLAY_SNAPSHOT_STALENESS_S=300 -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=604800000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-replay-audit-recovery-v2.mjs
+          for attempt in $(seq 1 90); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-replay-audit-recovery-v2.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              sudo docker stats --no-stream deadlock-recommendation-v8-training
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          tail -n 300 "$TRAINING_RUN_DIR/training.log" || true
+          exit 1
+
+      - name: Consume request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('.github/training-requests/recommendation-v8-snapshot-oom-restart-v1.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          value['deployedCommit'] = '${{ github.sha }}'
+          value['trainingRunId'] = '${{ env.TRAINING_RUN_ID }}'
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/training-requests/recommendation-v8-snapshot-oom-restart-v1.json
+          git commit -m 'chore: consume Recommendation V8 snapshot OOM restart'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
