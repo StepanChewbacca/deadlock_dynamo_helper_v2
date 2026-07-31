@@ -46,7 +46,7 @@ jobs:
 
       - name: Apply source patch
         if: steps.request.outputs.apply == 'true'
-        run: python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2.py
+        run: python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2.py && python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2-followup.py
 
       - name: Setup Node.js
         if: steps.request.outputs.apply == 'true'
