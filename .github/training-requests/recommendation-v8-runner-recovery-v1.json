@@ -1,0 +1,11 @@
+{
+  "operation": "RECOVER_RECOMMENDATION_V8_SELF_HOSTED_RUNNER_V1",
+  "state": "REQUESTED",
+  "requestedAt": "2026-07-31T21:15:00Z",
+  "targetRunId": 30664768948,
+  "preserveWorkflow": "Recommendation V8 Snapshot OOM Restart V1",
+  "cancelOnlyStaleRecommendationV8SelfHostedRuns": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
