@@ -1,8 +1,8 @@
 {
   "operation": "INSPECT_RECOMMENDATION_V8_RECOVERY",
-  "requestedAt": "2026-07-31T14:42:00Z",
+  "requestedAt": "2026-07-31T17:22:00Z",
   "runId": "30638488726-1-release-c6637-v2",
-  "inspection": 6,
+  "inspection": 7,
   "includeHistoricalCatalogReadiness": true,
   "verifyIsolationGuards": true,
   "readOnly": true,
