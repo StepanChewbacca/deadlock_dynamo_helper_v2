@@ -24,6 +24,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
       - name: Validate request
         shell: bash
         run: |
@@ -43,13 +49,19 @@ jobs:
           git diff --check
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Build project
-        run: yarn build
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
 
       - name: Run targeted tests
-        run: yarn workspace api test --runInBand recommendation-candidate-generator-snapshot-memory.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-replay-audit-recovery-v2.spec.ts
+        run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-candidate-generator-snapshot-memory.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-replay-audit-recovery-v2.spec.ts
 
       - name: Commit validated source fix
         shell: bash
