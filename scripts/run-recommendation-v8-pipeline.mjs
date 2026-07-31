@@ -363,10 +363,33 @@ async function runFullValueV8({
 }
 
 async function runStage({ name, startPath, statusPath, body }) {
-  console.log(`${name}: starting.`);
-  await post(startPath, body);
   const deadline = Date.now() + config.pipelineTimeoutMs;
+  let status = await get(statusPath);
   let previousPhase;
+
+  if (status.state === 'COMPLETE') {
+    console.log(`${name}: already COMPLETE/${status.phase}.`);
+    return status;
+  }
+
+  if (status.state === 'RUNNING') {
+    console.log(`${name}: resuming ${status.state}/${status.phase}.`);
+  } else {
+    console.log(`${name}: starting.`);
+    try {
+      await post(startPath, body);
+    } catch (error) {
+      const afterStart = await get(statusPath);
+      if (!['RUNNING', 'COMPLETE'].includes(afterStart.state)) {
+        throw error;
+      }
+      status = afterStart;
+      console.warn(
+        `${name}: start request failed after the server accepted the stage; ` +
+          `continuing from ${status.state}/${status.phase}.`,
+      );
+    }
+  }
 
   while (Date.now() < deadline) {
     const status = await get(statusPath);

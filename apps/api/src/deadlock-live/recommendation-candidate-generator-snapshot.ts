@@ -63,6 +63,11 @@ export interface RecommendationPreparedHeroBuildPolicy {
     state: HeroBuildPolicyState;
     itemCounts: ReadonlyMap<number, number>;
   }>;
+  supportPolicy: HeroBuildPolicy;
+  supportParsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
 }
 
 export interface RecommendationCandidateGeneratorSnapshotRegistryEntry {
@@ -271,10 +276,13 @@ export function prepareRecommendationSerializedHeroBuildPolicy(
         itemCounts: ReadonlyMap<number, number>;
       } => item.itemCounts !== undefined,
     );
+  const support = buildHistoricalSupportPolicy(value);
   return {
     heroId: value.heroId,
     policy,
     parsedStates,
+    supportPolicy: support.policy,
+    supportParsedStates: support.parsedStates,
   };
 }
 
@@ -325,20 +333,161 @@ export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(inp
         [...item.componentItemIds],
       ]),
     );
+  const request = {
+    heroId: input.decision.heroId,
+    itemIds,
+    gameTimeS: input.decision.gameTimeS,
+    limit: input.generatorOptions.limit,
+  };
+  const recipeResolver = (parentItemId: number): readonly number[] =>
+    componentsByParent.get(parentItemId) ?? [];
   const response = recommendFromPolicy(
-    {
-      heroId: input.decision.heroId,
-      itemIds,
-      gameTimeS: input.decision.gameTimeS,
-      limit: input.generatorOptions.limit,
-    },
+    request,
     input.decision.inventoryBeforeStateKey,
     input.policy.policy,
     input.policy.parsedStates,
-    (parentItemId) => componentsByParent.get(parentItemId) ?? [],
+    recipeResolver,
     normalizeGeneratorOptions(input.generatorOptions),
   );
-  return candidateActionsFromRecommendationResponse(response);
+  const supportResponse = recommendFromPolicy(
+    request,
+    input.decision.inventoryBeforeStateKey,
+    input.policy.supportPolicy,
+    input.policy.supportParsedStates,
+    recipeResolver,
+    {
+      minExactObservations: 1,
+      maxBackoffDistance: 64,
+      maxBackoffStates: 1,
+      limit: input.generatorOptions.limit,
+    },
+  );
+  return mergeHistoricalCandidateActions(
+    candidateActionsFromRecommendationResponse(response),
+    candidateActionsFromRecommendationResponse(supportResponse),
+    input.generatorOptions.limit,
+  );
+}
+
+function mergeHistoricalCandidateActions(
+  primary: readonly RecommendationHistoricalCandidateInput[],
+  support: readonly RecommendationHistoricalCandidateInput[],
+  limit: number,
+): RecommendationHistoricalCandidateInput[] {
+  const unique = new Map<string, RecommendationHistoricalCandidateInput>();
+  for (const candidate of [...primary, ...support]) {
+    const actionKey = `${candidate.actionType}:${candidate.itemId}`;
+    if (unique.has(actionKey)) {
+      continue;
+    }
+    unique.set(actionKey, {
+      ...candidate,
+      actionKey,
+      rank: unique.size + 1,
+    });
+    if (unique.size >= limit) {
+      break;
+    }
+  }
+  return [...unique.values()];
+}
+
+function buildHistoricalSupportPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): {
+  policy: HeroBuildPolicy;
+  parsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
+} {
+  const aggregates = new Map<
+    string,
+    {
+      actionType: HeroBuildPolicyNextAction['actionType'];
+      itemId: number;
+      actionKey: string;
+      count: number;
+      totalGameTimeS: number;
+      afterStateCounts: Map<string, number>;
+    }
+  >();
+  let observationCount = 0;
+  let transitionCount = 0;
+
+  for (const state of value.states) {
+    observationCount += state.observationCount;
+    for (const action of state.nextActions) {
+      const key = `${action.actionType}:${action.itemId}`;
+      const aggregate = aggregates.get(key) ?? {
+        actionType: action.actionType,
+        itemId: action.itemId,
+        actionKey: key,
+        count: 0,
+        totalGameTimeS: 0,
+        afterStateCounts: new Map<string, number>(),
+      };
+      aggregate.count += action.count;
+      aggregate.totalGameTimeS += action.averageGameTimeS * action.count;
+      transitionCount += action.count;
+      for (const afterState of action.afterStates) {
+        aggregate.afterStateCounts.set(
+          afterState.afterStateKey,
+          (aggregate.afterStateCounts.get(afterState.afterStateKey) ?? 0) +
+            afterState.count,
+        );
+      }
+      aggregates.set(key, aggregate);
+    }
+  }
+
+  const nextActions = [...aggregates.values()]
+    .map((aggregate): HeroBuildPolicyNextAction => ({
+      actionType: aggregate.actionType,
+      itemId: aggregate.itemId,
+      actionKey: aggregate.actionKey,
+      count: aggregate.count,
+      probability:
+        transitionCount > 0 ? aggregate.count / transitionCount : 0,
+      averageGameTimeS:
+        aggregate.count > 0
+          ? aggregate.totalGameTimeS / aggregate.count
+          : 0,
+      afterStates: [...aggregate.afterStateCounts.entries()]
+        .map(([afterStateKey, count]) => ({
+          afterStateKey,
+          count,
+          probability:
+            aggregate.count > 0 ? count / aggregate.count : 0,
+        }))
+        .sort(
+          (left, right) =>
+            right.count - left.count ||
+            left.afterStateKey.localeCompare(right.afterStateKey),
+        ),
+    }))
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.actionKey.localeCompare(right.actionKey),
+    );
+  const state: HeroBuildPolicyState = {
+    heroId: value.heroId,
+    stateKey: 'EMPTY',
+    observationCount: Math.max(1, observationCount),
+    nextActionCount: nextActions.length,
+    nextActions,
+  };
+  return {
+    policy: {
+      heroId: value.heroId,
+      playerCount: value.playerCount,
+      stateCount: 1,
+      transitionCount,
+      statesByKey: new Map([[state.stateKey, state]]),
+    },
+    parsedStates: [{ state, itemCounts: new Map<number, number>() }],
+  };
 }
 
 export function createRecommendationCandidateGeneratorSnapshotArtifact(input: {

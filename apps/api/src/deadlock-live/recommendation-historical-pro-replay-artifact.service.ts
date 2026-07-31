@@ -43,7 +43,11 @@ import {
   type RecommendationHistoricalProReplayAudit,
   type RecommendationHistoricalProReplayThresholds,
 } from './recommendation-historical-pro-replay';
-import { buildRecommendationHistoricalShortHorizonOutcomes } from './recommendation-historical-pro-replay-outcomes';
+import {
+  buildRecommendationHistoricalShortHorizonOutcomes,
+  hasFreshRecommendationDecisionTimelineSnapshot,
+} from './recommendation-historical-pro-replay-outcomes';
+import { RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION } from './recommendation-historical-postgres-timeline-cache.service';
 import { RecommendationHistoricalProReplayAuditAccumulator } from './recommendation-historical-pro-replay-streaming-audit';
 import { sha256StableJson, updateStableJsonHash } from './stable-json';
 
@@ -142,8 +146,12 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     selectionRule: 'LATEST_TRAINING_WINDOW_END_STRICTLY_BEFORE_MATCH_START';
   };
   timelineSource: {
+    source: 'POSTGRESQL_RAW_MATCH_METADATA_CACHE';
+    cacheVersion: typeof RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION;
     directory: string;
     snapshotStalenessS: number;
+    decisionSnapshotSelection: 'LATEST_AT_OR_BEFORE_WITHIN_STALENESS';
+    horizonSnapshotSelection: 'NEAREST_AFTER_DECISION_WITHIN_STALENESS';
     requiredForOutput: true;
   };
   artifact: {
@@ -356,7 +364,11 @@ export class RecommendationHistoricalProReplayArtifactService
         snapshotStalenessS: options.snapshotStalenessS,
         maxRows: options.maxRows,
         thresholds: options.thresholds,
-        partitionStrategy: 'HERO_ID_HASH_V2',
+        partitionStrategy: 'MATCH_ID_HASH_V3',
+        candidateSupportStrategy: 'STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V2',
+        timelineJoinContract: 'DECISION_JOIN_SEPARATE_FROM_HORIZON_COMPLETENESS_V2',
+        timelineCacheVersion:
+          RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
       });
       let checkpoint = options.resume
         ? await readJson<BuildCheckpoint>(this.paths.checkpoint)
@@ -538,8 +550,15 @@ export class RecommendationHistoricalProReplayArtifactService
             'LATEST_TRAINING_WINDOW_END_STRICTLY_BEFORE_MATCH_START',
         },
         timelineSource: {
+          source: 'POSTGRESQL_RAW_MATCH_METADATA_CACHE',
+          cacheVersion:
+            RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
           directory: this.timelineDirectory,
           snapshotStalenessS: options.snapshotStalenessS,
+          decisionSnapshotSelection:
+            'LATEST_AT_OR_BEFORE_WITHIN_STALENESS',
+          horizonSnapshotSelection:
+            'NEAREST_AFTER_DECISION_WITHIN_STALENESS',
           requiredForOutput: true,
         },
         artifact: {
@@ -990,7 +1009,7 @@ async function partitionSource(input: {
       }
       const row = sourceRow(value, count + 1);
       const partition = partitionIndex(
-        String(row.heroId),
+        String(row.matchId),
         input.partitionCount,
       );
       let handle = handles.get(partition);
@@ -1103,6 +1122,12 @@ async function processPartition(input: {
           catalogItems,
         );
       }
+      const decisionTimelineJoined =
+        hasFreshRecommendationDecisionTimelineSnapshot({
+          decision: row,
+          snapshots: timeline.snapshots,
+          snapshotStalenessS: input.snapshotStalenessS,
+        });
       const outcomes =
         buildRecommendationHistoricalShortHorizonOutcomes({
           decision: row,
@@ -1112,6 +1137,7 @@ async function processPartition(input: {
         });
       const replayRow = createRecommendationHistoricalProReplayRow({
         decision: row,
+        decisionTimelineJoined,
         candidateActions: candidates,
         catalogItemsById: catalogItems,
         shortHorizonOutcomes: outcomes,
@@ -1393,7 +1419,7 @@ function normalizeOptions(
     ),
     snapshotStalenessS: boundedInteger(
       request.snapshotStalenessS,
-      120,
+      300,
       0,
       3_600,
       'snapshotStalenessS',

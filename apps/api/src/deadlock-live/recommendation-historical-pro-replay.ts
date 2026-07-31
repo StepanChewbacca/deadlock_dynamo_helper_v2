@@ -102,6 +102,9 @@ export interface RecommendationHistoricalProReplayRow {
   team: number;
   decisionGameTimeS: number;
   phase: HeroBuildDecisionDatasetV3Row['phase'];
+  timeline: {
+    decisionSnapshotJoined: boolean;
+  };
   state: {
     inventoryBeforeStateKey: string;
     previousActionKeys: string[];
@@ -156,6 +159,7 @@ export interface RecommendationHistoricalProReplayAudit {
 
 export interface CreateRecommendationHistoricalProReplayRowInput {
   decision: HeroBuildDecisionDatasetV3Row;
+  decisionTimelineJoined?: boolean;
   candidateActions: RecommendationHistoricalCandidateInput[];
   catalogItemsById: ReadonlyMap<number, RecommendationHistoricalCatalogItem>;
   shortHorizonOutcomes: RecommendationHistoricalShortHorizonOutcome[];
@@ -201,12 +205,17 @@ export function createRecommendationHistoricalProReplayRow(
   const completeOutcomeAvailable = normalizedOutcomes.some(
     (outcome) => outcome.complete && outcome.utility !== undefined,
   );
+  const decisionTimelineJoined =
+    input.decisionTimelineJoined ?? completeOutcomeAvailable;
   const allCandidateMetadataAvailable =
     candidates.length > 0 &&
     candidates.every((candidate) => candidate.catalogMetadataAvailable);
   const hasChoiceSet = candidates.length >= 2;
   const exclusionReasons: string[] = [];
 
+  if (!decisionTimelineJoined) {
+    exclusionReasons.push('MISSING_DECISION_TIMELINE_SNAPSHOT');
+  }
   if (!completeOutcomeAvailable) {
     exclusionReasons.push('MISSING_COMPLETE_SHORT_HORIZON_OUTCOME');
   }
@@ -241,6 +250,9 @@ export function createRecommendationHistoricalProReplayRow(
     team: input.decision.team,
     decisionGameTimeS: input.decision.gameTimeS,
     phase: input.decision.phase,
+    timeline: {
+      decisionSnapshotJoined: decisionTimelineJoined,
+    },
     state: {
       inventoryBeforeStateKey: input.decision.inventoryBeforeStateKey,
       previousActionKeys: [...input.decision.previousActionKeys],
@@ -306,11 +318,7 @@ export function buildRecommendationHistoricalProReplayAudit(
     )
       ? 0
       : 1;
-    timelineRowCount += row.shortHorizonOutcomes.some(
-      (outcome) => outcome.complete,
-    )
-      ? 1
-      : 0;
+    timelineRowCount += row.timeline.decisionSnapshotJoined ? 1 : 0;
     candidateCount += row.candidates.length;
     candidateWithMetadataCount += row.candidates.filter(
       (candidate) => candidate.catalogMetadataAvailable,
@@ -437,7 +445,7 @@ function historicalCandidateFromRecommendationAction(
   }
 
   return {
-    actionKey: action.actionKey,
+    actionKey: `${action.sourceActionType}:${action.itemId}`,
     actionType: action.sourceActionType,
     itemId: action.itemId,
     rank,

@@ -5,7 +5,7 @@ import type {
 } from './match-timeline-collector.service';
 import type { RecommendationHistoricalShortHorizonOutcome } from './recommendation-historical-pro-replay';
 
-export const RECOMMENDATION_SHORT_HORIZON_SNAPSHOT_STALENESS_S = 120;
+export const RECOMMENDATION_SHORT_HORIZON_SNAPSHOT_STALENESS_S = 300;
 
 const HORIZONS = [
   { horizon: '3m' as const, seconds: 180 },
@@ -30,16 +30,9 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
   objectives: readonly MatchTimelineObjectiveEvent[];
   snapshotStalenessS?: number;
 }): RecommendationHistoricalShortHorizonOutcome[] {
-  const snapshotStalenessS =
-    input.snapshotStalenessS ??
-    RECOMMENDATION_SHORT_HORIZON_SNAPSHOT_STALENESS_S;
-  if (
-    !Number.isFinite(snapshotStalenessS) ||
-    snapshotStalenessS < 0 ||
-    snapshotStalenessS > 3_600
-  ) {
-    throw new Error('snapshotStalenessS must be between 0 and 3600.');
-  }
+  const snapshotStalenessS = normalizeSnapshotStaleness(
+    input.snapshotStalenessS,
+  );
 
   const playerSnapshots = selectDecisionPlayerSnapshots(
     input.decision,
@@ -53,16 +46,18 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
 
   return HORIZONS.map(({ horizon, seconds }) => {
     const upper = input.decision.gameTimeS + seconds;
-    const target = latestInWindow(
+    const target = nearestToHorizonAfterDecision(
       playerSnapshots,
       input.decision.gameTimeS,
       upper,
+      snapshotStalenessS,
     );
     const baselineFresh =
       baseline !== undefined &&
       input.decision.gameTimeS - baseline.gameTimeS <= snapshotStalenessS;
     const targetFresh =
-      target !== undefined && upper - target.gameTimeS <= snapshotStalenessS;
+      target !== undefined &&
+      Math.abs(upper - target.gameTimeS) <= snapshotStalenessS;
 
     if (!baseline || !target || !baselineFresh || !targetFresh) {
       return {
@@ -106,6 +101,28 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
       snapshotGameTimeS: target.gameTimeS,
     };
   });
+}
+
+export function hasFreshRecommendationDecisionTimelineSnapshot(input: {
+  decision: HeroBuildDecisionDatasetV3Row;
+  snapshots: readonly MatchTimelinePlayerSnapshot[];
+  snapshotStalenessS?: number;
+}): boolean {
+  const snapshotStalenessS = normalizeSnapshotStaleness(
+    input.snapshotStalenessS,
+  );
+  const playerSnapshots = selectDecisionPlayerSnapshots(
+    input.decision,
+    input.snapshots,
+  );
+  const baseline = latestAtOrBefore(
+    playerSnapshots,
+    input.decision.gameTimeS,
+  );
+  return (
+    baseline !== undefined &&
+    input.decision.gameTimeS - baseline.gameTimeS <= snapshotStalenessS
+  );
 }
 
 export function recommendationShortHorizonUtility(
@@ -164,20 +181,41 @@ function latestAtOrBefore(
   return result;
 }
 
-function latestInWindow(
+function nearestToHorizonAfterDecision(
   snapshots: readonly MatchTimelinePlayerSnapshot[],
-  lowerExclusive: number,
-  upperInclusive: number,
+  decisionGameTimeS: number,
+  horizonGameTimeS: number,
+  snapshotStalenessS: number,
 ): MatchTimelinePlayerSnapshot | undefined {
   let result: MatchTimelinePlayerSnapshot | undefined;
+  let resultDistance = Number.POSITIVE_INFINITY;
+  const latestAllowed = horizonGameTimeS + snapshotStalenessS;
   for (const snapshot of snapshots) {
-    if (snapshot.gameTimeS <= lowerExclusive) {
+    if (snapshot.gameTimeS <= decisionGameTimeS) {
       continue;
     }
-    if (snapshot.gameTimeS > upperInclusive) {
+    if (snapshot.gameTimeS > latestAllowed) {
       break;
     }
-    result = snapshot;
+    const distance = Math.abs(snapshot.gameTimeS - horizonGameTimeS);
+    if (
+      distance < resultDistance ||
+      (distance === resultDistance &&
+        result !== undefined &&
+        snapshot.gameTimeS < result.gameTimeS)
+    ) {
+      result = snapshot;
+      resultDistance = distance;
+    }
+  }
+  return result;
+}
+
+function normalizeSnapshotStaleness(value: number | undefined): number {
+  const result =
+    value ?? RECOMMENDATION_SHORT_HORIZON_SNAPSHOT_STALENESS_S;
+  if (!Number.isFinite(result) || result < 0 || result > 3_600) {
+    throw new Error('snapshotStalenessS must be between 0 and 3600.');
   }
   return result;
 }
