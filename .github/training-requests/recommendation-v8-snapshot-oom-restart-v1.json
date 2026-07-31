@@ -1,6 +1,6 @@
 {
   "operation": "RESTART_RECOMMENDATION_V8_AFTER_SNAPSHOT_OOM_V1",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-07-31T21:06:00Z",
   "validatedSourceCommit": "b32d018d633196b14050fda1d1b7a6be22fe679d",
   "observedExitCode": 137,
@@ -11,5 +11,8 @@
   "fullTrainingRequiresDiagnosticGate": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T21:00:58.169926Z",
+  "deployedCommit": "44bfca5c3bda030ad35eeb4507b953218c323147",
+  "trainingRunId": "30664768948-1-snapshot-oom-recovery-v1"
 }
