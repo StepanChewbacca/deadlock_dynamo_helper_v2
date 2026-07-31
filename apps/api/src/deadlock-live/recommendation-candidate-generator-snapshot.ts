@@ -149,12 +149,12 @@ export function validateRecommendationCandidateGeneratorSnapshotArtifact(
   validateSnapshotIdentity(artifact.snapshot);
   validateGeneratorOptions(artifact.generatorOptions);
 
-  const normalizedPolicies = normalizePolicies(artifact.policies);
-  if (normalizedPolicies.length === 0) {
+  const policies = artifact.policies;
+  if (policies.length === 0) {
     throw new Error('Candidate generator snapshot contains no hero policies.');
   }
   const heroIds = new Set<number>();
-  for (const policy of normalizedPolicies) {
+  for (const policy of policies) {
     if (heroIds.has(policy.heroId)) {
       throw new Error(`Candidate generator snapshot duplicates hero ${policy.heroId}.`);
     }
@@ -177,9 +177,10 @@ export function validateRecommendationCandidateGeneratorSnapshotArtifact(
     itemIds.add(item.itemId);
   }
 
-  const actualPolicySha256 = sha256StableJson(
-    candidateGeneratorPolicyPayload(artifact),
-  );
+  const actualPolicySha256 = sha256StableJson({
+    generatorOptions: artifact.generatorOptions,
+    policies: artifact.policies,
+  });
   if (actualPolicySha256 !== artifact.snapshot.policySha256) {
     throw new Error(
       `Candidate generator policy SHA-256 mismatch: ${actualPolicySha256} versus ` +
@@ -499,6 +500,21 @@ export function createRecommendationCandidateGeneratorSnapshotArtifact(input: {
   policies: RecommendationSerializedHeroBuildPolicy[];
   catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
 }): RecommendationCandidateGeneratorSnapshotArtifact {
+  return createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies({
+    ...input,
+    policies: normalizePolicies(input.policies),
+  });
+}
+
+export function createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies(input: {
+  snapshot: Omit<
+    RecommendationFrozenCandidateGeneratorSnapshot,
+    'policySha256' | 'catalogSha256'
+  >;
+  generatorOptions?: Partial<HeroBuildRecommendationOptions>;
+  policies: RecommendationSerializedHeroBuildPolicy[];
+  catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+}): RecommendationCandidateGeneratorSnapshotArtifact {
   const artifact = {
     schemaVersion:
       RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_SCHEMA_VERSION,
@@ -520,15 +536,16 @@ export function createRecommendationCandidateGeneratorSnapshotArtifact(input: {
         HERO_BUILD_MAX_BACKOFF_STATES,
       limit: input.generatorOptions?.limit ?? 100,
     }),
-    policies: normalizePolicies(input.policies),
+    policies: input.policies,
     catalog: {
       version: input.catalog.version,
       items: normalizeCatalogItems(input.catalog.items),
     },
   } satisfies RecommendationCandidateGeneratorSnapshotArtifact;
-  artifact.snapshot.policySha256 = sha256StableJson(
-    candidateGeneratorPolicyPayload(artifact),
-  );
+  artifact.snapshot.policySha256 = sha256StableJson({
+    generatorOptions: artifact.generatorOptions,
+    policies: artifact.policies,
+  });
   artifact.snapshot.catalogSha256 = sha256StableJson(
     candidateGeneratorCatalogPayload(artifact),
   );

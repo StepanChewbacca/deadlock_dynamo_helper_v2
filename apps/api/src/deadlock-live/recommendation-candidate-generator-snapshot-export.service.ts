@@ -26,7 +26,7 @@ import {
   ItemCatalogVersion,
 } from './entities/item-catalog-version.entity';
 import {
-  createRecommendationCandidateGeneratorSnapshotArtifact,
+  createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies,
   RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION,
   type RecommendationCandidateGeneratorSnapshotArtifact,
   type RecommendationCandidateGeneratorSnapshotRegistry,
@@ -247,6 +247,7 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         },
       });
       const built = accumulator.build();
+      accumulator.release();
       this.status = {
         ...this.status,
         heroCount: built.summary.heroCount,
@@ -262,7 +263,8 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         phase: 'WRITING',
       };
 
-      const artifact = createRecommendationCandidateGeneratorSnapshotArtifact({
+      const artifact =
+        createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies({
         snapshot: {
           snapshotId: request.snapshotId,
           generatorVersion: request.generatorVersion,
