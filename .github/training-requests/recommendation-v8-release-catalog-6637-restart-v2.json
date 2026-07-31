@@ -1,5 +1,5 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "operation": "RELEASE_CATALOG_6637_RESTART_V2",
   "requestedAt": "2026-07-31T20:58:00Z",
   "attempt": 2,
@@ -15,5 +15,9 @@
   "fullTrainingRequiresDiagnosticGate": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T20:58:36.752393Z",
+  "catalogVersionId": 2,
+  "catalogPayloadHash": "dbbd2ec9b27255b0b07986d904f4f7c2528c089b64c331d4e50e0ba42861e11e",
+  "deployedCommit": "e03caaa1904e9d356c1a961d9d291fa65b348202"
 }
