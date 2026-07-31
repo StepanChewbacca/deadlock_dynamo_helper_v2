@@ -1,0 +1,11 @@
+{
+  "operation": "INSPECT_CATALOG_READINESS_SQL_V1",
+  "requestedAt": "2026-07-31T13:56:00Z",
+  "sourceWindowStart": "2026-07-18T12:31:22.000Z",
+  "sourceWindowEnd": "2026-07-28T15:34:17.000Z",
+  "policyWindowEnd": "2026-07-22T09:32:54.000Z",
+  "readOnly": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
