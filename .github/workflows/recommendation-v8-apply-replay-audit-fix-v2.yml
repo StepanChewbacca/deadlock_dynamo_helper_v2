@@ -1,0 +1,129 @@
+name: Recommendation V8 Apply Replay Audit Fix V2
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-apply-replay-audit-fix-v2.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-apply-replay-audit-fix-v2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    name: Apply and validate replay audit fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-apply-replay-audit-fix-v2.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'APPLY_REPLAY_AUDIT_FIX_V2'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'apply=true' >> "$GITHUB_OUTPUT"
+
+      - name: Apply source patch
+        if: steps.request.outputs.apply == 'true'
+        run: python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2.py
+
+      - name: Setup Node.js
+        if: steps.request.outputs.apply == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        if: steps.request.outputs.apply == 'true'
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Validate runner syntax
+        if: steps.request.outputs.apply == 'true'
+        run: node --check scripts/run-recommendation-v8-replay-audit-recovery-v2.mjs && node --check scripts/run-recommendation-v8-pipeline.mjs
+
+      - name: Build shared package
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Run replay recovery tests
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test --runInBand recommendation-historical-replay-audit-recovery-v2.spec.ts recommendation-historical-postgres-timeline-cache.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-pro-replay-fractional-snapshot.spec.ts > "$RUNNER_TEMP/replay-recovery-tests.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 300 "$RUNNER_TEMP/replay-recovery-tests.log"
+            exit "$status"
+          fi
+          tail -n 80 "$RUNNER_TEMP/replay-recovery-tests.log"
+
+      - name: Mark request consumed
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          path = Path('.github/training-requests/recommendation-v8-apply-replay-audit-fix-v2.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+
+      - name: Commit validated fix
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'The replay audit fix is already applied.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts apps/api/src/deadlock-live/recommendation-historical-pro-replay-outcomes.ts apps/api/src/deadlock-live/recommendation-historical-pro-replay.ts apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot.ts apps/api/test/recommendation-historical-replay-audit-recovery-v2.spec.ts scripts/run-recommendation-v8-pipeline.mjs .github/training-requests/recommendation-v8-apply-replay-audit-fix-v2.json
+          git commit -m 'fix: repair Recommendation V8 historical replay audit'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Upload failed test log
+        if: failure() && steps.request.outputs.apply == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-replay-audit-fix-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/replay-recovery-tests.log
+          if-no-files-found: ignore
+          retention-days: 7
