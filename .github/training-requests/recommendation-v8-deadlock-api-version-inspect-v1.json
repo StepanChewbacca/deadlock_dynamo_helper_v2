@@ -1,6 +1,8 @@
 {
   "operation": "INSPECT_DEADLOCK_API_VERSION_METADATA_V1",
-  "requestedAt": "2026-07-31T14:08:00Z",
+  "requestedAt": "2026-07-31T14:12:00Z",
+  "inspection": 2,
+  "includeSteamInfoAll": true,
   "readOnly": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
