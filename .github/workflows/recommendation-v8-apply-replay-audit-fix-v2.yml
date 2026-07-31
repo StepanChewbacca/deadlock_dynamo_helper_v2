@@ -46,7 +46,7 @@ jobs:
 
       - name: Apply source patch
         if: steps.request.outputs.apply == 'true'
-        run: python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2.py && python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2-followup.py
+        run: python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2.py && python3 scripts/patch-recommendation-v8-replay-audit-recovery-v2-followup.py && python3 scripts/patch-recommendation-v8-replay-audit-compat-v2.py
 
       - name: Setup Node.js
         if: steps.request.outputs.apply == 'true'
@@ -80,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          yarn workspace @deadlock-live-probe/api test --runInBand recommendation-historical-replay-audit-recovery-v2.spec.ts recommendation-historical-postgres-timeline-cache.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-pro-replay-fractional-snapshot.spec.ts > "$RUNNER_TEMP/replay-recovery-tests.log" 2>&1
+          yarn workspace @deadlock-live-probe/api test --runInBand recommendation-historical-replay-audit-recovery-v2.spec.ts recommendation-historical-postgres-timeline-cache.spec.ts recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-pro-replay-fractional-snapshot.spec.ts recommendation-pro-decision-dataset-v6.spec.ts recommendation-pro-decision-dataset-v6-artifact.spec.ts > "$RUNNER_TEMP/replay-recovery-tests.log" 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
             tail -n 300 "$RUNNER_TEMP/replay-recovery-tests.log"
