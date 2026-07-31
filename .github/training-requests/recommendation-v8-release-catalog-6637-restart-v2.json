@@ -1,20 +1,19 @@
 {
-  "state": "CONSUMED",
+  "state": "REQUESTED",
   "operation": "RELEASE_CATALOG_6637_RESTART_V2",
-  "requestedAt": "2026-07-31T14:27:00Z",
+  "requestedAt": "2026-07-31T20:58:00Z",
+  "attempt": 2,
+  "retryReason": "CANDIDATE_SNAPSHOT_WRITER_EXIT_137_FIXED",
+  "validatedSourceCommit": "b32d018d633196b14050fda1d1b7a6be22fe679d",
   "clientVersion": 6637,
   "sourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
   "sourceDatasetRowCount": 6188423,
   "policyTrainingWindowEnd": "2026-07-22T09:32:54.000Z",
-  "catalogBackfillRequired": true,
+  "catalogBackfillRequired": false,
   "archiveCurrentNonReleaseAttempt": true,
   "diagnosticFirst": true,
   "fullTrainingRequiresDiagnosticGate": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false,
-  "consumedAt": "2026-07-31T14:28:51.782156Z",
-  "catalogVersionId": 2,
-  "catalogPayloadHash": "dbbd2ec9b27255b0b07986d904f4f7c2528c089b64c331d4e50e0ba42861e11e",
-  "deployedCommit": "773793ea1b124d380078f4e3220824017172e057"
+  "randomizedCanaryAuthorized": false
 }
