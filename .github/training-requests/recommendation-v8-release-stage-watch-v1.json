@@ -1,0 +1,10 @@
+{
+  "operation": "WATCH_RECOMMENDATION_V8_RELEASE_STAGE_V1",
+  "requestedAt": "2026-07-31T14:45:00Z",
+  "runId": "30638488726-1-release-c6637-v2",
+  "stopAt": "SNAPSHOT_COMPLETE_OR_REPLAY_STARTED_OR_FAILURE",
+  "readOnly": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
