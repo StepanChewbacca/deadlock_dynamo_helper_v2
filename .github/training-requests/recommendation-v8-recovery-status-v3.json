@@ -1,8 +1,8 @@
 {
   "operation": "INSPECT_RECOMMENDATION_V8_RECOVERY",
-  "requestedAt": "2026-07-31T17:22:00Z",
-  "runId": "30638488726-1-release-c6637-v2",
-  "inspection": 7,
+  "requestedAt": "2026-07-31T21:08:00Z",
+  "runId": "30664768948-1-snapshot-oom-recovery-v1",
+  "inspection": 8,
   "includeHistoricalCatalogReadiness": true,
   "verifyIsolationGuards": true,
   "readOnly": true,
