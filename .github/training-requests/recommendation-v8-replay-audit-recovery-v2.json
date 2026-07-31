@@ -1,0 +1,19 @@
+{
+  "state": "REQUESTED",
+  "operation": "REPLAY_AUDIT_RECOVERY_V2",
+  "requestedAt": "2026-07-31T13:20:00Z",
+  "sourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "sourceDatasetRowCount": 6188423,
+  "preserveSnapshotId": "v8-20260722-c1-ff04970fda51",
+  "newSnapshotSuffix": "support-v2",
+  "candidateSupportStrategy": "STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V2",
+  "partitionStrategy": "MATCH_ID_HASH_V3",
+  "timelineJoinContract": "DECISION_JOIN_SEPARATE_FROM_HORIZON_COMPLETENESS_V2",
+  "snapshotStalenessS": 300,
+  "diagnosticFirst": true,
+  "fullTrainingRequiresDiagnosticGate": true,
+  "archiveFailedReplay": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
