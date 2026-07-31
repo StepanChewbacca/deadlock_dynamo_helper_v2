@@ -1,0 +1,8 @@
+{
+  "operation": "INSPECT_DEADLOCK_API_VERSION_METADATA_V1",
+  "requestedAt": "2026-07-31T14:08:00Z",
+  "readOnly": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
