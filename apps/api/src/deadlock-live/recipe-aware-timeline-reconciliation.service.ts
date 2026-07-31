@@ -19,6 +19,9 @@ interface UpgradeProposal {
 @Injectable()
 export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
   private readonly logger = new Logger(RecipeAwareTimelineReconciliationService.name);
+  private readonly intervalRefreshEnabled =
+    process.env.DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED?.trim().toLowerCase() !==
+    'false';
   private componentItemIdsByParent = new Map<number, readonly number[]>();
 
   constructor(
@@ -37,6 +40,9 @@ export class RecipeAwareTimelineReconciliationService implements OnModuleInit {
 
   @Interval('recipe-aware-timeline-reconciliation-refresh', TIMELINE_RECIPE_REFRESH_INTERVAL_MS)
   refreshOnInterval(): void {
+    if (!this.intervalRefreshEnabled) {
+      return;
+    }
     void this.refreshRecipes().catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to refresh timeline recipes: ${message}`);

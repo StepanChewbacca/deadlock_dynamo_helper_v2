@@ -122,6 +122,9 @@ export class RecentMatchCrawlerService implements OnModuleInit {
   private readonly crawlerType = 'all_heroes';
   private readonly itemsById = new Map<number, ItemReference>();
   private readonly hasApiKey = Boolean(process.env.DEADLOCK_API_KEY?.trim());
+  private readonly enabled =
+    process.env.DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED?.trim().toLowerCase() !==
+    'false';
 
   private isCrawling = false;
   private activeRunId?: number;
@@ -154,6 +157,10 @@ export class RecentMatchCrawlerService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!this.enabled) {
+      this.logger.log('Recent match crawler is disabled for this runtime.');
+      return;
+    }
     await this.recoverCrawlerStateAfterRestart();
     const removedMatchCount = await this.pruneInvalidMatches();
     if (removedMatchCount > 0) {
@@ -168,7 +175,7 @@ export class RecentMatchCrawlerService implements OnModuleInit {
   }
 
   async startCrawling(): Promise<void> {
-    if (this.isCrawling) {
+    if (!this.enabled || this.isCrawling) {
       return;
     }
 
@@ -199,6 +206,9 @@ export class RecentMatchCrawlerService implements OnModuleInit {
     timeZone: 'UTC',
   })
   async scheduledCrawl(): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
     this.logger.log('Starting scheduled four-hour crawl for the two-week match window.');
     await this.startCrawling();
   }

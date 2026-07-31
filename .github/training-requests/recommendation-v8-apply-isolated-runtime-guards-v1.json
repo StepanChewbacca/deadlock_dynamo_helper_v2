@@ -1,5 +1,5 @@
 {
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "operation": "APPLY_ISOLATED_RUNTIME_GUARDS_V1",
   "requestedAt": "2026-07-31T13:49:00Z",
   "retry": 2,
@@ -13,5 +13,6 @@
   "restartCurrentHealthyWriter": false,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T13:50:36.961881Z"
 }

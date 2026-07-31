@@ -11,6 +11,9 @@ import { HERO_REFERENCE_SEED, ITEM_REFERENCE_SEED } from './reference-data.seed'
 @Injectable()
 export class ReferenceDataImportService implements OnModuleInit {
   private readonly logger = new Logger(ReferenceDataImportService.name);
+  private readonly enabled =
+    process.env.DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED?.trim().toLowerCase() !==
+    'false';
 
   constructor(
     @InjectRepository(Hero)
@@ -21,7 +24,11 @@ export class ReferenceDataImportService implements OnModuleInit {
     private readonly itemComponentRepo: Repository<ItemComponent>,
   ) {}
 
-  async onModuleInit() {
+  async onModuleInit(): Promise<void> {
+    if (!this.enabled) {
+      this.logger.log('Reference data import is disabled for this runtime.');
+      return;
+    }
     await this.importIfNeeded();
   }
 
