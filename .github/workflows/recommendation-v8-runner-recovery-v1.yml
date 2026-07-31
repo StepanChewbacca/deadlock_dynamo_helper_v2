@@ -1,0 +1,96 @@
+name: Recommendation V8 Runner Recovery V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-runner-recovery-v1.json'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - name: Inspect runner and cancel stale V8 jobs
+        id: recover
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '.github/training-requests/recommendation-v8-runner-recovery-v1.json';
+            const request = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (request.state === 'CONSUMED') {
+              core.notice('Runner recovery request is already consumed.');
+              return;
+            }
+            if (request.operation !== 'RECOVER_RECOMMENDATION_V8_SELF_HOSTED_RUNNER_V1') {
+              core.setFailed('Unexpected runner recovery operation.');
+              return;
+            }
+            const targetRunId = Number(request.targetRunId);
+            const runners = await github.paginate(
+              github.rest.actions.listSelfHostedRunnersForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 },
+            );
+            core.notice(`Self-hosted runners: ${JSON.stringify(runners.map(runner => ({name: runner.name, status: runner.status, busy: runner.busy, labels: runner.labels.map(label => label.name)})))}`);
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, branch: context.payload.pull_request?.head?.ref || context.ref.replace('refs/heads/', ''), per_page: 100 },
+            );
+            const cancelled = [];
+            for (const run of runs) {
+              if (run.id === targetRunId || !['queued', 'in_progress', 'pending', 'waiting', 'requested'].includes(run.status)) {
+                continue;
+              }
+              if (!run.name.startsWith('Recommendation V8')) {
+                continue;
+              }
+              const jobs = await github.paginate(
+                github.rest.actions.listJobsForWorkflowRun,
+                { owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100 },
+              );
+              const usesSelfHosted = jobs.some(job =>
+                Array.isArray(job.labels) && job.labels.includes('self-hosted') &&
+                ['queued', 'in_progress', 'waiting', 'pending'].includes(job.status)
+              );
+              if (!usesSelfHosted) {
+                continue;
+              }
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id,
+                });
+                cancelled.push({id: run.id, name: run.name, status: run.status});
+              } catch (error) {
+                if (![404, 409].includes(error.status)) throw error;
+              }
+            }
+            core.notice(`Cancelled stale self-hosted runs: ${JSON.stringify(cancelled)}`);
+            const value = {
+              ...request,
+              state: 'CONSUMED',
+              consumedAt: new Date().toISOString(),
+              runnerState: runners.map(runner => ({name: runner.name, status: runner.status, busy: runner.busy})),
+              cancelledRuns: cancelled,
+            };
+            fs.writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
+      - name: Commit recovery evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .github/training-requests/recommendation-v8-runner-recovery-v1.json; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/training-requests/recommendation-v8-runner-recovery-v1.json
+          git commit -m 'chore: record Recommendation V8 runner recovery'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
