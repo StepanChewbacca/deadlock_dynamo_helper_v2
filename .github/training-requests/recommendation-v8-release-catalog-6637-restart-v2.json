@@ -1,0 +1,16 @@
+{
+  "state": "REQUESTED",
+  "operation": "RELEASE_CATALOG_6637_RESTART_V2",
+  "requestedAt": "2026-07-31T14:27:00Z",
+  "clientVersion": 6637,
+  "sourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "sourceDatasetRowCount": 6188423,
+  "policyTrainingWindowEnd": "2026-07-22T09:32:54.000Z",
+  "catalogBackfillRequired": true,
+  "archiveCurrentNonReleaseAttempt": true,
+  "diagnosticFirst": true,
+  "fullTrainingRequiresDiagnosticGate": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
