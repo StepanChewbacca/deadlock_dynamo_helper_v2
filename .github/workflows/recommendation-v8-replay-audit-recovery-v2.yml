@@ -35,6 +35,7 @@ jobs:
           test "$state" = 'REQUESTED'
           test "$(jq -r '.operation' "$request")" = 'REPLAY_AUDIT_RECOVERY_V2'
           test "$(jq -r '.sourceDatasetSha256' "$request")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(jq -r '.failedReplaySha256 | length' "$request")" = '64'
           test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
           test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
           test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
@@ -52,54 +53,45 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
 
-      - name: Resolve isolated runtime
+      - name: Resolve production-owned storage and recovery state
         shell: bash
         run: |
           set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
           old_run_dir="$(readlink -f "$run_root/current")"
-          container='deadlock-recommendation-v8-training'
+          production_container="$(cd "$deploy_dir" && sudo docker compose ps -q api)"
+          test -n "$production_container"
           test -s "$old_run_dir/resolved-training-config.json"
-          sudo docker inspect "$container" >/dev/null
-          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$container")"
-          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$container")"
-          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$container")"
-          network_name="$(sudo docker inspect --format='{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$container")"
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_container")"
+          network_name="$(sudo docker inspect --format='{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$production_container")"
           test -n "$storage_type"
           test -n "$storage_source"
           test -n "$network_name"
+          request='.github/training-requests/recommendation-v8-replay-audit-recovery-v2.json'
+          failed_replay_sha="$(jq -r '.failedReplaySha256' "$request")"
+          prefix="${failed_replay_sha:0:12}"
+          archive_parent="$storage_source/recommendation-v8-failed-artifacts"
+          existing_archive="$(sudo find "$archive_parent" -mindepth 1 -maxdepth 1 -type d -name "${prefix}-*" -print 2>/dev/null | head -n 1 || true)"
+          archive_root="${existing_archive:-$archive_parent/${prefix}-recovery-v2}"
           run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-replay-audit-v2"
           run_dir="$run_root/runs/$run_id"
-          sudo mkdir -p "$run_dir"
+          sudo mkdir -p "$run_dir" "$archive_root"
           sudo chown -R "$(id -u):$(id -g)" "$run_root"
           cp "$old_run_dir/resolved-training-config.json" "$run_dir/"
           cp scripts/run-recommendation-v8-replay-audit-recovery-v2.mjs "$run_dir/"
           echo "TRAINING_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
           echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
           echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          echo "TRAINING_CONTAINER=$container" >> "$GITHUB_ENV"
+          echo 'TRAINING_CONTAINER=deadlock-recommendation-v8-training' >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
           echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
           echo "TRAINING_NETWORK=$network_name" >> "$GITHUB_ENV"
-
-      - name: Verify failed replay and immutable source
-        shell: bash
-        run: |
-          set -euo pipefail
-          status="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status)"
-          audit="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/audit)"
-          manifest="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/manifest)"
-          source_manifest="$(curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/manifest)"
-          test "$(echo "$status" | jq -r '.state')" = 'COMPLETE'
-          test "$(echo "$status" | jq -r '.auditPassed')" = 'false'
-          test "$(echo "$audit" | jq -r '.passed')" = 'false'
-          test "$(echo "$audit" | jq -r '.rowCount > 0')" = 'true'
-          test "$(echo "$manifest" | jq -r '.source.sha256')" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
-          test "$(echo "$source_manifest" | jq -r '.artifact.sha256')" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
-          replay_sha="$(echo "$manifest" | jq -r '.artifact.sha256')"
-          test "${#replay_sha}" = '64'
-          echo "FAILED_REPLAY_SHA=$replay_sha" >> "$GITHUB_ENV"
+          echo "FAILED_REPLAY_SHA=$failed_replay_sha" >> "$GITHUB_ENV"
+          echo "ARCHIVE_ROOT=$archive_root" >> "$GITHUB_ENV"
 
       - name: Build repaired isolated image
         shell: bash
@@ -109,25 +101,48 @@ jobs:
           sudo docker build -t "$image" .
           echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
 
-      - name: Archive failed artifacts
+      - name: Complete failed-artifact archive idempotently
         shell: bash
         run: |
           set -euo pipefail
-          archive_root="$STORAGE_MOUNT_SOURCE/recommendation-v8-failed-artifacts/${FAILED_REPLAY_SHA:0:12}-${GITHUB_RUN_ID}"
-          sudo docker rm -f "$TRAINING_CONTAINER" >/dev/null
-          sudo mkdir -p "$archive_root"
-          replay_path="$STORAGE_MOUNT_SOURCE/recommendation-historical-pro-replay-v1"
-          test -s "$replay_path/manifest.json"
-          sudo mv "$replay_path" "$archive_root/"
+          sudo docker rm -f "$TRAINING_CONTAINER" >/dev/null 2>&1 || true
+          replay_source="$STORAGE_MOUNT_SOURCE/recommendation-historical-pro-replay-v1"
+          replay_archive="$ARCHIVE_ROOT/recommendation-historical-pro-replay-v1"
+          if sudo test -d "$replay_source"; then
+            source_replay_sha="$(sudo cat "$replay_source/manifest.json" | jq -r '.artifact.sha256')"
+            test "$source_replay_sha" = "$FAILED_REPLAY_SHA"
+            if sudo test -e "$replay_archive"; then
+              echo 'Both source and archived failed replay exist.' >&2
+              exit 1
+            fi
+            sudo mv "$replay_source" "$ARCHIVE_ROOT/"
+          fi
+          sudo test -s "$replay_archive/manifest.json"
+          archived_replay_sha="$(sudo cat "$replay_archive/manifest.json" | jq -r '.artifact.sha256')"
+          test "$archived_replay_sha" = "$FAILED_REPLAY_SHA"
           for directory in recommendation-pro-decision-dataset-v6-1 recommendation-behavioral-v5-1 recommendation-value-v8-diagnostic-1 recommendation-v6-short-only-dataset-v6-baseline-1 recommendation-value-v8-full-evaluation-1; do
-            path="$STORAGE_MOUNT_SOURCE/$directory"
-            if [ -e "$path" ]; then sudo mv "$path" "$archive_root/"; fi
+            source="$STORAGE_MOUNT_SOURCE/$directory"
+            target="$ARCHIVE_ROOT/$directory"
+            if sudo test -e "$source"; then
+              if sudo test -e "$target"; then
+                target="$ARCHIVE_ROOT/${directory}-retry-${GITHUB_RUN_ID}"
+              fi
+              sudo mv "$source" "$target"
+            fi
           done
-          test -s "$archive_root/recommendation-historical-pro-replay-v1/manifest.json"
-          test -s "$STORAGE_MOUNT_SOURCE/build-decision-dataset-v3/dataset.ndjson"
-          test -s "$STORAGE_MOUNT_SOURCE/recommendation-candidate-generator-snapshots/registry.json"
-          printf 'Archived failed replay %s at %s\n' "$FAILED_REPLAY_SHA" "$(date --iso-8601=seconds)" | tee "$TRAINING_RUN_DIR/archive-report.txt"
-          sudo du -sh "$archive_root" | tee -a "$TRAINING_RUN_DIR/archive-report.txt"
+          sudo test -s "$STORAGE_MOUNT_SOURCE/build-decision-dataset-v3/dataset.ndjson"
+          sudo test -s "$STORAGE_MOUNT_SOURCE/build-decision-dataset-v3/manifest.json"
+          sudo test -s "$STORAGE_MOUNT_SOURCE/recommendation-candidate-generator-snapshots/registry.json"
+          source_sha="$(sudo cat "$STORAGE_MOUNT_SOURCE/build-decision-dataset-v3/manifest.json" | jq -r '.artifact.sha256')"
+          source_rows="$(sudo cat "$STORAGE_MOUNT_SOURCE/build-decision-dataset-v3/manifest.json" | jq -r '.artifact.rowCount')"
+          test "$source_sha" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$source_rows" = '6188423'
+          {
+            printf 'Archived failed replay %s\n' "$FAILED_REPLAY_SHA"
+            printf 'Archive root: %s\n' "$ARCHIVE_ROOT"
+            printf 'Verified Dataset V3: %s rows, SHA %s\n' "$source_rows" "$source_sha"
+            sudo du -sh "$ARCHIVE_ROOT"
+          } | tee "$TRAINING_RUN_DIR/archive-report.txt"
 
       - name: Start repaired isolated API
         shell: bash
@@ -140,18 +155,24 @@ jobs:
           elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
             mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
           else
+            echo "Unsupported storage type: $STORAGE_MOUNT_TYPE" >&2
             exit 1
           fi
           sudo docker run -d --name "$TRAINING_CONTAINER" --restart=no --network "$TRAINING_NETWORK" -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
           for attempt in $(seq 1 90); do
-            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then exit 0; fi
-            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$TRAINING_CONTAINER")" != 'true' ]; then sudo docker logs --tail=300 "$TRAINING_CONTAINER"; exit 1; fi
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$TRAINING_CONTAINER")" != 'true' ]; then
+              sudo docker logs --tail=300 "$TRAINING_CONTAINER"
+              exit 1
+            fi
             sleep 2
           done
           sudo docker logs --tail=300 "$TRAINING_CONTAINER"
           exit 1
 
-      - name: Verify immutable inputs
+      - name: Verify immutable inputs through isolated API
         shell: bash
         run: |
           set -euo pipefail
@@ -169,7 +190,10 @@ jobs:
           ln -sfn "$TRAINING_RUN_DIR" "$TRAINING_RUN_ROOT/current"
           sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_RESOLVED_CONFIG_PATH=/runner/resolved-training-config.json -e REPLAY_PARTITION_COUNT=64 -e REPLAY_SNAPSHOT_STALENESS_S=300 -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 -e DIAGNOSTIC_MAX_ROWS=10000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=604800000 "$TRAINING_CONTAINER" node /runner/run-recommendation-v8-replay-audit-recovery-v2.mjs
           for attempt in $(seq 1 60); do
-            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec "$TRAINING_CONTAINER" sh -lc "pgrep -f 'run-recommendation-v8-replay-audit-recovery-v2.mjs' >/dev/null"; then cat "$TRAINING_RUN_DIR/status.json"; exit 0; fi
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec "$TRAINING_CONTAINER" sh -lc "pgrep -f 'run-recommendation-v8-replay-audit-recovery-v2.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              exit 0
+            fi
             sleep 1
           done
           sudo docker logs --tail=300 "$TRAINING_CONTAINER"
