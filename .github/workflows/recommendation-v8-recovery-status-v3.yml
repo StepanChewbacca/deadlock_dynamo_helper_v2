@@ -56,6 +56,13 @@ jobs:
             echo
             curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true
             echo
+            echo '=== historical catalog status ==='
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/catalogs/history/status || true
+            echo
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/rulesets/windows/status || true
+            echo
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/catalogs || true
+            echo
             echo '=== training log tail ==='
             tail -n 120 "$run_dir/training.log" 2>/dev/null || true
             echo
