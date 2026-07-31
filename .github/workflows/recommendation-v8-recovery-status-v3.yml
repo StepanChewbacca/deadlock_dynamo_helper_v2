@@ -16,7 +16,7 @@ concurrency:
 jobs:
   inspect:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - name: Checkout status request
         uses: actions/checkout@v4
@@ -30,6 +30,7 @@ jobs:
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
           run_dir="$(readlink -f "$run_root/current")"
           container='deadlock-recommendation-v8-training'
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
           report="$RUNNER_TEMP/recommendation-v8-recovery-status.txt"
           test -d "$run_dir"
           {
@@ -37,44 +38,29 @@ jobs:
             echo "runDir=$run_dir"
             echo
             echo '=== supervisor status ==='
-            if [ -s "$run_dir/status.json" ]; then cat "$run_dir/status.json"; else echo 'status.json missing'; fi
+            cat "$run_dir/status.json" 2>/dev/null || true
             echo
-            echo '=== isolated container ==='
+            echo '=== isolated container and processes ==='
             sudo docker ps -a --filter "name=^/${container}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-            if sudo docker inspect "$container" >/dev/null 2>&1; then
-              sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} startedAt={{.State.StartedAt}} finishedAt={{.State.FinishedAt}}' "$container"
-              echo
-              echo '=== recovery processes ==='
-              sudo docker exec "$container" sh -lc "ps -eo pid,etime,rss,args | grep -E 'recommendation-v8|node /runner' | grep -v grep || true"
-            fi
+            sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} startedAt={{.State.StartedAt}}' "$container" 2>/dev/null || true
+            sudo docker exec "$container" sh -lc "ps -eo pid,etime,rss,args | grep -E 'recommendation-v8|node /runner' | grep -v grep || true" 2>/dev/null || true
             echo
-            echo '=== API stages ==='
-            for endpoint in \
-              recommendation-candidate-generator-snapshots/status \
-              recommendation-historical-pro-replay/status \
-              recommendation-pro-decision-dataset-v6/status \
-              recommendation-behavioral-v5-training/status \
-              recommendation-value-v8-diagnostic/status \
-              recommendation-v6-short-only-dataset-v6-baseline/status \
-              recommendation-value-v8-full-evaluation/status; do
-              echo "--- $endpoint"
-              curl --silent --show-error --max-time 20 "http://127.0.0.1:3010/deadlock/analysis/$endpoint" || true
-              echo
-            done
+            echo '=== active artifact files ==='
+            sudo find "$storage/recommendation-candidate-generator-snapshots" "$storage/recommendation-historical-pro-replay-v1" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %s %p\n' 2>/dev/null | sort | tail -n 40 || true
             echo
-            echo '=== replay audit ==='
-            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/audit || true
+            echo '=== active artifact sizes ==='
+            sudo du -sh "$storage/recommendation-candidate-generator-snapshots" "$storage/recommendation-historical-pro-replay-v1" 2>/dev/null || true
             echo
+            echo '=== current API stage ==='
+            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status || true
             echo
-            echo '=== diagnostic audit ==='
-            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/audit || true
-            echo
+            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true
             echo
             echo '=== training log tail ==='
-            tail -n 300 "$run_dir/training.log" 2>/dev/null || true
+            tail -n 120 "$run_dir/training.log" 2>/dev/null || true
             echo
-            echo '=== container log tail ==='
-            sudo docker logs --tail=200 "$container" 2>&1 || true
+            echo '=== recent container warnings/errors ==='
+            sudo docker logs --since=10m "$container" 2>&1 | grep -E 'ERROR|WARN|completed|failed|processed|exported|cache' | tail -n 120 || true
           } | tee "$report"
 
       - name: Upload status report
