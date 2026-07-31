@@ -29,30 +29,110 @@ jobs:
           set -euo pipefail
           postgres='aboba-telegramovich-postgres-1'
           report="$RUNNER_TEMP/recommendation-v8-catalog-readiness.txt"
+          sql="$RUNNER_TEMP/recommendation-v8-catalog-readiness.sql"
           sudo docker inspect "$postgres" >/dev/null
+          cat > "$sql" <<'SQL'
+          \pset pager off
+          \echo '=== item catalog versions ==='
+          SELECT id, "clientVersion", "contentCatalogVersionId", "rulesetId", "isCurrent", "importedAt", "payloadHash"
+          FROM item_catalog_versions
+          ORDER BY "clientVersion";
+
+          \echo '=== game ruleset windows ==='
+          SELECT id, "rulesetKey", "clientVersion", status, source, "validFrom", "validTo"
+          FROM game_rulesets
+          ORDER BY "clientVersion";
+
+          \echo '=== raw metadata client versions ==='
+          SELECT "clientVersion", COUNT(DISTINCT "matchId") AS matches,
+                 MIN("fetchedAt") AS first_fetched, MAX("fetchedAt") AS last_fetched
+          FROM raw_match_metadata
+          GROUP BY "clientVersion"
+          ORDER BY "clientVersion";
+
+          \echo '=== raw metadata resolution methods ==='
+          SELECT "rulesetResolutionMethod", COUNT(DISTINCT "matchId") AS matches,
+                 COUNT(*) AS rows
+          FROM raw_match_metadata
+          GROUP BY "rulesetResolutionMethod"
+          ORDER BY "rulesetResolutionMethod";
+
+          \echo '=== resolved catalog distribution ==='
+          SELECT r."resolvedCatalogVersionId", c."clientVersion",
+                 COUNT(DISTINCT r."matchId") AS matches
+          FROM raw_match_metadata r
+          LEFT JOIN item_catalog_versions c ON c.id = r."resolvedCatalogVersionId"
+          GROUP BY r."resolvedCatalogVersionId", c."clientVersion"
+          ORDER BY c."clientVersion";
+
+          \echo '=== top-level raw payload keys ==='
+          SELECT key, COUNT(*) AS rows
+          FROM raw_match_metadata r
+          CROSS JOIN LATERAL jsonb_object_keys(r.payload) AS key
+          GROUP BY key
+          ORDER BY key;
+
+          \echo '=== match_info raw payload keys ==='
+          SELECT key, COUNT(*) AS rows
+          FROM raw_match_metadata r
+          CROSS JOIN LATERAL jsonb_object_keys(
+            CASE WHEN jsonb_typeof(r.payload->'match_info') = 'object'
+              THEN r.payload->'match_info' ELSE '{}'::jsonb END
+          ) AS key
+          GROUP BY key
+          ORDER BY key;
+
+          \echo '=== recursive version/build-like paths in recent payload samples ==='
+          WITH RECURSIVE roots AS (
+            SELECT id, payload
+            FROM raw_match_metadata
+            ORDER BY id DESC
+            LIMIT 50
+          ), walk AS (
+            SELECT id, ARRAY[]::text[] AS path, payload AS value
+            FROM roots
+            UNION ALL
+            SELECT walk.id, walk.path || child.key, child.value
+            FROM walk
+            CROSS JOIN LATERAL jsonb_each(
+              CASE WHEN jsonb_typeof(walk.value) = 'object'
+                THEN walk.value ELSE '{}'::jsonb END
+            ) AS child
+          )
+          SELECT array_to_string(path, '.') AS path,
+                 LEFT(value #>> '{}', 160) AS sample_value,
+                 COUNT(*) AS occurrences
+          FROM walk
+          WHERE path <> ARRAY[]::text[]
+            AND (path[array_length(path, 1)] ILIKE '%version%'
+              OR path[array_length(path, 1)] ILIKE '%build%')
+            AND jsonb_typeof(value) IN ('string', 'number', 'boolean')
+          GROUP BY array_to_string(path, '.'), LEFT(value #>> '{}', 160)
+          ORDER BY path, occurrences DESC;
+
+          \echo '=== V3 match-window raw metadata distribution ==='
+          SELECT r."clientVersion", r."rulesetResolutionMethod",
+                 COUNT(DISTINCT r."matchId") AS matches
+          FROM raw_match_metadata r
+          JOIN matches m ON m."matchId" = r."matchId"
+          WHERE m."startTime" >= TIMESTAMPTZ '2026-07-18T12:31:22Z'
+            AND m."startTime" <= TIMESTAMPTZ '2026-07-28T15:34:17Z'
+          GROUP BY r."clientVersion", r."rulesetResolutionMethod"
+          ORDER BY r."clientVersion", r."rulesetResolutionMethod";
+
+          \echo '=== policy-window raw metadata distribution ==='
+          SELECT r."clientVersion", r."rulesetResolutionMethod",
+                 COUNT(DISTINCT r."matchId") AS matches
+          FROM raw_match_metadata r
+          JOIN matches m ON m."matchId" = r."matchId"
+          WHERE m."startTime" >= TIMESTAMPTZ '2026-07-18T12:31:22Z'
+            AND m."startTime" <= TIMESTAMPTZ '2026-07-22T09:32:54Z'
+          GROUP BY r."clientVersion", r."rulesetResolutionMethod"
+          ORDER BY r."clientVersion", r."rulesetResolutionMethod";
+          SQL
           {
             echo "generatedAt=$(date --iso-8601=seconds)"
-            echo
-            echo '=== item catalog versions ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT id, "clientVersion", "contentCatalogVersionId", "rulesetId", "isCurrent", "importedAt", "payloadHash" FROM item_catalog_versions ORDER BY "clientVersion";'
-            echo
-            echo '=== game ruleset windows ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT id, "rulesetKey", "clientVersion", status, source, "validFrom", "validTo" FROM game_rulesets ORDER BY "clientVersion";'
-            echo
-            echo '=== raw metadata client versions ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT "clientVersion", COUNT(DISTINCT "matchId") AS matches, MIN("fetchedAt") AS first_fetched, MAX("fetchedAt") AS last_fetched FROM raw_match_metadata GROUP BY "clientVersion" ORDER BY "clientVersion";'
-            echo
-            echo '=== raw metadata resolution methods ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT "rulesetResolutionMethod", COUNT(DISTINCT "matchId") AS matches, COUNT(*) AS rows FROM raw_match_metadata GROUP BY "rulesetResolutionMethod" ORDER BY "rulesetResolutionMethod";'
-            echo
-            echo '=== resolved catalog distribution ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT r."resolvedCatalogVersionId", c."clientVersion", COUNT(DISTINCT r."matchId") AS matches FROM raw_match_metadata r LEFT JOIN item_catalog_versions c ON c.id = r."resolvedCatalogVersionId" GROUP BY r."resolvedCatalogVersionId", c."clientVersion" ORDER BY c."clientVersion";'
-            echo
-            echo '=== V3 match-window raw metadata distribution ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT r."clientVersion", r."rulesetResolutionMethod", COUNT(DISTINCT r."matchId") AS matches FROM raw_match_metadata r JOIN matches m ON m."matchId" = r."matchId" WHERE m."startTime" >= TIMESTAMPTZ ''2026-07-18T12:31:22Z'' AND m."startTime" <= TIMESTAMPTZ ''2026-07-28T15:34:17Z'' GROUP BY r."clientVersion", r."rulesetResolutionMethod" ORDER BY r."clientVersion", r."rulesetResolutionMethod";'
-            echo
-            echo '=== policy-window raw metadata distribution ==='
-            sudo docker exec "$postgres" psql -U postgres -d deadlock_builds -X -P pager=off -c 'SELECT r."clientVersion", r."rulesetResolutionMethod", COUNT(DISTINCT r."matchId") AS matches FROM raw_match_metadata r JOIN matches m ON m."matchId" = r."matchId" WHERE m."startTime" >= TIMESTAMPTZ ''2026-07-18T12:31:22Z'' AND m."startTime" <= TIMESTAMPTZ ''2026-07-22T09:32:54Z'' GROUP BY r."clientVersion", r."rulesetResolutionMethod" ORDER BY r."clientVersion", r."rulesetResolutionMethod";'
+            sudo docker exec -i "$postgres" psql -U postgres -d deadlock_builds -X -v ON_ERROR_STOP=1 < "$sql"
           } | tee "$report"
 
       - name: Upload SQL report
