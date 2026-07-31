@@ -1,8 +1,9 @@
 {
   "operation": "CANCEL_STALE_RECOMMENDATION_V8_INSPECTIONS_V1",
-  "requestedAt": "2026-07-31T14:21:00Z",
-  "runIds": [30637657708, 30637256790, 30637023763, 30636791151],
-  "reason": "Release the self-hosted runner for historical catalog backfill.",
+  "requestedAt": "2026-07-31T14:31:00Z",
+  "inspection": 2,
+  "runIds": [30638488619],
+  "reason": "Release the self-hosted runner for the validated release catalog 6637 restart.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
