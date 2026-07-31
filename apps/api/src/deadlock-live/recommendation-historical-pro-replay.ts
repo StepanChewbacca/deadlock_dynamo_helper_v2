@@ -102,7 +102,7 @@ export interface RecommendationHistoricalProReplayRow {
   team: number;
   decisionGameTimeS: number;
   phase: HeroBuildDecisionDatasetV3Row['phase'];
-  timeline: {
+  timeline?: {
     decisionSnapshotJoined: boolean;
   };
   state: {
@@ -318,7 +318,11 @@ export function buildRecommendationHistoricalProReplayAudit(
     )
       ? 0
       : 1;
-    timelineRowCount += row.timeline.decisionSnapshotJoined ? 1 : 0;
+    timelineRowCount +=
+      row.timeline?.decisionSnapshotJoined ??
+      row.shortHorizonOutcomes.some((outcome) => outcome.complete)
+        ? 1
+        : 0;
     candidateCount += row.candidates.length;
     candidateWithMetadataCount += row.candidates.filter(
       (candidate) => candidate.catalogMetadataAvailable,
