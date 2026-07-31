@@ -1,8 +1,8 @@
 {
   "operation": "INSPECT_RECOMMENDATION_V8_RECOVERY",
-  "requestedAt": "2026-07-31T13:36:00Z",
+  "requestedAt": "2026-07-31T13:40:00Z",
   "runId": "30634525625-1-replay-resume-v3",
-  "inspection": 2,
+  "inspection": 3,
   "readOnly": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
