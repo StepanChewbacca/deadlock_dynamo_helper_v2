@@ -1,10 +1,11 @@
 {
   "operation": "INSPECT_RECOMMENDATION_V8_RECOVERY",
-  "requestedAt": "2026-07-31T21:08:00Z",
+  "requestedAt": "2026-08-01T13:05:00Z",
   "runId": "30664768948-1-snapshot-oom-recovery-v1",
-  "inspection": 8,
+  "inspection": 9,
   "includeHistoricalCatalogReadiness": true,
   "verifyIsolationGuards": true,
+  "includeHostMemoryAndKernelOom": true,
   "readOnly": true,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
