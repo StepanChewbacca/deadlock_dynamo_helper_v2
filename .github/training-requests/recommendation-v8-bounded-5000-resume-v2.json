@@ -1,7 +1,9 @@
 {
   "operation": "RESUME_RECOMMENDATION_V8_BOUNDED_5000_V2",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-08-01T13:16:00Z",
+  "reservedAt": "2026-08-01T13:20:00Z",
+  "reservedWorkflowRunId": 30701422914,
   "policyMatchCount": 5000,
   "replayMatchCount": 5000,
   "replayTrainMatchCount": 2500,
