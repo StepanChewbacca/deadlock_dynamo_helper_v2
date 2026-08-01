@@ -1,9 +1,9 @@
 {
   "operation": "CANCEL_STALE_RECOMMENDATION_V8_INSPECTIONS_V1",
-  "requestedAt": "2026-07-31T14:31:00Z",
-  "inspection": 2,
-  "runIds": [30638488619],
-  "reason": "Release the self-hosted runner for the validated release catalog 6637 restart.",
+  "requestedAt": "2026-08-01T13:13:00Z",
+  "inspection": 3,
+  "runIds": [30701236778],
+  "reason": "Release the self-hosted runner from a stale read-only catalog SQL inspection for the bounded 5000-match diagnostic run.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
