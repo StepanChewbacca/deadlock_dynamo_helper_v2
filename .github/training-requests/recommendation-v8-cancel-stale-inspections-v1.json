@@ -1,9 +1,9 @@
 {
   "operation": "CANCEL_STALE_RECOMMENDATION_V8_INSPECTIONS_V1",
-  "requestedAt": "2026-08-01T13:13:00Z",
-  "inspection": 3,
-  "runIds": [30701236778],
-  "reason": "Release the self-hosted runner from a stale read-only catalog SQL inspection for the bounded 5000-match diagnostic run.",
+  "requestedAt": "2026-08-01T13:18:00Z",
+  "inspection": 4,
+  "runIds": [30701422897, 30701422911, 30701422916, 30701422959, 30701422934, 30701422947, 30701422979, 30701422924, 30701422930, 30701422938, 30701422946, 30701422904, 30701422928, 30701422919],
+  "reason": "Cancel stale and no-op Recommendation V8 jobs queued ahead of the isolated bounded 5000-match diagnostic. Do not cancel run 30701422914.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
