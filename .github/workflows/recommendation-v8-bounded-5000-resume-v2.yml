@@ -1,0 +1,195 @@
+name: Recommendation V8 Bounded 5000 Resume V2
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-bounded-5000-resume-v2.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-bounded-5000-resume-v2
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-bounded-5000-resume-v2.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'RESUME_RECOMMENDATION_V8_BOUNDED_5000_V2'
+          python3 -m py_compile scripts/build-recommendation-v8-bounded-sources.py
+          node --check scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: validate
+    if: needs.validate.outputs.run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 720
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Prepare resume run
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-bounded-5000-resume-v2"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          sudo test -s "$storage/build-decision-dataset-v3/dataset.ndjson"
+          test "$(sudo jq -r '.artifact.sha256' "$storage/build-decision-dataset-v3/manifest.json")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(sudo jq -r '.artifact.rowCount' "$storage/build-decision-dataset-v3/manifest.json")" = '6188423'
+          sudo test -d "$storage/recommendation-v8-failed-artifacts/full-run-exit255-30701236827"
+          row="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion", c."payloadHash", r."validFrom", r."validTo", r.status FROM item_catalog_versions c JOIN game_rulesets r ON r.id = c."rulesetId" WHERE c."clientVersion" = 6637;')"
+          test "$(echo "$row" | cut -d'|' -f2)" = '6637'
+          test "$(echo "$row" | cut -d'|' -f6)" = 'active'
+          echo "CATALOG_VERSION_ID=$(echo "$row" | cut -d'|' -f1)" >> "$GITHUB_ENV"
+          echo "BOUNDED_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "BOUNDED_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "BOUNDED_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Build exact 5000-match sources as root
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          bounded="$storage/recommendation-v8-bounded-5000-v1"
+          sudo rm -rf "$bounded"
+          sudo mkdir -p "$bounded"
+          sudo nice -n 10 ionice -c2 -n7 python3 scripts/build-recommendation-v8-bounded-sources.py --source-dir "$storage/build-decision-dataset-v3" --policy-output-dir "$bounded/policy-v3" --replay-output-dir "$bounded/replay-v3" --training-window-start '2026-07-18T12:31:22.000Z' --training-window-end '2026-07-22T09:32:54.000Z' --tuning-start '2026-07-26T05:57:36.000Z' --future-test-start '2026-07-27T20:43:24.000Z' --policy-match-count 5000 --replay-train-match-count 2500 --replay-tuning-match-count 1250 --replay-future-match-count 1250 | tee "$BOUNDED_RUN_DIR/source-build.log"
+          test "$(sudo jq -r '.policy.matchCount' "$bounded/summary.json")" = '5000'
+          test "$(sudo jq -r '.replay.matchCount' "$bounded/summary.json")" = '5000'
+          policy_sha="$(sudo jq -r '.policy.sha256' "$bounded/summary.json")"
+          sudo cp "$bounded/summary.json" "$BOUNDED_RUN_DIR/source-summary.json"
+          sudo chown -R "$(id -u):$(id -g)" "$bounded" "$BOUNDED_RUN_DIR"
+          echo "POLICY_SOURCE_SHA=$policy_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare clean bounded artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          for directory in recommendation-historical-pro-replay-v1 recommendation-pro-decision-dataset-v6-1 recommendation-behavioral-v5-1 recommendation-value-v8-diagnostic-1 recommendation-v6-short-only-dataset-v6-baseline-1 recommendation-value-v8-full-evaluation-1 recommendation-candidate-generator-snapshots-5000-v1; do
+            sudo rm -rf "$storage/$directory"
+          done
+          sudo mkdir -p "$storage/recommendation-candidate-generator-snapshots-5000-v1"
+          sudo chown -R "$(id -u):$(id -g)" "$storage/recommendation-candidate-generator-snapshots-5000-v1"
+          cat > "$BOUNDED_RUN_DIR/run.json" <<JSON
+          {
+            "runId": "$BOUNDED_RUN_ID",
+            "state": "PREPARING",
+            "policyMatchCount": 5000,
+            "replayMatchCount": 5000,
+            "replayTrainMatchCount": 2500,
+            "replayTuningMatchCount": 1250,
+            "replayFutureTestMatchCount": 1250,
+            "containerMemoryMiB": 6144,
+            "cpuLimit": 2,
+            "fullTrainingAuthorized": false,
+            "productionRankingChanged": false,
+            "passiveShadowActivated": false,
+            "randomizedCanaryAuthorized": false
+          }
+          JSON
+
+      - name: Build bounded isolated image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}-bounded-5000-v2"
+          sudo docker build -t "$image" .
+          echo "BOUNDED_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Start resource-limited isolated API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          container='deadlock-recommendation-v8-training'
+          sudo docker run -d --name "$container" --restart=no --cpus=2 --memory=6g --memory-swap=6g --pids-limit=256 --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/policy-v3 -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_DIR=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1 -e DEADLOCK_RECOMMENDATION_HISTORICAL_PRO_REPLAY_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/replay-v3 -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_REGISTRY_PATH=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1/registry.json -e NODE_OPTIONS=--max-old-space-size=4096 --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage --mount "type=bind,src=$BOUNDED_RUN_DIR,dst=/runner" "$BOUNDED_IMAGE"
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+              sudo docker logs --tail=300 "$container"
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$container"
+          exit 1
+
+      - name: Start bounded diagnostic pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$BOUNDED_RUN_DIR/training.log"
+          ln -sfn "$BOUNDED_RUN_DIR" "$BOUNDED_RUN_ROOT/current"
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e SNAPSHOT_ID=v8-5000-c6637-${GITHUB_RUN_ID} -e CANDIDATE_GENERATOR_VERSION=RECOMMENDATION_CANDIDATE_GENERATOR_V6_2_SUPPORT_UNION_5000 -e CANDIDATE_POLICY_VERSION=RECOMMENDATION_CANDIDATE_POLICY_V6_2_SUPPORT_UNION_5000 -e CATALOG_VERSION_ID="$CATALOG_VERSION_ID" -e TRAINING_WINDOW_START=2026-07-18T12:31:22.000Z -e TRAINING_WINDOW_END=2026-07-22T09:32:54.000Z -e TUNING_START=2026-07-26T05:57:36.000Z -e FUTURE_TEST_START=2026-07-27T20:43:24.000Z -e EXPECTED_SNAPSHOT_SOURCE_SHA256="$POLICY_SOURCE_SHA" -e REPLAY_PARTITION_COUNT=16 -e REPLAY_SNAPSHOT_STALENESS_S=300 -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 -e DIAGNOSTIC_MAX_ROWS=2000000 -e PIPELINE_POLL_INTERVAL_MS=10000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
+          for attempt in $(seq 1 90); do
+            if sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null"; then
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('${{ env.BOUNDED_RUN_DIR }}') / 'run.json'
+          value = json.loads(path.read_text())
+          value['state'] = 'RUNNING'
+          value['stage'] = 'DIAGNOSTIC_PIPELINE'
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+              sudo docker stats --no-stream deadlock-recommendation-v8-training
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          tail -n 300 "$BOUNDED_RUN_DIR/training.log" || true
+          exit 1
+
+      - name: Consume request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('.github/training-requests/recommendation-v8-bounded-5000-resume-v2.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          value['deployedCommit'] = '${{ github.sha }}'
+          value['trainingRunId'] = '${{ env.BOUNDED_RUN_ID }}'
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/training-requests/recommendation-v8-bounded-5000-resume-v2.json
+          git commit -m 'chore: consume Recommendation V8 bounded 5000 resume'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
