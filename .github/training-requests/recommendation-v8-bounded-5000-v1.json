@@ -1,7 +1,10 @@
 {
   "operation": "RUN_RECOMMENDATION_V8_BOUNDED_5000_V1",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-08-01T13:10:00Z",
+  "consumedAt": "2026-08-01T13:20:30Z",
+  "result": "REPLACED_BY_RESUME_V2_AFTER_ROOT_VOLUME_PERMISSION_FAILURE",
+  "failedWorkflowRunId": 30701236827,
   "policyMatchCount": 5000,
   "replayMatchCount": 5000,
   "replayTrainMatchCount": 2500,
