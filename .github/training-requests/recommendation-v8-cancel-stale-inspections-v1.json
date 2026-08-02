@@ -1,9 +1,9 @@
 {
   "operation": "CANCEL_STALE_RECOMMENDATION_V8_INSPECTIONS_V1",
-  "requestedAt": "2026-08-01T13:21:00Z",
-  "inspection": 5,
-  "runIds": [30701481417, 30701481432],
-  "reason": "Cancel the superseded bounded V1 run and duplicate V2 run. Preserve the reserved bounded resume run 30701422914.",
+  "requestedAt": "2026-08-02T13:35:00Z",
+  "inspection": 6,
+  "runIds": [30750138742],
+  "reason": "Release the self-hosted runner for the validated ENOSPC cleanup and checkpoint resume run 30750138767.",
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
   "randomizedCanaryAuthorized": false
