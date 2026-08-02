@@ -1,0 +1,59 @@
+name: Recommendation V8 Recovery Locator V1
+
+on:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-recovery-locator-v1.json'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Locate recovery workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result='.github/training-results/recommendation-v8-recovery-locator-v1.json'
+          mkdir -p "$(dirname "$result")"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            '/repos/StepanChewbacca/deadlock_dynamo_helper_v2/actions/runs?branch=agent%2Frecommendation-value-v8-passive-shadow-1&per_page=100' \
+            | jq '{
+                generatedAt: (now | todateiso8601),
+                runs: [
+                  .workflow_runs[]
+                  | select(.name == "Recommendation V8 Timeline Audit Fix Resume V1")
+                  | {
+                      id,
+                      name,
+                      event,
+                      status,
+                      conclusion,
+                      run_number,
+                      run_attempt,
+                      head_sha,
+                      created_at,
+                      updated_at,
+                      html_url
+                    }
+                ]
+              }' > "$result"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$result"
+          git commit -m 'chore: publish V8 recovery workflow location'
+          git push origin agent/recommendation-value-v8-passive-shadow-1
