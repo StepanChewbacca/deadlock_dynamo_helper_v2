@@ -1,0 +1,96 @@
+name: Recommendation V8 Replay Finalization ENOSPC V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-replay-finalization-enospc-v1
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Validate request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'Request already consumed.'
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'FIX_RECOMMENDATION_V8_REPLAY_FINALIZATION_ENOSPC_V1'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+
+      - name: Apply patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(jq -r '.state' .github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json)" = 'CONSUMED' ]; then
+            exit 0
+          fi
+          python3 scripts/patch-recommendation-v8-replay-finalization-enospc-v1.py
+          git diff --check
+
+      - name: Install dependencies
+        if: ${{ hashFiles('.github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json') != '' }}
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Run replay tests
+        run: yarn workspace @deadlock-live-probe/api test --runInBand recommendation-historical-pro-replay-artifact.spec.ts recommendation-historical-replay-audit-recovery-v2.spec.ts
+
+      - name: Commit validated fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(jq -r '.state' .github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json)" = 'CONSUMED' ]; then
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('.github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts .github/training-requests/recommendation-v8-replay-finalization-enospc-v1.json
+          git commit -m 'fix: make replay finalization disk bounded'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
