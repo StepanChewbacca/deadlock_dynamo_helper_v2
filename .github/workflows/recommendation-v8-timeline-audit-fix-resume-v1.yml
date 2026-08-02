@@ -1,0 +1,300 @@
+name: Recommendation V8 Timeline Audit Fix Resume V1
+
+on:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-timeline-audit-fix-resume-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-timeline-audit-fix-resume-v1
+  cancel-in-progress: false
+
+jobs:
+  fix-and-resume:
+    runs-on: self-hosted
+    timeout-minutes: 360
+    steps:
+      - name: Checkout fixed branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Validate request and recovery script
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-timeline-audit-fix-resume-v1.json'
+          test "$(jq -r '.operation' "$request")" = 'FIX_REAUDIT_AND_RESUME_RECOMMENDATION_V8_V1'
+          test "$(jq -r '.state' "$request")" = 'REQUESTED'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          node --check scripts/reaudit-recommendation-historical-pro-replay.mjs
+          node --check scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs
+
+      - name: Verify completed bounded replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          replay="$storage/recommendation-historical-pro-replay-v1"
+          test -s "$replay/dataset.ndjson"
+          test -s "$replay/audit.json"
+          test -s "$replay/manifest.json"
+          test "$(sudo jq -r '.artifact.sha256' "$replay/manifest.json")" = '4d3aa9d7ae819ecc314cbaa389314a90058ac330f87ffbd5e42aa4cff759d33f'
+          test "$(sudo jq -r '.artifact.rowCount' "$replay/manifest.json")" = '1023598'
+          test "$(sudo jq -r '.passed' "$replay/audit.json")" = 'false'
+          test "$(sudo jq -r '.reasons | length' "$replay/audit.json")" = '1'
+          test "$(sudo jq -r '.source.excludedWithoutTimelineCount' "$replay/audit.json")" = '0'
+          test "$(sudo jq -r '.source.excludedWithoutGeneratorSnapshotCount' "$replay/audit.json")" = '0'
+
+      - name: Prepare recovery run
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-timeline-audit-fix-v1"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          ln -sfn "$run_dir" "$run_root/current"
+          row="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion" FROM item_catalog_versions c WHERE c."clientVersion" = 6637 ORDER BY c.id DESC LIMIT 1;')"
+          test "$(echo "$row" | cut -d'|' -f2)" = '6637'
+          echo "CATALOG_VERSION_ID=$(echo "$row" | cut -d'|' -f1)" >> "$GITHUB_ENV"
+          echo "RECOVERY_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "RECOVERY_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "RECOVERY_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          cat > "$run_dir/run.json" <<JSON
+          {
+            "runId": "$run_id",
+            "state": "PREPARING",
+            "stage": "TIMELINE_AUDIT_FIX",
+            "sourceReplaySha256": "4d3aa9d7ae819ecc314cbaa389314a90058ac330f87ffbd5e42aa4cff759d33f",
+            "sourceReplayRowCount": 1023598,
+            "fullTrainingAuthorized": false,
+            "productionRankingChanged": false,
+            "passiveShadowActivated": false,
+            "randomizedCanaryAuthorized": false
+          }
+          JSON
+
+      - name: Build fixed isolated image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}-timeline-audit-fix-v1"
+          sudo docker build -t "$image" .
+          echo "RECOVERY_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Replace idle isolated training API
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          if sudo docker ps --format '{{.Names}}' | grep -Fxq "$container"; then
+            if sudo docker exec "$container" sh -lc "pgrep -f 'run-recommendation-v8-diagnostic-only-pipeline.mjs|run-recommendation-v8-training-supervisor.mjs' >/dev/null"; then
+              echo 'An active training process exists; refusing to replace it.' >&2
+              exit 1
+            fi
+          fi
+          sudo docker rm -f "$container" >/dev/null 2>&1 || true
+          sudo docker run -d \
+            --name "$container" \
+            --restart=no \
+            --cpus=2 \
+            --memory=6g \
+            --memory-swap=6g \
+            --pids-limit=256 \
+            --network aboba-telegramovich_default \
+            -p 127.0.0.1:3010:3000 \
+            --env-file "$deploy_dir/.env" \
+            -e DB_HOST=aboba-telegramovich-postgres-1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=postgres \
+            -e DB_NAME=deadlock_builds \
+            -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false \
+            -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false \
+            -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false \
+            -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false \
+            -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/policy-v3 \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_DIR=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1 \
+            -e DEADLOCK_RECOMMENDATION_HISTORICAL_PRO_REPLAY_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/replay-v3 \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_REGISTRY_PATH=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1/registry.json \
+            -e NODE_OPTIONS=--max-old-space-size=4096 \
+            --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage \
+            --mount "type=bind,src=$RECOVERY_RUN_DIR,dst=/runner" \
+            "$RECOVERY_IMAGE"
+
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' "$container")" != 'true' ]; then
+              sudo docker logs --tail=300 "$container"
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 "$container"
+          exit 1
+
+      - name: Re-audit immutable replay artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('${{ env.RECOVERY_RUN_DIR }}') / 'run.json'
+          value = json.loads(path.read_text())
+          value['state'] = 'RUNNING'
+          value['stage'] = 'REAUDITING_REPLAY'
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          sudo docker exec \
+            -e REAUDIT_RESULT_PATH=/runner/reaudit-result.json \
+            deadlock-recommendation-v8-training \
+            sh -lc 'node /app/scripts/reaudit-recommendation-historical-pro-replay.mjs 2>&1 | tee /runner/reaudit.log'
+          test "$(jq -r '.auditPassed' "$RECOVERY_RUN_DIR/reaudit-result.json")" = 'true'
+          test "$(jq -r '.trainingArtifactEligible' "$RECOVERY_RUN_DIR/reaudit-result.json")" = 'true'
+          test "$(jq -r '.timelineCoverage' "$RECOVERY_RUN_DIR/reaudit-result.json")" = '1'
+
+      - name: Reload corrected audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker restart deadlock-recommendation-v8-training >/dev/null
+          for attempt in $(seq 1 120); do
+            status="$(curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
+            if [ "$(jq -r '.auditPassed // false' <<<"$status" 2>/dev/null || true)" = 'true' ]; then
+              echo "$status" | tee "$RECOVERY_RUN_DIR/replay-status-after-fix.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          exit 1
+
+      - name: Restart bounded diagnostic training
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$RECOVERY_RUN_DIR/training.log"
+          sudo docker exec -d \
+            -e API_BASE_URL=http://127.0.0.1:3000 \
+            -e SNAPSHOT_ID=v8-5000-c6637-30701422914 \
+            -e CANDIDATE_GENERATOR_VERSION=RECOMMENDATION_CANDIDATE_GENERATOR_V6_2_SUPPORT_UNION_5000 \
+            -e CANDIDATE_POLICY_VERSION=RECOMMENDATION_CANDIDATE_POLICY_V6_2_SUPPORT_UNION_5000 \
+            -e CATALOG_VERSION_ID="$CATALOG_VERSION_ID" \
+            -e TRAINING_WINDOW_START=2026-07-18T12:31:22.000Z \
+            -e TRAINING_WINDOW_END=2026-07-22T09:32:54.000Z \
+            -e TUNING_START=2026-07-26T05:57:36.000Z \
+            -e FUTURE_TEST_START=2026-07-27T20:43:24.000Z \
+            -e REPLAY_PARTITION_COUNT=16 \
+            -e REPLAY_SNAPSHOT_STALENESS_S=300 \
+            -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 \
+            -e DIAGNOSTIC_MAX_ROWS=2000000 \
+            -e PIPELINE_POLL_INTERVAL_MS=10000 \
+            -e PIPELINE_TIMEOUT_MS=172800000 \
+            -e PIPELINE_REQUEST_TIMEOUT_MS=30000 \
+            -e PIPELINE_REQUEST_RETRY_COUNT=240 \
+            -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 \
+            deadlock-recommendation-v8-training \
+            sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
+
+          for attempt in $(seq 1 120); do
+            if sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null"; then
+              break
+            fi
+            sleep 1
+          done
+          sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null"
+
+          for attempt in $(seq 1 60); do
+            dataset_status="$(curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status || true)"
+            dataset_state="$(jq -r '.state // empty' <<<"$dataset_status" 2>/dev/null || true)"
+            if [ "$dataset_state" = 'RUNNING' ] || [ "$dataset_state" = 'COMPLETE' ]; then
+              echo "$dataset_status" | tee "$RECOVERY_RUN_DIR/dataset-v6-status.json"
+              break
+            fi
+            sleep 2
+          done
+          test -s "$RECOVERY_RUN_DIR/dataset-v6-status.json"
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('${{ env.RECOVERY_RUN_DIR }}') / 'run.json'
+          value = json.loads(path.read_text())
+          value['state'] = 'RUNNING'
+          value['stage'] = 'DIAGNOSTIC_PIPELINE'
+          value['trainingRestartedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          sudo docker stats --no-stream deadlock-recommendation-v8-training | tee "$RECOVERY_RUN_DIR/docker-stats.txt"
+
+      - name: Publish recovery result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result='.github/training-results/recommendation-v8-timeline-audit-fix-resume-v1.json'
+          mkdir -p "$(dirname "$result")"
+          jq -n \
+            --arg generatedAt "$(date --iso-8601=seconds)" \
+            --arg commitSha "$GITHUB_SHA" \
+            --arg image "${RECOVERY_IMAGE:-}" \
+            --arg runId "${RECOVERY_RUN_ID:-}" \
+            --slurpfile run "${RECOVERY_RUN_DIR:-/nonexistent}/run.json" \
+            --slurpfile reaudit "${RECOVERY_RUN_DIR:-/nonexistent}/reaudit-result.json" \
+            --slurpfile replayStatus "${RECOVERY_RUN_DIR:-/nonexistent}/replay-status-after-fix.json" \
+            --slurpfile datasetStatus "${RECOVERY_RUN_DIR:-/nonexistent}/dataset-v6-status.json" \
+            '{
+              generatedAt: $generatedAt,
+              commitSha: $commitSha,
+              image: $image,
+              runId: $runId,
+              run: ($run[0] // {}),
+              reaudit: ($reaudit[0] // {}),
+              replayStatus: ($replayStatus[0] // {}),
+              datasetV6Status: ($datasetStatus[0] // {})
+            }' > "$result"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin agent/recommendation-value-v8-passive-shadow-1
+          git checkout agent/recommendation-value-v8-passive-shadow-1
+          git pull --rebase origin agent/recommendation-value-v8-passive-shadow-1
+          git add "$result"
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: publish V8 timeline audit recovery result'
+            git push origin agent/recommendation-value-v8-passive-shadow-1
+          fi
+
+      - name: Upload recovery logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-timeline-audit-fix-${{ github.run_id }}
+          path: |
+            ${{ env.RECOVERY_RUN_DIR }}/run.json
+            ${{ env.RECOVERY_RUN_DIR }}/reaudit.log
+            ${{ env.RECOVERY_RUN_DIR }}/reaudit-result.json
+            ${{ env.RECOVERY_RUN_DIR }}/replay-status-after-fix.json
+            ${{ env.RECOVERY_RUN_DIR }}/dataset-v6-status.json
+            ${{ env.RECOVERY_RUN_DIR }}/training.log
+            ${{ env.RECOVERY_RUN_DIR }}/docker-stats.txt
+          if-no-files-found: warn
+          retention-days: 14
