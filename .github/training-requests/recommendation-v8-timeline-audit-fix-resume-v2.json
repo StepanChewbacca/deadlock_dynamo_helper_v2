@@ -1,0 +1,15 @@
+{
+  "operation": "FIX_REAUDIT_AND_RESUME_RECOMMENDATION_V8_V2",
+  "state": "REQUESTED",
+  "requestedAt": "2026-08-02T22:39:00Z",
+  "rootCause": "STREAMING_AUDIT_COUNTED_COMPLETE_HORIZON_AS_TIMELINE_JOIN",
+  "preserveReplayDatasetSha256": "4d3aa9d7ae819ecc314cbaa389314a90058ac330f87ffbd5e42aa4cff759d33f",
+  "preserveReplayRowCount": 1023598,
+  "rebuildReplay": false,
+  "restartFromStage": "DATASET_V6",
+  "diagnosticOnly": true,
+  "fullTrainingAuthorized": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
