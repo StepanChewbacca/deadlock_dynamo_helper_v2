@@ -1,0 +1,9 @@
+{
+  "operation": "INSPECT_RECOMMENDATION_V8_REPLAY_AUDIT_V1",
+  "requestedAt": "2026-08-02T22:16:00Z",
+  "runId": "30701422914-1-bounded-5000-resume-v2",
+  "readOnly": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
