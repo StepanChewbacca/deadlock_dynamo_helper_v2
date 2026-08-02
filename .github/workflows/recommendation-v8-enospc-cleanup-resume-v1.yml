@@ -1,0 +1,313 @@
+name: Recommendation V8 ENOSPC Cleanup Resume V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-enospc-cleanup-resume-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-enospc-cleanup-resume-v1
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-enospc-cleanup-resume-v1.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'CLEAN_AND_RESUME_RECOMMENDATION_V8_BOUNDED_5000_ENOSPC_V1'
+          test "$(jq -r '.preserveCheckpoint' "$request")" = 'true'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+  cleanup-and-resume:
+    needs: validate
+    if: needs.validate.outputs.run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 180
+    steps:
+      - name: Checkout disk-bounded replay source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify immutable inputs and checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-bounded-5000-enospc-resume-v1"
+          run_dir="$run_root/runs/$run_id"
+          replay="$storage/recommendation-historical-pro-replay-v1"
+          snapshots="$storage/recommendation-candidate-generator-snapshots-5000-v1"
+          bounded="$storage/recommendation-v8-bounded-5000-v1"
+          snapshot_id='v8-5000-c6637-30701422914'
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          sudo test -s "$storage/build-decision-dataset-v3/dataset.ndjson"
+          test "$(sudo jq -r '.artifact.sha256' "$storage/build-decision-dataset-v3/manifest.json")" = 'ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad'
+          test "$(sudo jq -r '.artifact.rowCount' "$storage/build-decision-dataset-v3/manifest.json")" = '6188423'
+          sudo test -s "$snapshots/$snapshot_id.json"
+          sudo test -s "$snapshots/$snapshot_id.audit.json"
+          test "$(sudo jq -r '.passed' "$snapshots/$snapshot_id.audit.json")" = 'true'
+          test "$(sudo jq -r --arg id "$snapshot_id" '[.snapshots[] | select(.snapshotId == $id)] | length' "$snapshots/registry.json")" = '1'
+          sudo test -s "$bounded/summary.json"
+          test "$(sudo jq -r '.policy.matchCount' "$bounded/summary.json")" = '5000'
+          test "$(sudo jq -r '.replay.matchCount' "$bounded/summary.json")" = '5000'
+          sudo test -s "$replay/work/checkpoint.json"
+          test "$(sudo jq -r '.partitioningComplete' "$replay/work/checkpoint.json")" = 'true'
+          completed="$(sudo jq -r '.completedPartitions | length' "$replay/work/checkpoint.json")"
+          test "$completed" -ge 12
+          test "$completed" -lt 16
+          policy_sha="$(sudo jq -r '.policy.sha256' "$bounded/summary.json")"
+          row="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion", r.status FROM item_catalog_versions c JOIN game_rulesets r ON r.id = c."rulesetId" WHERE c."clientVersion" = 6637;')"
+          test "$(echo "$row" | cut -d'|' -f2)" = '6637'
+          test "$(echo "$row" | cut -d'|' -f3)" = 'active'
+          echo "CATALOG_VERSION_ID=$(echo "$row" | cut -d'|' -f1)" >> "$GITHUB_ENV"
+          echo "POLICY_SOURCE_SHA=$policy_sha" >> "$GITHUB_ENV"
+          echo "V8_STORAGE=$storage" >> "$GITHUB_ENV"
+          echo "V8_REPLAY=$replay" >> "$GITHUB_ENV"
+          echo "V8_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "V8_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "V8_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "V8_SNAPSHOT_ID=$snapshot_id" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_COMPLETED=$completed" >> "$GITHUB_ENV"
+
+      - name: Audit disk before cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "generatedAt=$(date --iso-8601=seconds)"
+            echo "checkpointCompleted=$CHECKPOINT_COMPLETED"
+            echo '=== filesystem ==='
+            df -hT /
+            df -B1 /
+            echo '=== storage top level ==='
+            sudo du -xhd1 "$V8_STORAGE" 2>/dev/null | sort -h | tail -n 80
+            echo '=== replay work ==='
+            sudo du -xhd2 "$V8_REPLAY/work" 2>/dev/null | sort -h | tail -n 80
+            echo '=== Docker usage ==='
+            sudo docker system df
+            echo '=== isolated container ==='
+            sudo docker ps -a --filter 'name=^/deadlock-recommendation-v8-training$' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+          } | tee "$V8_RUN_DIR/disk-before.txt"
+
+      - name: Preserve small failure evidence and remove obsolete datasets
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$V8_RUN_DIR/removed-artifact-evidence"
+          failed="$V8_STORAGE/recommendation-v8-failed-artifacts"
+          mkdir -p "$evidence"
+          if sudo test -d "$failed"; then
+            sudo find "$failed" -maxdepth 6 -type f -printf '%s %p\n' 2>/dev/null | sort -n > "$V8_RUN_DIR/failed-artifact-inventory.txt" || true
+            while IFS= read -r file; do
+              [ -n "$file" ] || continue
+              rel="${file#${failed}/}"
+              mkdir -p "$evidence/$(dirname "$rel")"
+              sudo cp "$file" "$evidence/$rel"
+            done < <(sudo find "$failed" -maxdepth 6 -type f \( -name 'manifest.json' -o -name 'audit.json' -o -name 'status.json' -o -name '*.txt' \) -size -4M 2>/dev/null | head -n 300)
+            sudo rm -rf "$failed"
+          fi
+          obsolete=(
+            recommendation-pro-decision-dataset-v6-1
+            recommendation-behavioral-v5-1
+            recommendation-value-v8-diagnostic-1
+            recommendation-v6-short-only-dataset-v6-baseline-1
+            recommendation-value-v8-full-evaluation-1
+            recommendation-value-v8-passive-shadow-1
+            recommendation-value-v5-scale-sweep-full-crawler-20260725
+            recommendation-value-v5-full-crawler-recovery-v3-20260725
+            recommendation-value-v4-training-historical-bootstrap
+            recommendation-value-v4-training-historical-bootstrap-tuning
+            recommendation-value-v4-full-crawler-20260724
+            recommendation-value-v4-training-historical-bootstrap-v2
+            contextual-v3-candidate-evaluation-full-crawler-20260724
+            match-timeline-events-v1-historical-db-20260726
+            recommendation-value-v4-full-crawler-recovery-v3-20260725
+            recommendation-behavioral-v4-full-crawler-20260724
+            recommendation-behavioral-v4-training-historical-bootstrap
+            recommendation-decision-dataset-v5-full-crawler-20260726
+            recommendation-decision-dataset-v5-full-crawler-db-timeline-20260726
+            recommendation-policy-v4-evaluation-historical-bootstrap
+            recommendation-policy-v7-catboost-db-timeline-20260726
+            contextual-v3-candidate-evaluation-full-crawler-recovery-v3-20260725
+            contextual-v3-training-full-crawler-20260724
+            recommendation-policy-v6-prior-sweep-db-timeline-20260726
+            recommendation-value-v6-full-crawler-20260726
+            recommendation-value-v6-full-crawler-db-timeline-20260726
+            build-decision-dataset-v3-full-crawler-20260724
+            recommendation-behavioral-v4-full-crawler-recovery-v3-20260725
+            recommendation-policy-v6-full-crawler-20260726
+            recommendation-policy-v6-full-crawler-db-timeline-20260726
+            recommendation-value-v7-catboost-db-timeline-20260726
+            recommendation-value-v6-prior-sweep-db-timeline-20260726
+            recommendation-decision-dataset-v4-full-crawler-recovery-v3-20260725
+          )
+          for name in "${obsolete[@]}"; do
+            sudo rm -rf "$V8_STORAGE/$name"
+          done
+          sudo find "$V8_STORAGE/recommendation-candidate-generator-snapshots" "$V8_STORAGE/recommendation-candidate-generator-snapshots-5000-v1" -maxdepth 1 -type f -name '*.partial' -mmin +30 -delete 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$V8_RUN_DIR"
+
+      - name: Prune unused Docker build data
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker builder prune -af
+          sudo docker image prune -af --filter 'until=24h'
+
+      - name: Verify enough space for checkpoint resume
+        shell: bash
+        run: |
+          set -euo pipefail
+          free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
+          output_bytes="$(sudo du -sb "$V8_REPLAY/work/output-parts" 2>/dev/null | awk '{print $1}')"
+          output_bytes="${output_bytes:-0}"
+          completed="$(sudo jq -r '.completedPartitions | length' "$V8_REPLAY/work/checkpoint.json")"
+          remaining=$((16 - completed))
+          if [ "$completed" -gt 0 ]; then
+            estimated_remaining=$((output_bytes * remaining / completed))
+          else
+            estimated_remaining=$((20 * 1024 * 1024 * 1024))
+          fi
+          safety=$((10 * 1024 * 1024 * 1024))
+          required=$((estimated_remaining + safety))
+          {
+            echo "freeBytes=$free_bytes"
+            echo "existingOutputBytes=$output_bytes"
+            echo "completedPartitions=$completed"
+            echo "remainingPartitions=$remaining"
+            echo "estimatedRemainingOutputBytes=$estimated_remaining"
+            echo "requiredFreeBytes=$required"
+            df -hT /
+            sudo du -xhd1 "$V8_STORAGE" 2>/dev/null | sort -h | tail -n 80
+            sudo docker system df
+          } | tee "$V8_RUN_DIR/disk-after-cleanup.txt"
+          test "$free_bytes" -ge "$required"
+
+      - name: Replace only isolated API with disk-bounded image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}-bounded-5000-enospc-v1"
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          sudo docker build -t "$image" .
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --cpus=2 --memory=6g --memory-swap=6g --pids-limit=256 --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/policy-v3 -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_DIR=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1 -e DEADLOCK_RECOMMENDATION_HISTORICAL_PRO_REPLAY_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/replay-v3 -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_REGISTRY_PATH=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1/registry.json -e NODE_OPTIONS=--max-old-space-size=4096 --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage --mount "type=bind,src=$V8_RUN_DIR,dst=/runner" "$image"
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status >/dev/null; then
+              echo "V8_IMAGE=$image" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          exit 1
+
+      - name: Resume gated bounded diagnostic pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$V8_RUN_DIR/training.log"
+          cat > "$V8_RUN_DIR/run.json" <<JSON
+          {
+            "runId": "$V8_RUN_ID",
+            "state": "RUNNING",
+            "stage": "HISTORICAL_REPLAY_RESUME",
+            "snapshotId": "$V8_SNAPSHOT_ID",
+            "checkpointCompletedBeforeResume": $CHECKPOINT_COMPLETED,
+            "fullTrainingAuthorized": false,
+            "productionRankingChanged": false,
+            "passiveShadowActivated": false,
+            "randomizedCanaryAuthorized": false
+          }
+          JSON
+          ln -sfn "$V8_RUN_DIR" "$V8_RUN_ROOT/current"
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e SNAPSHOT_ID="$V8_SNAPSHOT_ID" -e CANDIDATE_GENERATOR_VERSION=RECOMMENDATION_CANDIDATE_GENERATOR_V6_2_SUPPORT_UNION_5000 -e CANDIDATE_POLICY_VERSION=RECOMMENDATION_CANDIDATE_POLICY_V6_2_SUPPORT_UNION_5000 -e CATALOG_VERSION_ID="$CATALOG_VERSION_ID" -e TRAINING_WINDOW_START=2026-07-18T12:31:22.000Z -e TRAINING_WINDOW_END=2026-07-22T09:32:54.000Z -e TUNING_START=2026-07-26T05:57:36.000Z -e FUTURE_TEST_START=2026-07-27T20:43:24.000Z -e EXPECTED_SNAPSHOT_SOURCE_SHA256="$POLICY_SOURCE_SHA" -e REPLAY_PARTITION_COUNT=16 -e REPLAY_SNAPSHOT_STALENESS_S=300 -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 -e DIAGNOSTIC_MAX_ROWS=2000000 -e PIPELINE_POLL_INTERVAL_MS=10000 -e PIPELINE_TIMEOUT_MS=172800000 -e PIPELINE_REQUEST_TIMEOUT_MS=30000 -e PIPELINE_REQUEST_RETRY_COUNT=240 -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 deadlock-recommendation-v8-training sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
+          for attempt in $(seq 1 180); do
+            state="$(curl --silent --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq -r '.state // empty' 2>/dev/null || true)"
+            phase="$(curl --silent --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq -r '.phase // empty' 2>/dev/null || true)"
+            processed="$(curl --silent --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq -r '.processedPartitionCount // 0' 2>/dev/null || true)"
+            if [ "$state" = 'RUNNING' ] && { [ "$phase" = 'REPLAYING' ] || [ "$phase" = 'FINALIZING' ]; }; then
+              test "$processed" -ge "$CHECKPOINT_COMPLETED"
+              curl --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq
+              sudo docker stats --no-stream deadlock-recommendation-v8-training
+              exit 0
+            fi
+            if [ "$state" = 'COMPLETE' ]; then
+              curl --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq
+              exit 0
+            fi
+            if [ "$state" = 'FAILED' ]; then
+              curl --silent http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq
+              tail -n 300 "$V8_RUN_DIR/training.log" || true
+              exit 1
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          tail -n 300 "$V8_RUN_DIR/training.log" || true
+          exit 1
+
+      - name: Consume request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path('.github/training-requests/recommendation-v8-enospc-cleanup-resume-v1.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          value['deployedCommit'] = '${{ github.sha }}'
+          value['trainingRunId'] = '${{ env.V8_RUN_ID }}'
+          value['checkpointCompletedBeforeResume'] = int('${{ env.CHECKPOINT_COMPLETED }}')
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/training-requests/recommendation-v8-enospc-cleanup-resume-v1.json
+          git commit -m 'chore: consume V8 ENOSPC cleanup resume request'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Upload cleanup audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-enospc-cleanup-resume-${{ github.run_id }}
+          path: ${{ env.V8_RUN_DIR }}
+          if-no-files-found: warn
+          retention-days: 14
