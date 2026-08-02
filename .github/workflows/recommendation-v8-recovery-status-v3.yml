@@ -28,46 +28,69 @@ jobs:
         run: |
           set -euo pipefail
           run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
-          run_dir="$(readlink -f "$run_root/current")"
+          bounded_run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_dir="$(readlink -f "$run_root/current" 2>/dev/null || true)"
+          bounded_run_dir="$(readlink -f "$bounded_run_root/current" 2>/dev/null || true)"
           container='deadlock-recommendation-v8-training'
           storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          replay="$storage/recommendation-historical-pro-replay-v1"
           report="$RUNNER_TEMP/recommendation-v8-recovery-status.txt"
-          test -d "$run_dir"
           {
             echo "generatedAt=$(date --iso-8601=seconds)"
             echo "runDir=$run_dir"
+            echo "boundedRunDir=$bounded_run_dir"
             echo
-            echo '=== supervisor status ==='
-            cat "$run_dir/status.json" 2>/dev/null || true
+            echo '=== full supervisor status ==='
+            [ -n "$run_dir" ] && cat "$run_dir/status.json" 2>/dev/null || true
+            echo
+            echo '=== bounded run files ==='
+            if [ -n "$bounded_run_dir" ]; then
+              cat "$bounded_run_dir/run.json" 2>/dev/null || true
+              cat "$bounded_run_dir/status.json" 2>/dev/null || true
+              tail -n 160 "$bounded_run_dir/training.log" 2>/dev/null || true
+            fi
             echo
             echo '=== isolated container and processes ==='
             sudo docker ps -a --filter "name=^/${container}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-            sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} startedAt={{.State.StartedAt}}' "$container" 2>/dev/null || true
+            sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}}' "$container" 2>/dev/null || true
             sudo docker exec "$container" sh -lc "ps -eo pid,etime,rss,args | grep -E 'recommendation-v8|node /runner' | grep -v grep || true" 2>/dev/null || true
             echo
-            echo '=== active artifact files ==='
-            sudo find "$storage/recommendation-candidate-generator-snapshots" "$storage/recommendation-historical-pro-replay-v1" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %s %p\n' 2>/dev/null | sort | tail -n 40 || true
+            echo '=== filesystem ==='
+            df -hT /
+            df -B1 /
+            sudo docker system df || true
             echo
-            echo '=== active artifact sizes ==='
-            sudo du -sh "$storage/recommendation-candidate-generator-snapshots" "$storage/recommendation-historical-pro-replay-v1" 2>/dev/null || true
+            echo '=== replay checkpoint ==='
+            sudo cat "$replay/work/checkpoint.json" 2>/dev/null || true
             echo
-            echo '=== current API stage ==='
+            echo '=== replay artifact files ==='
+            sudo stat -c '%n size=%s blocks=%b modified=%y' "$replay/dataset.ndjson" "$replay/manifest.json" "$replay/audit.json" 2>/dev/null || true
+            sudo du -sh "$replay" "$replay/work/source-parts" "$replay/work/output-parts" 2>/dev/null || true
+            echo
+            echo '=== replay status ==='
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true
+            echo
+            echo '=== replay audit ==='
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/audit || sudo cat "$replay/audit.json" 2>/dev/null || true
+            echo
+            echo '=== replay manifest ==='
+            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/manifest || sudo cat "$replay/manifest.json" 2>/dev/null || true
+            echo
+            echo '=== downstream status ==='
+            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status || true
+            echo
+            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5/status || true
+            echo
+            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status || true
+            echo
+            echo '=== candidate snapshot status ==='
             curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-candidate-generator-snapshots/status || true
             echo
-            curl --silent --show-error --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true
-            echo
-            echo '=== historical catalog status ==='
-            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/catalogs/history/status || true
-            echo
-            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/rulesets/windows/status || true
-            echo
-            curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/reference-data/catalogs || true
-            echo
-            echo '=== training log tail ==='
-            tail -n 120 "$run_dir/training.log" 2>/dev/null || true
+            echo '=== active artifact sizes ==='
+            sudo du -xhd1 "$storage" 2>/dev/null | sort -h | tail -n 80 || true
             echo
             echo '=== recent container warnings/errors ==='
-            sudo docker logs --since=10m "$container" 2>&1 | grep -E 'ERROR|WARN|completed|failed|processed|exported|cache' | tail -n 120 || true
+            sudo docker logs --since=30m "$container" 2>&1 | grep -E 'ERROR|WARN|completed|failed|processed|exported|cache|audit' | tail -n 200 || true
           } | tee "$report"
 
       - name: Upload status report
