@@ -14,7 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-catalog-readiness-sql-v1.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" != 'REQUESTED' ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$(jq -r '.operation' "$request")" = 'INSPECT_CATALOG_READINESS_SQL_V1'
+          test "$(jq -r '.readOnly' "$request")" = 'true'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
   inspect:
+    needs: validate
+    if: needs.validate.outputs.run == 'true'
     runs-on: self-hosted
     timeout-minutes: 10
     steps:
@@ -72,44 +99,6 @@ jobs:
           GROUP BY key
           ORDER BY key;
 
-          \echo '=== match_info raw payload keys ==='
-          SELECT key, COUNT(*) AS rows
-          FROM raw_match_metadata r
-          CROSS JOIN LATERAL jsonb_object_keys(
-            CASE WHEN jsonb_typeof(r.payload->'match_info') = 'object'
-              THEN r.payload->'match_info' ELSE '{}'::jsonb END
-          ) AS key
-          GROUP BY key
-          ORDER BY key;
-
-          \echo '=== recursive version/build-like paths in recent payload samples ==='
-          WITH RECURSIVE roots AS (
-            SELECT id, payload
-            FROM raw_match_metadata
-            ORDER BY id DESC
-            LIMIT 50
-          ), walk AS (
-            SELECT id, ARRAY[]::text[] AS path, payload AS value
-            FROM roots
-            UNION ALL
-            SELECT walk.id, walk.path || child.key, child.value
-            FROM walk
-            CROSS JOIN LATERAL jsonb_each(
-              CASE WHEN jsonb_typeof(walk.value) = 'object'
-                THEN walk.value ELSE '{}'::jsonb END
-            ) AS child
-          )
-          SELECT array_to_string(path, '.') AS path,
-                 LEFT(value #>> '{}', 160) AS sample_value,
-                 COUNT(*) AS occurrences
-          FROM walk
-          WHERE path <> ARRAY[]::text[]
-            AND (path[array_length(path, 1)] ILIKE '%version%'
-              OR path[array_length(path, 1)] ILIKE '%build%')
-            AND jsonb_typeof(value) IN ('string', 'number', 'boolean')
-          GROUP BY array_to_string(path, '.'), LEFT(value #>> '{}', 160)
-          ORDER BY path, occurrences DESC;
-
           \echo '=== V3 match-window raw metadata distribution ==='
           SELECT r."clientVersion", r."rulesetResolutionMethod",
                  COUNT(DISTINCT r."matchId") AS matches
@@ -117,16 +106,6 @@ jobs:
           JOIN matches m ON m."matchId" = r."matchId"
           WHERE m."startTime" >= TIMESTAMPTZ '2026-07-18T12:31:22Z'
             AND m."startTime" <= TIMESTAMPTZ '2026-07-28T15:34:17Z'
-          GROUP BY r."clientVersion", r."rulesetResolutionMethod"
-          ORDER BY r."clientVersion", r."rulesetResolutionMethod";
-
-          \echo '=== policy-window raw metadata distribution ==='
-          SELECT r."clientVersion", r."rulesetResolutionMethod",
-                 COUNT(DISTINCT r."matchId") AS matches
-          FROM raw_match_metadata r
-          JOIN matches m ON m."matchId" = r."matchId"
-          WHERE m."startTime" >= TIMESTAMPTZ '2026-07-18T12:31:22Z'
-            AND m."startTime" <= TIMESTAMPTZ '2026-07-22T09:32:54Z'
           GROUP BY r."clientVersion", r."rulesetResolutionMethod"
           ORDER BY r."clientVersion", r."rulesetResolutionMethod";
           SQL
