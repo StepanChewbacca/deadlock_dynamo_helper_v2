@@ -36,7 +36,7 @@ jobs:
                 generatedAt: (now | todateiso8601),
                 runs: [
                   .workflow_runs[]
-                  | select(.name == "Recommendation V8 Timeline Audit Fix Resume V1")
+                  | select(.name == "Recommendation V8 Timeline Audit Fix Resume V2")
                   | {
                       id,
                       name,
@@ -55,5 +55,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$result"
-          git commit -m 'chore: publish V8 recovery workflow location'
+          git commit -m 'chore: publish V8 recovery V2 workflow location'
           git push origin agent/recommendation-value-v8-passive-shadow-1
