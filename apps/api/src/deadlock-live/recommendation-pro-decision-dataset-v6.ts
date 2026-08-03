@@ -103,6 +103,7 @@ export interface RecommendationProDecisionDatasetV6Row {
   candidates: RecommendationDatasetV6CandidateFeatures[];
   observedActionKey: string;
   observedActionInCandidateSet: boolean;
+  terminalOutcomeApplied?: boolean;
   shortHorizonOutcomes: {
     threeMinutes?: number;
     fiveMinutes?: number;
@@ -232,6 +233,11 @@ export function createRecommendationProDecisionDatasetV6Row(
     candidates,
     observedActionKey: replayRow.observedAction.actionKey,
     observedActionInCandidateSet: replayRow.observedAction.inCandidateSet,
+    terminalOutcomeApplied: replayRow.shortHorizonOutcomes.some(
+      (outcome) =>
+        outcome.complete &&
+        outcome.outcomeSource === 'TERMINAL_FINAL_OUTCOME',
+    ),
     shortHorizonOutcomes: horizonOutcomes(replayRow),
     finalOutcome: replayRow.finalOutcomeAuxiliary.playerWon ? 1 : 0,
     versions: {
@@ -294,7 +300,8 @@ export function buildRecommendationProDecisionDatasetV6Audit(
       row.versions.candidateGenerator,
     );
     decisionSourceDistribution[row.decisionSource] += 1;
-    timelineJoinCount += row.state.timelineJoined ? 1 : 0;
+    timelineJoinCount +=
+      row.state.timelineJoined || row.terminalOutcomeApplied === true ? 1 : 0;
     shortHorizonDecisionCount += hasShortHorizonOutcome(row) ? 1 : 0;
     observedActionInCandidateSetCount += row.observedActionInCandidateSet ? 1 : 0;
     candidateRowCount += row.candidates.length;
@@ -332,7 +339,7 @@ export function buildRecommendationProDecisionDatasetV6Audit(
   }
   if (timelineJoinCoverage < thresholds.minimumTimelineJoinCoverage) {
     reasons.push(
-      `Timeline join coverage ${timelineJoinCoverage} is below ` +
+      `Timeline join or confirmed terminal outcome coverage ${timelineJoinCoverage} is below ` +
         `${thresholds.minimumTimelineJoinCoverage}.`,
     );
   }

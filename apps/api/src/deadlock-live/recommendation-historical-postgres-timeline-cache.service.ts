@@ -18,6 +18,7 @@ const RAW_METADATA_BATCH_SIZE = 250;
 export interface RecommendationHistoricalPostgresTimelineData {
   snapshots: MatchTimelinePlayerSnapshot[];
   objectives: MatchTimelineObjectiveEvent[];
+  matchEndGameTimeS?: number;
 }
 
 export interface RecommendationHistoricalPostgresTimelineCacheProgress {
@@ -257,6 +258,7 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
         source: 'POSTGRESQL_RAW_MATCH_METADATA',
         rawMetadataId: input.rawMetadataId,
         rawMetadataFetchedAt: input.fetchedAt,
+        matchEndGameTimeS: input.timeline.matchEndGameTimeS,
         artifacts: {
           playerSnapshots: {
             fileName: 'player-snapshots.ndjson',
@@ -279,6 +281,7 @@ export class RecommendationHistoricalPostgresTimelineCacheService {
         matchId: input.matchId,
         passed: input.timeline.snapshots.length > 0,
         source: 'POSTGRESQL_RAW_MATCH_METADATA',
+        matchEndGameTimeS: input.timeline.matchEndGameTimeS,
         playerSnapshotCount: input.timeline.snapshots.length,
         objectiveEventCount: input.timeline.objectives.length,
         reasons:
@@ -410,13 +413,30 @@ export function extractRecommendationHistoricalPostgresTimeline(input: {
     },
   );
 
+  const deduplicatedSnapshots = deduplicateSnapshots(snapshots);
+  const explicitMatchEndGameTimeS = nonNegativeFiniteNumber(
+    matchInfo?.duration_s ??
+      matchInfo?.duration_sec ??
+      matchInfo?.match_duration_s ??
+      matchInfo?.match_duration_sec,
+  );
+  const inferredMatchEndGameTimeS = deduplicatedSnapshots.reduce(
+    (maximum, snapshot) => Math.max(maximum, snapshot.gameTimeS),
+    0,
+  );
+
   return {
-    snapshots: deduplicateSnapshots(snapshots),
+    snapshots: deduplicatedSnapshots,
     objectives: objectives.sort(
       (left, right) =>
         left.gameTimeS - right.gameTimeS ||
         left.objectiveEventId.localeCompare(right.objectiveEventId),
     ),
+    matchEndGameTimeS:
+      explicitMatchEndGameTimeS ??
+      (inferredMatchEndGameTimeS > 0
+        ? inferredMatchEndGameTimeS
+        : undefined),
   };
 }
 

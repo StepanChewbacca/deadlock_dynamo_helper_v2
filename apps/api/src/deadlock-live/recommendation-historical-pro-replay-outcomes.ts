@@ -28,6 +28,7 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
   decision: HeroBuildDecisionDatasetV3Row;
   snapshots: readonly MatchTimelinePlayerSnapshot[];
   objectives: readonly MatchTimelineObjectiveEvent[];
+  matchEndGameTimeS?: number;
   snapshotStalenessS?: number;
 }): RecommendationHistoricalShortHorizonOutcome[] {
   const snapshotStalenessS = normalizeSnapshotStaleness(
@@ -43,9 +44,25 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
     input.decision.gameTimeS,
   );
   const ownTeamId = liveTeam(input.decision.team);
+  const matchEndGameTimeS = normalizeMatchEndGameTimeS(
+    input.matchEndGameTimeS,
+    input.decision.gameTimeS,
+  );
 
   return HORIZONS.map(({ horizon, seconds }) => {
     const upper = input.decision.gameTimeS + seconds;
+    if (
+      matchEndGameTimeS !== undefined &&
+      matchEndGameTimeS <= upper
+    ) {
+      return {
+        horizon,
+        complete: true,
+        utility: input.decision.outcomeLabel.playerWon ? 1 : -1,
+        outcomeSource: 'TERMINAL_FINAL_OUTCOME',
+        terminalGameTimeS: matchEndGameTimeS,
+      };
+    }
     const target = nearestToHorizonAfterDecision(
       playerSnapshots,
       input.decision.gameTimeS,
@@ -98,6 +115,7 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
       horizon,
       complete: true,
       utility: recommendationShortHorizonUtility(deltas),
+      outcomeSource: 'TIMELINE_SNAPSHOT',
       snapshotGameTimeS: target.gameTimeS,
     };
   });
@@ -209,6 +227,19 @@ function nearestToHorizonAfterDecision(
     }
   }
   return result;
+}
+
+function normalizeMatchEndGameTimeS(
+  value: number | undefined,
+  decisionGameTimeS: number,
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(value) || value < decisionGameTimeS) {
+    return undefined;
+  }
+  return value;
 }
 
 function normalizeSnapshotStaleness(value: number | undefined): number {

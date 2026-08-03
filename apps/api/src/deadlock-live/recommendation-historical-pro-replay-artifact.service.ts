@@ -152,6 +152,7 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     snapshotStalenessS: number;
     decisionSnapshotSelection: 'LATEST_AT_OR_BEFORE_WITHIN_STALENESS';
     horizonSnapshotSelection: 'NEAREST_AFTER_DECISION_WITHIN_STALENESS';
+    terminalOutcomeSelection: 'FINAL_OUTCOME_WHEN_MATCH_END_PRECEDES_HORIZON';
     requiredForOutput: true;
   };
   artifact: {
@@ -173,7 +174,8 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     v5_3UsedAsInput: false;
     userLiveUsedAsInput: false;
     shortHorizonTargets: ['3m', '5m', '10m'];
-    finalOutcomeAuxiliaryOnly: true;
+    finalOutcomeAuxiliaryOnly: false;
+    terminalOutcomeBackfill: true;
   };
   auditPassed: boolean;
   trainingArtifactEligible: boolean;
@@ -245,6 +247,7 @@ interface TimelineData {
   available: boolean;
   snapshots: MatchTimelinePlayerSnapshot[];
   objectives: MatchTimelineObjectiveEvent[];
+  matchEndGameTimeS?: number;
 }
 
 interface PartitionStats {
@@ -373,7 +376,8 @@ export class RecommendationHistoricalProReplayArtifactService
         thresholds: options.thresholds,
         partitionStrategy: 'MATCH_ID_HASH_V3',
         candidateSupportStrategy: 'STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V2',
-        timelineJoinContract: 'DECISION_JOIN_SEPARATE_FROM_HORIZON_COMPLETENESS_V2',
+        timelineJoinContract: 'DECISION_OR_CONFIRMED_TERMINAL_OUTCOME_V3',
+        terminalOutcomeContract: 'FINAL_WIN_LOSS_AFTER_CONFIRMED_MATCH_END_V1',
         timelineCacheVersion:
           RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
       });
@@ -566,6 +570,8 @@ export class RecommendationHistoricalProReplayArtifactService
             'LATEST_AT_OR_BEFORE_WITHIN_STALENESS',
           horizonSnapshotSelection:
             'NEAREST_AFTER_DECISION_WITHIN_STALENESS',
+          terminalOutcomeSelection:
+            'FINAL_OUTCOME_WHEN_MATCH_END_PRECEDES_HORIZON',
           requiredForOutput: true,
         },
         artifact: {
@@ -587,7 +593,8 @@ export class RecommendationHistoricalProReplayArtifactService
           v5_3UsedAsInput: false,
           userLiveUsedAsInput: false,
           shortHorizonTargets: ['3m', '5m', '10m'],
-          finalOutcomeAuxiliaryOnly: true,
+          finalOutcomeAuxiliaryOnly: false,
+          terminalOutcomeBackfill: true,
         },
         auditPassed: audit.passed,
         trainingArtifactEligible,
@@ -1140,6 +1147,7 @@ async function processPartition(input: {
           decision: row,
           snapshots: timeline.snapshots,
           objectives: timeline.objectives,
+          matchEndGameTimeS: timeline.matchEndGameTimeS,
           snapshotStalenessS: input.snapshotStalenessS,
         });
       const replayRow = createRecommendationHistoricalProReplayRow({
@@ -1248,10 +1256,22 @@ async function loadTimeline(
       left.gameTimeS - right.gameTimeS ||
       left.objectiveEventId.localeCompare(right.objectiveEventId),
   );
+  const manifestMatchEndGameTimeS = Number(manifest.matchEndGameTimeS);
+  const inferredMatchEndGameTimeS = snapshots.reduce(
+    (maximum, snapshot) => Math.max(maximum, snapshot.gameTimeS),
+    0,
+  );
+  const matchEndGameTimeS =
+    Number.isFinite(manifestMatchEndGameTimeS) && manifestMatchEndGameTimeS > 0
+      ? manifestMatchEndGameTimeS
+      : inferredMatchEndGameTimeS > 0
+        ? inferredMatchEndGameTimeS
+        : undefined;
   return {
     available: snapshots.length > 0,
     snapshots,
     objectives,
+    matchEndGameTimeS,
   };
 }
 
@@ -1410,7 +1430,12 @@ function compareSnapshots(
 }
 
 function emptyTimeline(): TimelineData {
-  return { available: false, snapshots: [], objectives: [] };
+  return {
+    available: false,
+    snapshots: [],
+    objectives: [],
+    matchEndGameTimeS: undefined,
+  };
 }
 
 function emptyPartitionStats(index: number): PartitionStats {

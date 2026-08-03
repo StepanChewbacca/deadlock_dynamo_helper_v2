@@ -57,10 +57,10 @@ export class RecommendationHistoricalProReplayAuditAccumulator {
       Date.parse(row.matchStartTime)
         ? 0
         : 1;
-    const decisionTimelineJoined =
-      row.timeline?.decisionSnapshotJoined ??
+    const timelineOrTerminalOutcomeAvailable =
+      row.timeline?.decisionSnapshotJoined === true ||
       row.shortHorizonOutcomes.some((outcome) => outcome.complete);
-    this.timelineRowCount += decisionTimelineJoined ? 1 : 0;
+    this.timelineRowCount += timelineOrTerminalOutcomeAvailable ? 1 : 0;
     this.candidateCount += row.candidates.length;
     this.candidateWithMetadataCount += row.candidates.filter(
       (candidate) => candidate.catalogMetadataAvailable,

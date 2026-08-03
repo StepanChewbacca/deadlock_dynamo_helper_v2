@@ -66,7 +66,9 @@ export interface RecommendationHistoricalShortHorizonOutcome {
   horizon: '3m' | '5m' | '10m';
   complete: boolean;
   utility?: number;
+  outcomeSource?: 'TIMELINE_SNAPSHOT' | 'TERMINAL_FINAL_OUTCOME';
   snapshotGameTimeS?: number;
+  terminalGameTimeS?: number;
 }
 
 export interface RecommendationHistoricalReplayCandidate {
@@ -318,11 +320,10 @@ export function buildRecommendationHistoricalProReplayAudit(
     )
       ? 0
       : 1;
-    timelineRowCount +=
-      row.timeline?.decisionSnapshotJoined ??
-      row.shortHorizonOutcomes.some((outcome) => outcome.complete)
-        ? 1
-        : 0;
+    const timelineOrTerminalOutcomeAvailable =
+      row.timeline?.decisionSnapshotJoined === true ||
+      row.shortHorizonOutcomes.some((outcome) => outcome.complete);
+    timelineRowCount += timelineOrTerminalOutcomeAvailable ? 1 : 0;
     candidateCount += row.candidates.length;
     candidateWithMetadataCount += row.candidates.filter(
       (candidate) => candidate.catalogMetadataAvailable,
@@ -525,6 +526,37 @@ function normalizeOutcomes(
       nonNegativeFiniteNumber(
         outcome.snapshotGameTimeS,
         `${outcome.horizon} snapshotGameTimeS`,
+      );
+    }
+    if (outcome.terminalGameTimeS !== undefined) {
+      nonNegativeFiniteNumber(
+        outcome.terminalGameTimeS,
+        `${outcome.horizon} terminalGameTimeS`,
+      );
+    }
+    if (outcome.outcomeSource === 'TERMINAL_FINAL_OUTCOME') {
+      if (
+        !outcome.complete ||
+        outcome.utility === undefined ||
+        outcome.terminalGameTimeS === undefined
+      ) {
+        throw new Error(
+          `Terminal ${outcome.horizon} outcome requires utility and terminalGameTimeS.`,
+        );
+      }
+      if (outcome.snapshotGameTimeS !== undefined) {
+        throw new Error(
+          `Terminal ${outcome.horizon} outcome must not include snapshotGameTimeS.`,
+        );
+      }
+    }
+    if (
+      outcome.outcomeSource === 'TIMELINE_SNAPSHOT' &&
+      outcome.complete &&
+      outcome.snapshotGameTimeS === undefined
+    ) {
+      throw new Error(
+        `Timeline ${outcome.horizon} outcome requires snapshotGameTimeS.`,
       );
     }
     byHorizon.set(outcome.horizon, { ...outcome });

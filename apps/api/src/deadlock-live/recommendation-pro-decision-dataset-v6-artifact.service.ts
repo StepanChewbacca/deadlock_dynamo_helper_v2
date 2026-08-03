@@ -172,7 +172,8 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
     v5_3UsedAsInput: false;
     userLiveUsedAsInput: false;
     futureTestEligibleForSelection: false;
-    finalOutcomeAuxiliary: true;
+    finalOutcomeAuxiliary: false;
+    terminalOutcomeBackfill: true;
     shortHorizonTargets: ['3m', '5m', '10m'];
   };
   auditPassed: boolean;
@@ -536,7 +537,8 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           v5_3UsedAsInput: false,
           userLiveUsedAsInput: false,
           futureTestEligibleForSelection: false,
-          finalOutcomeAuxiliary: true,
+          finalOutcomeAuxiliary: false,
+          terminalOutcomeBackfill: true,
           shortHorizonTargets: ['3m', '5m', '10m'],
         },
         auditPassed: audit.passed,
