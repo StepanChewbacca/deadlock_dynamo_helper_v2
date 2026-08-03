@@ -1,8 +1,8 @@
 {
-  "operation": "APPLY_TERMINAL_OUTCOMES_AND_REBUILD_5000_V1",
+  "operation": "APPLY_TERMINAL_OUTCOMES_AND_REBUILD_5000_V2",
   "state": "REQUESTED",
-  "requestedAt": "2026-08-03T14:46:00.000Z",
-  "attempt": 2,
+  "requestedAt": "2026-08-03T14:48:00.000Z",
+  "attempt": 3,
   "matchLimit": 5000,
   "rebuildReplay": true,
   "fullTrainingAuthorized": false,
@@ -16,5 +16,11 @@
     "winUtility": 1,
     "lossUtility": -1,
     "horizons": ["3m", "5m", "10m"]
+  },
+  "outputIsolation": {
+    "replay": "recommendation-historical-pro-replay-terminal-5000-v2",
+    "datasetV6": "recommendation-pro-decision-dataset-v6-terminal-5000-v2",
+    "behavioralV5": "recommendation-behavioral-v5-terminal-5000-v2",
+    "valueV8Diagnostic": "recommendation-value-v8-diagnostic-terminal-5000-v2"
   }
 }
