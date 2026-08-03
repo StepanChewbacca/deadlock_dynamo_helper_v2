@@ -1,0 +1,40 @@
+{
+  "generatedAt": "2026-08-03T14:36:56+00:00",
+  "workflowRunId": "30823250695",
+  "implementationSha": "1644d57f8007c91b81704f50ad1ea2c536d0d84e",
+  "image": "deadlock-recommendation-v8-training:1644d57f8007c91b81704f50ad1ea2c536d0d84e-terminal-outcomes-5000-v1",
+  "runId": "terminal-30823250695-1",
+  "run": {
+    "runId": "terminal-30823250695-1",
+    "state": "RUNNING",
+    "stage": "HISTORICAL_REPLAY",
+    "matchLimit": 5000,
+    "implementationSha": "1644d57f8007c91b81704f50ad1ea2c536d0d84e",
+    "rebuildReplay": true,
+    "fullTrainingAuthorized": false,
+    "productionRankingChanged": false,
+    "passiveShadowActivated": false,
+    "randomizedCanaryAuthorized": false,
+    "observedActionInjected": false,
+    "auditThresholdsLowered": false,
+    "trainingRestartedAt": "2026-08-03T14:36:55.195763Z"
+  },
+  "replayStatus": {
+    "state": "COMPLETE",
+    "phase": "COMPLETE",
+    "sourceRowCount": 1023598,
+    "selectedSourceRowCount": 1023598,
+    "processedPartitionCount": 0,
+    "partitionCount": 0,
+    "outputRowCount": 1023598,
+    "excludedWithoutTimelineCount": 0,
+    "excludedWithoutGeneratorSnapshotCount": 0,
+    "outputDirectory": "/app/apps/api/storage/recommendation-historical-pro-replay-v1",
+    "datasetPath": "/app/apps/api/storage/recommendation-historical-pro-replay-v1/dataset.ndjson",
+    "datasetAvailable": true,
+    "manifestAvailable": true,
+    "auditAvailable": true,
+    "completedAt": "2026-08-02T22:39:06.968Z",
+    "auditPassed": false
+  }
+}
