@@ -1,6 +1,7 @@
 {
-  "operation": "LOCATE_RECOMMENDATION_V8_TERMINAL_OUTCOME_REBUILD_5000_V1",
-  "requestedAt": "2026-08-03T14:47:00.000Z",
+  "operation": "LOCATE_RECOMMENDATION_V8_TERMINAL_OUTCOME_REBUILD_5000_V2",
+  "requestedAt": "2026-08-03T14:50:00.000Z",
   "targetWorkflowName": "Recommendation V8 Timeline Audit Fix Resume V2",
-  "attempt": 2
+  "targetHeadSha": "e37083bda373fbc9c03eb72d239055a18fcad7a4",
+  "attempt": 3
 }
