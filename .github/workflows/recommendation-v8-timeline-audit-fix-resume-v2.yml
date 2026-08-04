@@ -26,16 +26,20 @@ jobs:
           ref: agent/recommendation-value-v8-passive-shadow-1
           fetch-depth: 0
 
-      - name: Validate and start isolated bounded training
+      - name: Clean obsolete artifacts and restart isolated bounded training
         shell: bash
-        run: bash scripts/run-recommendation-v8-terminal-outcome-rebuild-5000-v2.sh
+        run: bash scripts/run-recommendation-v8-terminal-outcome-cleanup-restart-5000-v3.sh
 
-      - name: Upload restart evidence
+      - name: Upload cleanup and restart evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-v8-terminal-outcome-5000-v2-${{ github.run_id }}
+          name: recommendation-v8-terminal-outcome-5000-v3-${{ github.run_id }}
           path: |
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-before.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-after.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/removed-artifacts.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/evidence/**
             /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/run.json
             /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/replay-status.json
             /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/training.log
