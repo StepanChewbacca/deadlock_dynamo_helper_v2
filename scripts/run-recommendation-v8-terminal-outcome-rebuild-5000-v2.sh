@@ -254,11 +254,13 @@ publish_result() {
 
   git config user.name 'github-actions[bot]'
   git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+  git add "$result" scripts/run-recommendation-v8-terminal-outcome-rebuild-5000-v2.sh
+  if ! git diff --cached --quiet; then
+    git commit -m 'chore: publish isolated terminal outcome 5000-match restart'
+  fi
   git fetch origin "$branch"
-  git pull --rebase origin "$branch"
-  git add "$result"
-  git commit -m 'chore: publish isolated terminal outcome 5000-match restart'
-  git push origin "$branch"
+  git rebase "origin/$branch"
+  git push origin "HEAD:$branch"
   echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
 }
 
