@@ -1,10 +1,12 @@
 {
   "operation": "APPLY_TERMINAL_OUTCOMES_AND_REBUILD_5000_V2",
   "state": "REQUESTED",
-  "requestedAt": "2026-08-03T14:48:00.000Z",
-  "attempt": 3,
+  "requestedAt": "2026-08-04T15:24:00.000Z",
+  "attempt": 4,
   "matchLimit": 5000,
   "rebuildReplay": true,
+  "deleteObsoleteArtifacts": true,
+  "minimumFreeGiB": 90,
   "fullTrainingAuthorized": false,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
@@ -16,6 +18,13 @@
     "winUtility": 1,
     "lossUtility": -1,
     "horizons": ["3m", "5m", "10m"]
+  },
+  "preservedInputs": {
+    "boundedSource": "recommendation-v8-bounded-5000-v1",
+    "candidateSnapshotRegistry": "recommendation-candidate-generator-snapshots-5000-v1",
+    "snapshotId": "v8-5000-c6637-30701422914",
+    "timeline": "match-timeline-events-v1",
+    "postgresql": true
   },
   "outputIsolation": {
     "replay": "recommendation-historical-pro-replay-terminal-5000-v2",
