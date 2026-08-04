@@ -26,15 +26,15 @@ jobs:
           ref: agent/recommendation-value-v8-passive-shadow-1
           fetch-depth: 0
 
-      - name: Clean obsolete artifacts and restart isolated bounded training
+      - name: Reconcile active run or restart isolated bounded training
         shell: bash
-        run: bash scripts/run-recommendation-v8-terminal-outcome-cleanup-restart-5000-v3.sh
+        run: bash scripts/run-recommendation-v8-terminal-outcome-reconcile-5000-v4.sh
 
       - name: Upload cleanup and restart evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-v8-terminal-outcome-5000-v3-${{ github.run_id }}
+          name: recommendation-v8-terminal-outcome-5000-v4-${{ github.run_id }}
           path: |
             /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-before.txt
             /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-after.txt
