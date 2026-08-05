@@ -1,7 +1,8 @@
 {
   "operation": "DIAGNOSE_TERMINAL_TIMELINE_COVERAGE_V1",
   "state": "REQUESTED",
-  "requestedAt": "2026-08-05T18:35:00.000Z",
+  "attempt": 2,
+  "requestedAt": "2026-08-05T18:38:00.000Z",
   "replayDirectory": "recommendation-historical-pro-replay-terminal-5000-v2",
   "matchLimit": 5000,
   "productionRankingChanged": false,
