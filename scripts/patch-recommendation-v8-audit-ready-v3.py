@@ -181,7 +181,6 @@ def main() -> None:
     legacy.patch_behavioral()
     patch_evaluation_dataset_lineage()
     patch_test_contracts()
-    legacy.disable_retired_workflows()
 
 
 if __name__ == '__main__':
