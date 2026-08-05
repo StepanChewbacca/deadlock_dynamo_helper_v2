@@ -1,0 +1,8 @@
+{
+  "operation": "FORCE_CANCEL_STALE_RECOMMENDATION_V8_V1",
+  "state": "REQUESTED",
+  "requestedAt": "2026-08-05T22:51:00.000Z",
+  "preserveRunId": 31054170144,
+  "targetRunId": 31054170003,
+  "reason": "Free the self-hosted runner for the validated source-only publish and restart workflow."
+}
