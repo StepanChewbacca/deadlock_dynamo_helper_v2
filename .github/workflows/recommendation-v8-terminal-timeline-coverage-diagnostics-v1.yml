@@ -1,9 +1,7 @@
 name: Recommendation V8 Terminal Timeline Coverage Diagnostics V1
 
 on:
-  push:
-    branches:
-      - agent/recommendation-value-v8-passive-shadow-1
+  pull_request:
     paths:
       - '.github/training-requests/recommendation-v8-terminal-timeline-coverage-diagnostics-v1.json'
   workflow_dispatch:
@@ -23,7 +21,7 @@ jobs:
       - name: Checkout training branch
         uses: actions/checkout@v4
         with:
-          ref: agent/recommendation-value-v8-passive-shadow-1
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Validate request
         shell: bash
