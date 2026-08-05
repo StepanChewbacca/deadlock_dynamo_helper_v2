@@ -1,6 +1,6 @@
 {
   "operation": "APPLY_AUDIT_READY_FALLBACK_AND_RESTART_5000_V3",
-  "state": "PREPARING",
+  "state": "REQUESTED",
   "attempt": 5,
   "requestedAt": "2026-08-05T20:15:00.000Z",
   "matchLimit": 5000,
@@ -13,7 +13,7 @@
   "minimumObservedActionCandidateCoverage": 0.995,
   "candidateCoveragePreflightRequired": true,
   "deleteFailedDerivedArtifactsAuthorized": true,
-  "restartAfterCandidateCoverageReview": false,
+  "restartAfterCandidateCoverageReview": true,
   "lowerAuditThresholdsAuthorized": false,
   "observedActionInjectionAuthorized": false,
   "productionRankingChanged": false,
