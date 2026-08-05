@@ -1,6 +1,6 @@
 {
   "operation": "POST_CLEANUP_CAPACITY_GUARDED_RESTART_5000_V6",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "requestedAt": "2026-08-05T23:08:00.000Z",
   "matchLimit": 5000,
   "sourceImplementationSha": "486b0e080398dc57f030a030357be00133a3fa3c",
@@ -20,5 +20,6 @@
   "fullTrainingAuthorized": false,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "completedAt": "2026-08-05T23:14:21+00:00"
 }
