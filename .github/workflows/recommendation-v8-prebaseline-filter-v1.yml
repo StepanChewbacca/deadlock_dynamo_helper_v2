@@ -35,6 +35,7 @@ jobs:
           test "$(jq -r '.futureSnapshotFallbackEnabled' "$request")" = 'true'
           test "$(jq -r '.maximumFutureSnapshotLagS' "$request")" = '300'
           test "$(jq -r '.deleteFailedDerivedArtifactsAuthorized' "$request")" = 'true'
+          jq -e '.restartAfterCandidateCoverageReview | type == "boolean"' "$request" >/dev/null
           test "$(jq -r '.lowerAuditThresholdsAuthorized' "$request")" = 'false'
           test "$(jq -r '.observedActionInjectionAuthorized' "$request")" = 'false'
           test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
@@ -85,6 +86,7 @@ jobs:
             workspace @deadlock-live-probe/api test \
             recommendation-historical-pro-replay-artifact.spec.ts \
             recommendation-historical-pro-replay-terminal-outcomes.spec.ts \
+            recommendation-historical-pro-replay-fractional-snapshot.spec.ts \
             recommendation-historical-pro-replay-streaming-audit.spec.ts \
             recommendation-pro-decision-dataset-v6.spec.ts \
             recommendation-pro-decision-dataset-v6-artifact.spec.ts \
@@ -115,6 +117,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          request='.github/training-requests/recommendation-v8-prebaseline-filter-v1.json'
+          if [ "$(jq -r '.restartAfterCandidateCoverageReview' "$request")" != 'true' ]; then
+            echo 'Restart is held until observed candidate coverage review is complete.'
+            exit 0
+          fi
           bash scripts/run-recommendation-v8-terminal-outcome-cleanup-restart-5000-v3.sh
 
       - name: Capture restarted status
