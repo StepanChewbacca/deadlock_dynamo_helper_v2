@@ -1,0 +1,108 @@
+name: Recommendation V8 Prebaseline Filter V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-prebaseline-filter-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-prebaseline-filter-v1
+  cancel-in-progress: false
+
+jobs:
+  patch-test-and-publish:
+    runs-on: self-hosted
+    timeout-minutes: 120
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate request and safety boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-prebaseline-filter-v1.json'
+          test "$(jq -r '.operation' "$request")" = 'APPLY_PREBASELINE_REPLAY_FILTER_V1'
+          test "$(jq -r '.state' "$request")" = 'REQUESTED'
+          test "$(jq -r '.matchLimit' "$request")" = '5000'
+          test "$(jq -r '.lowerAuditThresholdsAuthorized' "$request")" = 'false'
+          test "$(jq -r '.observedActionInjectionAuthorized' "$request")" = 'false'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          python3 -m py_compile scripts/patch-recommendation-v8-prebaseline-filter-v1.py
+
+      - name: Refuse active training replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          if sudo docker ps --format '{{.Names}}' | grep -Fxq "$container"; then
+            if sudo docker exec "$container" sh -lc "pgrep -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs|[r]un-recommendation-v8-training-supervisor.mjs|[r]un-recommendation-v8-clean-diagnostic-supervisor.mjs' >/dev/null"; then
+              echo 'An active Recommendation V8 training process exists; refusing source mutation.' >&2
+              exit 1
+            fi
+          fi
+
+      - name: Apply leak-free prebaseline filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/patch-recommendation-v8-prebaseline-filter-v1.py
+          git diff --check
+          git diff -- \
+            apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts \
+            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts
+
+      - name: Build validation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-prebaseline-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$image" .
+          echo "BUILDER_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Run replay and Dataset V6 regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker run --rm --entrypoint yarn "$BUILDER_IMAGE" \
+            workspace @deadlock-live-probe/api test \
+            recommendation-historical-pro-replay-artifact.spec.ts \
+            recommendation-historical-pro-replay-terminal-outcomes.spec.ts \
+            recommendation-historical-pro-replay-streaming-audit.spec.ts \
+            recommendation-pro-decision-dataset-v6.spec.ts \
+            recommendation-pro-decision-dataset-v6-artifact.spec.ts \
+            --runInBand
+
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='agent/recommendation-value-v8-passive-shadow-1'
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts \
+            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts
+          git commit -m 'fix: exclude prebaseline replay decisions'
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin "HEAD:$branch"
+          git rev-parse HEAD | tee implementation-sha.txt
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-prebaseline-filter-v1-${{ github.run_id }}
+          path: implementation-sha.txt
+          if-no-files-found: warn
+          retention-days: 14
