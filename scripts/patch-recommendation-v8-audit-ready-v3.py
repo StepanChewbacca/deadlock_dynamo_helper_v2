@@ -32,6 +32,14 @@ def replace_regex(path: str, pattern: str, replacement: str, expected: int = 1) 
     target.write_text(updated, encoding='utf-8')
 
 
+def replace_all(path: Path, old: str, new: str) -> int:
+    text = path.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count > 0:
+        path.write_text(text.replace(old, new), encoding='utf-8')
+    return count
+
+
 def patch_replay_artifact() -> None:
     path = 'apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts'
     replace_exact(
@@ -122,6 +130,48 @@ def patch_evaluation_dataset_lineage() -> None:
     )
 
 
+def patch_test_contracts() -> None:
+    test_root = ROOT / 'apps/api/test'
+    replacements = {
+        'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1':
+            'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
+        'RECOMMENDATION_PRO_DECISION_DATASET_V6_1':
+            'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
+        'RECOMMENDATION_STATE_FEATURES_V6_1':
+            'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK',
+    }
+    replacement_count = 0
+    for path in test_root.glob('*.ts'):
+        for old, new in replacements.items():
+            replacement_count += replace_all(path, old, new)
+    if replacement_count == 0:
+        raise RuntimeError('Expected stale Recommendation V8 test version fixtures.')
+
+    replay_artifact_test = test_root / 'recommendation-historical-pro-replay-artifact.spec.ts'
+    replace_all(
+        replay_artifact_test,
+        "it('excludes decisions before the first leak-free timeline snapshot', async () => {",
+        "it('excludes decisions when the first future timeline snapshot exceeds staleness', async () => {",
+    )
+    text = replay_artifact_test.read_text(encoding='utf-8')
+    marker = """      partitionCount: 2,
+      resume: false,
+"""
+    marker_count = text.count(marker)
+    if marker_count == 0:
+        raise RuntimeError('Expected replay artifact start options in regression test.')
+    replay_artifact_test.write_text(
+        text.replace(
+            marker,
+            """      partitionCount: 2,
+      snapshotStalenessS: 100,
+      resume: false,
+""",
+        ),
+        encoding='utf-8',
+    )
+
+
 def main() -> None:
     legacy.patch_candidate_generator()
     legacy.patch_replay_contract()
@@ -130,6 +180,7 @@ def main() -> None:
     legacy.patch_dataset_contract()
     legacy.patch_behavioral()
     patch_evaluation_dataset_lineage()
+    patch_test_contracts()
     legacy.disable_retired_workflows()
 
 
