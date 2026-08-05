@@ -34,14 +34,14 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
   const snapshotStalenessS = normalizeSnapshotStaleness(
     input.snapshotStalenessS,
   );
-
   const playerSnapshots = selectDecisionPlayerSnapshots(
     input.decision,
     input.snapshots,
   );
-  const baseline = latestAtOrBefore(
+  const baseline = selectSnapshotAroundDecision(
     playerSnapshots,
     input.decision.gameTimeS,
+    snapshotStalenessS,
   );
   const ownTeamId = liveTeam(input.decision.team);
   const matchEndGameTimeS = normalizeMatchEndGameTimeS(
@@ -63,15 +63,18 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
         terminalGameTimeS: matchEndGameTimeS,
       };
     }
-    const target = nearestToHorizonAfterDecision(
+
+    const target = nearestToHorizonAfterBaseline(
       playerSnapshots,
       input.decision.gameTimeS,
       upper,
       snapshotStalenessS,
+      baseline?.gameTimeS,
     );
     const baselineFresh =
       baseline !== undefined &&
-      input.decision.gameTimeS - baseline.gameTimeS <= snapshotStalenessS;
+      Math.abs(input.decision.gameTimeS - baseline.gameTimeS) <=
+        snapshotStalenessS;
     const targetFresh =
       target !== undefined &&
       Math.abs(upper - target.gameTimeS) <= snapshotStalenessS;
@@ -84,10 +87,14 @@ export function buildRecommendationHistoricalShortHorizonOutcomes(input: {
       };
     }
 
+    const effectiveBaselineGameTimeS = Math.max(
+      input.decision.gameTimeS,
+      baseline.gameTimeS,
+    );
     const events = input.objectives.filter(
       (event) =>
         event.matchId === input.decision.matchId &&
-        event.gameTimeS > input.decision.gameTimeS &&
+        event.gameTimeS > effectiveBaselineGameTimeS &&
         event.gameTimeS <= upper,
     );
     const ownObjectiveLossCount =
@@ -126,21 +133,36 @@ export function hasFreshRecommendationDecisionTimelineSnapshot(input: {
   snapshots: readonly MatchTimelinePlayerSnapshot[];
   snapshotStalenessS?: number;
 }): boolean {
+  return (
+    selectRecommendationDecisionTimelineSnapshot({
+      matchId: input.decision.matchId,
+      heroId: input.decision.heroId,
+      team: input.decision.team,
+      gameTimeS: input.decision.gameTimeS,
+      snapshots: input.snapshots,
+      snapshotStalenessS: input.snapshotStalenessS,
+    }) !== undefined
+  );
+}
+
+export function selectRecommendationDecisionTimelineSnapshot(input: {
+  matchId: number;
+  heroId: number;
+  team: number;
+  gameTimeS: number;
+  snapshots: readonly MatchTimelinePlayerSnapshot[];
+  snapshotStalenessS?: number;
+}): MatchTimelinePlayerSnapshot | undefined {
   const snapshotStalenessS = normalizeSnapshotStaleness(
     input.snapshotStalenessS,
   );
-  const playerSnapshots = selectDecisionPlayerSnapshots(
-    input.decision,
-    input.snapshots,
-  );
-  const baseline = latestAtOrBefore(
+  const playerSnapshots = selectDecisionPlayerSnapshots(input, input.snapshots);
+  const selected = selectSnapshotAroundDecision(
     playerSnapshots,
-    input.decision.gameTimeS,
+    input.gameTimeS,
+    snapshotStalenessS,
   );
-  return (
-    baseline !== undefined &&
-    input.decision.gameTimeS - baseline.gameTimeS <= snapshotStalenessS
-  );
+  return selected ? { ...selected } : undefined;
 }
 
 export function recommendationShortHorizonUtility(
@@ -164,7 +186,7 @@ export function recommendationShortHorizonUtility(
 }
 
 function selectDecisionPlayerSnapshots(
-  decision: HeroBuildDecisionDatasetV3Row,
+  decision: Pick<HeroBuildDecisionDatasetV3Row, 'matchId' | 'heroId' | 'team'>,
   snapshots: readonly MatchTimelinePlayerSnapshot[],
 ): MatchTimelinePlayerSnapshot[] {
   const matchSnapshots = snapshots.filter(
@@ -185,6 +207,28 @@ function selectDecisionPlayerSnapshots(
   return [...result].sort(compareSnapshots);
 }
 
+function selectSnapshotAroundDecision(
+  snapshots: readonly MatchTimelinePlayerSnapshot[],
+  gameTimeS: number,
+  snapshotStalenessS: number,
+): MatchTimelinePlayerSnapshot | undefined {
+  const baseline = latestAtOrBefore(snapshots, gameTimeS);
+  if (
+    baseline !== undefined &&
+    gameTimeS - baseline.gameTimeS <= snapshotStalenessS
+  ) {
+    return baseline;
+  }
+  const future = earliestAfter(snapshots, gameTimeS);
+  if (
+    future !== undefined &&
+    future.gameTimeS - gameTimeS <= snapshotStalenessS
+  ) {
+    return future;
+  }
+  return undefined;
+}
+
 function latestAtOrBefore(
   snapshots: readonly MatchTimelinePlayerSnapshot[],
   gameTimeS: number,
@@ -199,17 +243,29 @@ function latestAtOrBefore(
   return result;
 }
 
-function nearestToHorizonAfterDecision(
+function earliestAfter(
+  snapshots: readonly MatchTimelinePlayerSnapshot[],
+  gameTimeS: number,
+): MatchTimelinePlayerSnapshot | undefined {
+  return snapshots.find((snapshot) => snapshot.gameTimeS > gameTimeS);
+}
+
+function nearestToHorizonAfterBaseline(
   snapshots: readonly MatchTimelinePlayerSnapshot[],
   decisionGameTimeS: number,
   horizonGameTimeS: number,
   snapshotStalenessS: number,
+  baselineGameTimeS?: number,
 ): MatchTimelinePlayerSnapshot | undefined {
   let result: MatchTimelinePlayerSnapshot | undefined;
   let resultDistance = Number.POSITIVE_INFINITY;
+  const lowerExclusive = Math.max(
+    decisionGameTimeS,
+    baselineGameTimeS ?? decisionGameTimeS,
+  );
   const latestAllowed = horizonGameTimeS + snapshotStalenessS;
   for (const snapshot of snapshots) {
-    if (snapshot.gameTimeS <= decisionGameTimeS) {
+    if (snapshot.gameTimeS <= lowerExclusive) {
       continue;
     }
     if (snapshot.gameTimeS > latestAllowed) {
