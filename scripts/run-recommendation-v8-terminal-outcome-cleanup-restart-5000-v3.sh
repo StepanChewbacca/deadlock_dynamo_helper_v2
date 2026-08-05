@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+request='.github/training-requests/recommendation-v8-timeline-audit-fix-resume-v2.json'
 container='deadlock-recommendation-v8-training'
 deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
 run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
@@ -24,6 +25,15 @@ resolve_storage() {
   test -n "$production_api_container"
   storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
   test -n "$storage_source"
+}
+
+verify_capacity_contract() {
+  test "$(jq -r '.minimumFreeGiB' "$request")" = '50'
+  test "$(jq -r '.minimumRuntimeReserveGiB' "$request")" = '12'
+  test "$(jq -r '.compactReplayCandidates' "$request")" = 'true'
+  test "$(jq -r '.historicalOfflineCandidateLimit' "$request")" = '256'
+  test "$(jq -r '.projectedObservedActionCandidateCoverage' "$request")" = '0.9993386075392879'
+  test "$(jq -r '.observedActionInjectionAuthorized' "$request")" = 'false'
 }
 
 verify_preserved_inputs() {
@@ -158,11 +168,13 @@ verify_cleanup() {
   done
 
   free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
-  minimum_free_bytes=$((90 * 1024 * 1024 * 1024))
+  minimum_free_gib="$(jq -r '.minimumFreeGiB' "$request")"
+  minimum_free_bytes=$((minimum_free_gib * 1024 * 1024 * 1024))
 
   {
     echo "generatedAt=$(date --iso-8601=seconds)"
     echo "freeBytes=$free_bytes"
+    echo "minimumFreeGiB=$minimum_free_gib"
     echo "minimumFreeBytes=$minimum_free_bytes"
     echo '=== filesystem ==='
     df -hT /
@@ -183,6 +195,7 @@ verify_cleanup() {
 
 refuse_active_training
 resolve_storage
+verify_capacity_contract
 verify_preserved_inputs
 prepare_evidence
 remove_obsolete_artifacts
