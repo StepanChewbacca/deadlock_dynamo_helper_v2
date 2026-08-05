@@ -16,7 +16,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: self-hosted
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout training branch
         uses: actions/checkout@v4
@@ -56,6 +56,52 @@ jobs:
             --missing-limit 500 \
             --row-limit 100000 \
             | tee "$run_dir/report.log"
+          sudo python3 - "$replay" "$run_dir/gate-cohorts.json" <<'PY'
+          import json
+          import sys
+          from collections import Counter
+
+          source, output = sys.argv[1:]
+          cohorts = {
+              'ALL': Counter(),
+              'TIMELINE_OR_TERMINAL': Counter(),
+              'NO_TIMELINE_OR_TERMINAL': Counter(),
+          }
+          with open(source, 'r', encoding='utf-8') as handle:
+              for line in handle:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  covered = bool(row.get('timeline', {}).get('decisionSnapshotJoined')) or any(
+                      isinstance(value, dict) and value.get('complete') is True
+                      for value in row.get('shortHorizonOutcomes', [])
+                  )
+                  observed = bool(row.get('observedAction', {}).get('inCandidateSet'))
+                  behavioral = bool(row.get('eligibility', {}).get('behavioralModel'))
+                  action = bool(row.get('eligibility', {}).get('actionModel'))
+                  state = bool(row.get('eligibility', {}).get('stateModel'))
+                  keys = ['ALL', 'TIMELINE_OR_TERMINAL' if covered else 'NO_TIMELINE_OR_TERMINAL']
+                  for key in keys:
+                      cohorts[key]['rowCount'] += 1
+                      cohorts[key]['observedActionCoveredCount'] += int(observed)
+                      cohorts[key]['behavioralEligibleCount'] += int(behavioral)
+                      cohorts[key]['actionEligibleCount'] += int(action)
+                      cohorts[key]['stateEligibleCount'] += int(state)
+          result = {}
+          for key, values in cohorts.items():
+              total = values['rowCount']
+              result[key] = dict(values)
+              result[key]['observedActionCoverage'] = (
+                  values['observedActionCoveredCount'] / total if total else 0
+              )
+              result[key]['behavioralEligibilityCoverage'] = (
+                  values['behavioralEligibleCount'] / total if total else 0
+              )
+          with open(output, 'w', encoding='utf-8') as handle:
+              json.dump(result, handle, indent=2)
+              handle.write('\n')
+          print(json.dumps(result, indent=2))
+          PY
           sudo chown -R "$(id -u):$(id -g)" "$run_dir"
           echo "DIAGNOSTIC_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
 
@@ -67,5 +113,6 @@ jobs:
           path: |
             ${{ env.DIAGNOSTIC_RUN_DIR }}/report.json
             ${{ env.DIAGNOSTIC_RUN_DIR }}/report.log
+            ${{ env.DIAGNOSTIC_RUN_DIR }}/gate-cohorts.json
           if-no-files-found: warn
           retention-days: 14
