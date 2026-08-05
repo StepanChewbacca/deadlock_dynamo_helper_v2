@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: recommendation-v8-vps-training
+  group: recommendation-v8-future-timeline-fallback-v2
   cancel-in-progress: false
 
 jobs:
