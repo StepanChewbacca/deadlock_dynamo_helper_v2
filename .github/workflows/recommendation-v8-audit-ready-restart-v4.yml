@@ -57,6 +57,7 @@ jobs:
 
       - name: Cancel stale Recommendation V8 runs
         if: steps.gate.outputs.should-run == 'true'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -87,9 +88,9 @@ jobs:
                   });
                   core.notice(`Cancelled stale run ${run.id}: ${run.name}`);
                 } catch (error) {
-                  if (![404, 409].includes(error.status)) {
-                    throw error;
-                  }
+                  core.warning(
+                    `Unable to cancel stale run ${run.id}: ${error.message}`,
+                  );
                 }
               }
             }
