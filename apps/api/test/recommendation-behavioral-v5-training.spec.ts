@@ -69,7 +69,7 @@ describe('Recommendation Behavioral V5 training', () => {
       writeFile(join(sourceDirectory, 'dataset.ndjson'), dataset, 'utf8'),
       writeJson(join(sourceDirectory, 'manifest.json'), {
         schemaVersion: 1,
-        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
         generatedAt: '2026-07-21T00:00:00.000Z',
         artifact: {
           format: 'NDJSON',
@@ -95,7 +95,7 @@ describe('Recommendation Behavioral V5 training', () => {
       }),
       writeJson(join(sourceDirectory, 'audit.json'), {
         schemaVersion: 1,
-        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
         passed: true,
         trainingArtifactEligible: true,
       }),
@@ -269,7 +269,7 @@ function row(input: {
 }): RecommendationProDecisionDatasetV6Row {
   return {
     schemaVersion: 1,
-    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
     dataSource: 'PRO_HISTORICAL',
     decisionSource: 'HISTORICAL_REPLAY',
     decisionId: input.decisionId,
@@ -317,8 +317,8 @@ function row(input: {
       candidateGenerator: 'generator-1',
       candidateGeneratorPolicy: 'policy-1',
       candidateGeneratorPolicySha256: 'b'.repeat(64),
-      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_1',
-      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK',
+      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     },
     eligibility: {
       stateModel: true,

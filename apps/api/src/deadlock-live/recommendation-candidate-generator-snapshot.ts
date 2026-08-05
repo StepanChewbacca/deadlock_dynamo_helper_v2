@@ -23,6 +23,7 @@ import { sha256StableJson } from './stable-json';
 export const RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION =
   'RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_1' as const;
+export const RECOMMENDATION_HISTORICAL_OFFLINE_CANDIDATE_LIMIT = 256;
 
 export interface RecommendationSerializedHeroBuildPolicyState {
   stateKey: string;
@@ -294,6 +295,7 @@ export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(inp
   catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
   policy?: RecommendationPreparedHeroBuildPolicy;
   componentsByParent?: ReadonlyMap<number, number[]>;
+  historicalCandidateLimit?: number;
 }): RecommendationHistoricalCandidateInput[] {
   const matchTime = requiredTimestamp(
     input.decision.matchStartTime,
@@ -334,11 +336,18 @@ export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(inp
         [...item.componentItemIds],
       ]),
     );
+  const historicalCandidateLimit = normalizeHistoricalCandidateLimit(
+    input.historicalCandidateLimit ??
+      Math.max(
+        input.generatorOptions.limit,
+        RECOMMENDATION_HISTORICAL_OFFLINE_CANDIDATE_LIMIT,
+      ),
+  );
   const request = {
     heroId: input.decision.heroId,
     itemIds,
     gameTimeS: input.decision.gameTimeS,
-    limit: input.generatorOptions.limit,
+    limit: historicalCandidateLimit,
   };
   const recipeResolver = (parentItemId: number): readonly number[] =>
     componentsByParent.get(parentItemId) ?? [];
@@ -360,14 +369,23 @@ export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(inp
       minExactObservations: 1,
       maxBackoffDistance: 64,
       maxBackoffStates: 1,
-      limit: input.generatorOptions.limit,
+      limit: historicalCandidateLimit,
     },
   );
   return mergeHistoricalCandidateActions(
     candidateActionsFromRecommendationResponse(response),
     candidateActionsFromRecommendationResponse(supportResponse),
-    input.generatorOptions.limit,
+    historicalCandidateLimit,
   );
+}
+
+function normalizeHistoricalCandidateLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 2 || value > 512) {
+    throw new Error(
+      'historicalCandidateLimit must be a safe integer between 2 and 512.',
+    );
+  }
+  return value;
 }
 
 function mergeHistoricalCandidateActions(

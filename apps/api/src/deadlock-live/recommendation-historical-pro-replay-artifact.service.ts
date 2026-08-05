@@ -150,7 +150,7 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     cacheVersion: typeof RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION;
     directory: string;
     snapshotStalenessS: number;
-    decisionSnapshotSelection: 'LATEST_AT_OR_BEFORE_WITHIN_STALENESS';
+    decisionSnapshotSelection: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS';
     horizonSnapshotSelection: 'NEAREST_AFTER_DECISION_WITHIN_STALENESS';
     terminalOutcomeSelection: 'FINAL_OUTCOME_WHEN_MATCH_END_PRECEDES_HORIZON';
     requiredForOutput: true;
@@ -169,13 +169,16 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     resumeEnabled: boolean;
   };
   featureContract: {
-    featureCutoff: 'DECISION_TIME_PRE_ACTION';
+    featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK';
     observedActionInjectedIntoCandidates: false;
     v5_3UsedAsInput: false;
     userLiveUsedAsInput: false;
     shortHorizonTargets: ['3m', '5m', '10m'];
     finalOutcomeAuxiliaryOnly: false;
     terminalOutcomeBackfill: true;
+    historicalOfflineCandidateLimit: 256;
+    compactCandidateCatalogReferences: true;
+    futureSnapshotFallbackAllowed: true;
   };
   auditPassed: boolean;
   trainingArtifactEligible: boolean;
@@ -375,8 +378,8 @@ export class RecommendationHistoricalProReplayArtifactService
         maxRows: options.maxRows,
         thresholds: options.thresholds,
         partitionStrategy: 'MATCH_ID_HASH_V3',
-        candidateSupportStrategy: 'STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V2',
-        timelineJoinContract: 'DECISION_OR_CONFIRMED_TERMINAL_OUTCOME_V3',
+        candidateSupportStrategy: 'STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V3_LIMIT_256',
+        timelineJoinContract: 'DECISION_FUTURE_FALLBACK_OR_CONFIRMED_TERMINAL_V4',
         terminalOutcomeContract: 'FINAL_WIN_LOSS_AFTER_CONFIRMED_MATCH_END_V1',
         timelineCacheVersion:
           RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
@@ -567,7 +570,7 @@ export class RecommendationHistoricalProReplayArtifactService
           directory: this.timelineDirectory,
           snapshotStalenessS: options.snapshotStalenessS,
           decisionSnapshotSelection:
-            'LATEST_AT_OR_BEFORE_WITHIN_STALENESS',
+            'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS',
           horizonSnapshotSelection:
             'NEAREST_AFTER_DECISION_WITHIN_STALENESS',
           terminalOutcomeSelection:
@@ -588,13 +591,16 @@ export class RecommendationHistoricalProReplayArtifactService
           resumeEnabled: options.resume,
         },
         featureContract: {
-          featureCutoff: 'DECISION_TIME_PRE_ACTION',
+          featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK',
           observedActionInjectedIntoCandidates: false,
           v5_3UsedAsInput: false,
           userLiveUsedAsInput: false,
           shortHorizonTargets: ['3m', '5m', '10m'],
           finalOutcomeAuxiliaryOnly: false,
           terminalOutcomeBackfill: true,
+          historicalOfflineCandidateLimit: 256,
+          compactCandidateCatalogReferences: true,
+          futureSnapshotFallbackAllowed: true,
         },
         auditPassed: audit.passed,
         trainingArtifactEligible,

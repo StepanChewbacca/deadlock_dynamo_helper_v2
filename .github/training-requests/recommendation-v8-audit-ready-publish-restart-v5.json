@@ -1,6 +1,6 @@
 {
   "operation": "PUBLISH_AUDIT_READY_AND_RESTART_5000_V5",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "attempt": 1,
   "requestedAt": "2026-08-05T22:45:00.000Z",
   "sourcePreflightRunId": 31046349784,
@@ -23,5 +23,7 @@
   "observedActionInjectionAuthorized": false,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "completedAt": "2026-08-05T22:53:31+00:00",
+  "validationBaseSha": "53075796af00ef56d7ce954c6162008e3c70b0ee"
 }

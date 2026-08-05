@@ -25,6 +25,7 @@ import {
   type RecommendationHistoricalCatalogItem,
   type RecommendationHistoricalProReplayRow,
 } from './recommendation-historical-pro-replay';
+import { selectRecommendationDecisionTimelineSnapshot } from './recommendation-historical-pro-replay-outcomes';
 import {
   createRecommendationProDecisionDatasetV6Row,
   DEFAULT_RECOMMENDATION_DATASET_V6_THRESHOLDS,
@@ -145,7 +146,7 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
   timelineSource: {
     directory: string;
     decisionSnapshotStalenessS: number;
-    featureCutoff: 'LATEST_PLAYER_SNAPSHOT_AT_OR_BEFORE_DECISION';
+    featureCutoff: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS';
   };
   splitDescriptor: RecommendationDatasetV6SplitDescriptor & {
     sha256: string;
@@ -162,7 +163,7 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
     diagnosticMaxRows?: number;
   };
   featureContract: {
-    featureCutoff: 'DECISION_TIME_PRE_ACTION';
+    featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK';
     stateFeatureVersion: typeof RECOMMENDATION_STATE_FEATURE_VERSION_V6;
     decisionSource: 'HISTORICAL_REPLAY';
     candidateSpecificFeatures: true;
@@ -174,6 +175,8 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
     futureTestEligibleForSelection: false;
     finalOutcomeAuxiliary: false;
     terminalOutcomeBackfill: true;
+    futureSnapshotFallbackAllowed: true;
+    maximumFutureSnapshotLagS: 300;
     shortHorizonTargets: ['3m', '5m', '10m'];
   };
   auditPassed: boolean;
@@ -509,7 +512,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
         timelineSource: {
           directory: this.timelineDirectory,
           decisionSnapshotStalenessS: options.decisionSnapshotStalenessS,
-          featureCutoff: 'LATEST_PLAYER_SNAPSHOT_AT_OR_BEFORE_DECISION',
+          featureCutoff: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS',
         },
         splitDescriptor: {
           ...splitDescriptor,
@@ -527,7 +530,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           diagnosticMaxRows: options.maxRows,
         },
         featureContract: {
-          featureCutoff: 'DECISION_TIME_PRE_ACTION',
+          featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK',
           stateFeatureVersion: RECOMMENDATION_STATE_FEATURE_VERSION_V6,
           decisionSource: 'HISTORICAL_REPLAY',
           candidateSpecificFeatures: true,
@@ -539,6 +542,8 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           futureTestEligibleForSelection: false,
           finalOutcomeAuxiliary: false,
           terminalOutcomeBackfill: true,
+          futureSnapshotFallbackAllowed: true,
+          maximumFutureSnapshotLagS: 300,
           shortHorizonTargets: ['3m', '5m', '10m'],
         },
         auditPassed: audit.passed,
@@ -757,27 +762,18 @@ function selectDecisionTimelineSnapshot(input: {
   snapshots: readonly MatchTimelinePlayerSnapshot[];
   stalenessS: number;
 }): MatchTimelinePlayerSnapshot | undefined {
-  let selected: MatchTimelinePlayerSnapshot | undefined;
-  for (const snapshot of input.snapshots) {
-    if (snapshot.gameTimeS > input.replayRow.decisionGameTimeS) {
-      break;
-    }
-    if (
-      String(snapshot.matchId) !== input.replayRow.matchId ||
-      snapshot.steamId !== input.replayRow.playerId ||
-      snapshot.heroId !== input.replayRow.heroId
-    ) {
-      continue;
-    }
-    selected = snapshot;
-  }
-  if (
-    !selected ||
-    input.replayRow.decisionGameTimeS - selected.gameTimeS > input.stalenessS
-  ) {
+  const matchId = Number(input.replayRow.matchId);
+  if (!Number.isSafeInteger(matchId)) {
     return undefined;
   }
-  return clone(selected);
+  return selectRecommendationDecisionTimelineSnapshot({
+    matchId,
+    heroId: input.replayRow.heroId,
+    team: input.replayRow.team,
+    gameTimeS: input.replayRow.decisionGameTimeS,
+    snapshots: input.snapshots,
+    snapshotStalenessS: input.stalenessS,
+  });
 }
 
 function validateReplaySnapshotLineage(

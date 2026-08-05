@@ -11,7 +11,7 @@ import {
 
 export const RECOMMENDATION_HISTORICAL_PRO_REPLAY_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_HISTORICAL_PRO_REPLAY_VERSION =
-  'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1' as const;
+  'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2' as const;
 
 export interface RecommendationHistoricalProReplayThresholds {
   minimumTimelineCoverage: number;
@@ -23,7 +23,7 @@ export const DEFAULT_RECOMMENDATION_HISTORICAL_PRO_REPLAY_THRESHOLDS:
   RecommendationHistoricalProReplayThresholds = {
     minimumTimelineCoverage: 0.99,
     minimumCandidateMetadataCoverage: 0.999,
-    minimumObservedActionCandidateCoverage: 0.99,
+    minimumObservedActionCandidateCoverage: 0.995,
   };
 
 export interface RecommendationFrozenCandidateGeneratorSnapshot {
@@ -495,7 +495,6 @@ function normalizeCandidates(
       confidence: candidate.confidence,
       predictedStateKey: candidate.predictedStateKey,
       catalogMetadataAvailable: catalog !== undefined,
-      catalog: catalog ? cloneCatalogItem(catalog) : undefined,
     });
   }
 
@@ -675,15 +674,6 @@ function cloneSnapshot(
   return { ...snapshot };
 }
 
-function cloneCatalogItem(
-  item: RecommendationHistoricalCatalogItem,
-): RecommendationHistoricalCatalogItem {
-  return {
-    ...item,
-    tags: [...item.tags],
-    componentItemIds: [...item.componentItemIds],
-  };
-}
 
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;

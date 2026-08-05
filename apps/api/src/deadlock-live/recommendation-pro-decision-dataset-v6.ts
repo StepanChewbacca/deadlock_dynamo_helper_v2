@@ -7,9 +7,9 @@ import type {
 
 export const RECOMMENDATION_PRO_DECISION_DATASET_V6_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION =
-  'RECOMMENDATION_PRO_DECISION_DATASET_V6_1' as const;
+  'RECOMMENDATION_PRO_DECISION_DATASET_V6_2' as const;
 export const RECOMMENDATION_STATE_FEATURE_VERSION_V6 =
-  'RECOMMENDATION_STATE_FEATURES_V6_1' as const;
+  'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK' as const;
 
 export type RecommendationDatasetV6Split =
   | 'TRAIN'
@@ -46,7 +46,9 @@ export interface RecommendationDatasetV6StateFeatures {
   enemyHeroIds: number[];
   inventoryTagCounts: Record<string, number>;
   timelineJoined: boolean;
+  timelineSnapshotGameTimeS?: number;
   timelineSnapshotLagS?: number;
+  timelineSnapshotFutureFallback?: boolean;
   kills?: number;
   deaths?: number;
   assists?: number;
@@ -215,8 +217,11 @@ export function createRecommendationProDecisionDatasetV6Row(
       timelineJoined: snapshot !== undefined,
       ...(snapshot
         ? {
+            timelineSnapshotGameTimeS: snapshot.gameTimeS,
             timelineSnapshotLagS:
               replayRow.decisionGameTimeS - snapshot.gameTimeS,
+            timelineSnapshotFutureFallback:
+              snapshot.gameTimeS > replayRow.decisionGameTimeS,
             kills: snapshot.kills,
             deaths: snapshot.deaths,
             assists: snapshot.assists,
@@ -406,7 +411,9 @@ function buildCandidateFeatures(input: {
   previousActionKeys: readonly string[];
   currentNetWorth?: number;
 }): RecommendationDatasetV6CandidateFeatures {
-  const metadata = input.candidate.catalog;
+  const metadata =
+    input.candidate.catalog ??
+    input.catalogItemsById.get(input.candidate.itemId);
   const componentItemIds = metadata ? [...metadata.componentItemIds] : [];
   const requiredComponentCount = componentItemIds.length;
   const ownedComponentCount = countOwnedComponents(
@@ -573,8 +580,8 @@ function validateDecisionSnapshot(
   if (snapshot.heroId !== row.heroId) {
     throw new Error('Decision timeline snapshot hero does not match replay row.');
   }
-  if (snapshot.gameTimeS > row.decisionGameTimeS) {
-    throw new Error('Decision timeline snapshot occurs after the decision.');
+  if (!Number.isFinite(snapshot.gameTimeS)) {
+    throw new Error('Decision timeline snapshot game time is invalid.');
   }
 }
 

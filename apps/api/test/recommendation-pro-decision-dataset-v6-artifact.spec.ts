@@ -84,7 +84,7 @@ describe('Recommendation Dataset V6 artifact', () => {
       writeFile(join(replayDirectory, 'dataset.ndjson'), replayDataset, 'utf8'),
       writeJson(join(replayDirectory, 'manifest.json'), {
         schemaVersion: 1,
-        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
         artifact: {
           fileName: 'dataset.ndjson',
           rowCount: replayRows.length,
@@ -95,7 +95,7 @@ describe('Recommendation Dataset V6 artifact', () => {
       }),
       writeJson(join(replayDirectory, 'audit.json'), {
         schemaVersion: 1,
-        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
         passed: true,
         trainingArtifactEligible: true,
       }),
@@ -149,7 +149,7 @@ describe('Recommendation Dataset V6 artifact', () => {
 
     const manifest = service.getManifest();
     expect(manifest).toMatchObject({
-      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
       source: {
         kind: 'HISTORICAL_REPLAY',
         sha256: replaySha256,
@@ -309,7 +309,7 @@ function replayRow(
   const catalog = new Map(catalogItems().map((item) => [item.itemId, item]));
   return {
     schemaVersion: 1,
-    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     dataSource: 'PRO_HISTORICAL',
     decisionId,
     matchId: String(matchId),

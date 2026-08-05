@@ -74,6 +74,7 @@ describe('Recommendation historical pro replay artifact', () => {
     await service.onModuleInit();
     await service.start({
       partitionCount: 2,
+      snapshotStalenessS: 100,
       resume: false,
       thresholds: {
         minimumTimelineCoverage: 1,
@@ -136,7 +137,7 @@ describe('Recommendation historical pro replay artifact', () => {
     });
   });
 
-  it('excludes decisions before the first leak-free timeline snapshot', async () => {
+  it('excludes decisions when the first future timeline snapshot exceeds staleness', async () => {
     const sourceDirectory = join(root, 'source');
     const snapshotDirectory = join(root, 'snapshots');
     const timelineDirectory = join(root, 'timeline');
@@ -163,6 +164,7 @@ describe('Recommendation historical pro replay artifact', () => {
     await service.onModuleInit();
     await service.start({
       partitionCount: 2,
+      snapshotStalenessS: 100,
       resume: false,
       thresholds: {
         minimumTimelineCoverage: 1,

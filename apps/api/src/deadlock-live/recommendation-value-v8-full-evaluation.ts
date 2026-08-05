@@ -1,8 +1,9 @@
 import type { RecommendationBehavioralV5PropensityRow } from './recommendation-behavioral-v5-training.service';
-import type {
-  RecommendationDatasetV6CandidateFeatures,
-  RecommendationDatasetV6Split,
-  RecommendationProDecisionDatasetV6Row,
+import {
+  RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION,
+  type RecommendationDatasetV6CandidateFeatures,
+  type RecommendationDatasetV6Split,
+  type RecommendationProDecisionDatasetV6Row,
 } from './recommendation-pro-decision-dataset-v6';
 import {
   RECOMMENDATION_VALUE_V8_HORIZONS,
@@ -66,7 +67,7 @@ export interface RecommendationV6ShortOnlyBaselineManifest {
     };
   };
   sourceDataset: {
-    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1';
+    datasetVersion: typeof RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION;
     sha256: string;
     splitDescriptorSha256: string;
   };
@@ -312,7 +313,7 @@ export function validateRecommendationV6ShortOnlyBaselineManifest(
     manifest.sourceModel.configuration.actionPriorStrength !== 0.1 ||
     manifest.sourceModel.configuration.minimumObservations !== 10 ||
     manifest.sourceDataset.datasetVersion !==
-      'RECOMMENDATION_PRO_DECISION_DATASET_V6_1' ||
+      RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION ||
     manifest.sourceDataset.sha256 !== expectedDatasetSha256 ||
     manifest.sourceDataset.splitDescriptorSha256 !==
       expectedSplitDescriptorSha256 ||
