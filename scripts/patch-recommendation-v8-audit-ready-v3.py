@@ -90,6 +90,31 @@ def patch_replay_artifact() -> None:
     )
 
 
+def patch_evaluation_dataset_lineage() -> None:
+    path = 'apps/api/src/deadlock-live/recommendation-value-v8-full-evaluation.ts'
+    replace_exact(
+        path,
+        """import type {
+  RecommendationDatasetV6CandidateFeatures,
+  RecommendationDatasetV6Split,
+  RecommendationProDecisionDatasetV6Row,
+} from './recommendation-pro-decision-dataset-v6';
+""",
+        """import {
+  RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION,
+  type RecommendationDatasetV6CandidateFeatures,
+  type RecommendationDatasetV6Split,
+  type RecommendationProDecisionDatasetV6Row,
+} from './recommendation-pro-decision-dataset-v6';
+""",
+    )
+    replace_exact(
+        path,
+        "datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1';",
+        'datasetVersion: typeof RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION;',
+    )
+
+
 def main() -> None:
     legacy.patch_candidate_generator()
     legacy.patch_replay_contract()
@@ -97,6 +122,7 @@ def main() -> None:
     legacy.patch_dataset_artifact()
     legacy.patch_dataset_contract()
     legacy.patch_behavioral()
+    patch_evaluation_dataset_lineage()
     legacy.disable_retired_workflows()
 
 
