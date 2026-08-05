@@ -1,9 +1,9 @@
 {
   "operation": "APPLY_AUDIT_READY_FALLBACK_AND_RESTART_5000_V4",
   "state": "REQUESTED",
-  "attempt": 3,
-  "requestedAt": "2026-08-05T20:44:00.000Z",
-  "lastFailure": "Dataset V6 version bump left Value V8 evaluation lineage hard-coded to V6_1; lineage now follows the exported Dataset V6 version constant.",
+  "attempt": 4,
+  "requestedAt": "2026-08-05T20:51:00.000Z",
+  "lastFailure": "A second runtime manifest check still compared Dataset V6 against the V6_1 literal; all evaluation lineage checks now use the exported Dataset V6 version constant.",
   "matchLimit": 5000,
   "futureSnapshotFallbackEnabled": true,
   "maximumFutureSnapshotLagS": 300,
