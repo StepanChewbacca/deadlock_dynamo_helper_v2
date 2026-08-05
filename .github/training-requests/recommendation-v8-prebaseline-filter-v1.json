@@ -1,0 +1,11 @@
+{
+  "operation": "APPLY_PREBASELINE_REPLAY_FILTER_V1",
+  "state": "REQUESTED",
+  "requestedAt": "2026-08-05T19:02:00.000Z",
+  "matchLimit": 5000,
+  "lowerAuditThresholdsAuthorized": false,
+  "observedActionInjectionAuthorized": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}
