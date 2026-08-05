@@ -1,0 +1,73 @@
+name: Recommendation V8 Terminal Timeline Coverage Diagnostics V1
+
+on:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-terminal-timeline-coverage-diagnostics-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-terminal-timeline-coverage-diagnostics-v1
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+
+      - name: Validate request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-terminal-timeline-coverage-diagnostics-v1.json'
+          test "$(jq -r '.operation' "$request")" = 'DIAGNOSE_TERMINAL_TIMELINE_COVERAGE_V1'
+          test "$(jq -r '.state' "$request")" = 'REQUESTED'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          python3 -m py_compile scripts/diagnose-recommendation-v8-terminal-timeline-coverage.py
+
+      - name: Diagnose missing timeline coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          replay="$storage/recommendation-historical-pro-replay-terminal-5000-v2/dataset.ndjson"
+          timeline="$storage/match-timeline-events-v1"
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_id="terminal-timeline-diagnostics-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          test -s "$replay"
+          test -d "$timeline"
+          sudo python3 scripts/diagnose-recommendation-v8-terminal-timeline-coverage.py \
+            --replay "$replay" \
+            --timeline-root "$timeline" \
+            --output "$run_dir/report.json" \
+            --missing-limit 500 \
+            --row-limit 100000 \
+            | tee "$run_dir/report.log"
+          sudo chown -R "$(id -u):$(id -g)" "$run_dir"
+          echo "DIAGNOSTIC_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-terminal-timeline-coverage-v1-${{ github.run_id }}
+          path: |
+            ${{ env.DIAGNOSTIC_RUN_DIR }}/report.json
+            ${{ env.DIAGNOSTIC_RUN_DIR }}/report.log
+          if-no-files-found: warn
+          retention-days: 14
