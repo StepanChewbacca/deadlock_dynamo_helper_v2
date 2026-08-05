@@ -1,4 +1,4 @@
-name: Recommendation V8 Prebaseline Filter V1
+name: Recommendation V8 Future Timeline Fallback V2
 
 on:
   pull_request:
@@ -10,13 +10,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: recommendation-v8-prebaseline-filter-v1
+  group: recommendation-v8-vps-training
   cancel-in-progress: false
 
 jobs:
-  patch-test-and-publish:
+  patch-test-cleanup-and-restart:
     runs-on: self-hosted
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout training branch
         uses: actions/checkout@v4
@@ -29,9 +29,12 @@ jobs:
         run: |
           set -euo pipefail
           request='.github/training-requests/recommendation-v8-prebaseline-filter-v1.json'
-          test "$(jq -r '.operation' "$request")" = 'APPLY_PREBASELINE_REPLAY_FILTER_V1'
+          test "$(jq -r '.operation' "$request")" = 'APPLY_FUTURE_TIMELINE_FALLBACK_AND_RESTART_5000_V2'
           test "$(jq -r '.state' "$request")" = 'REQUESTED'
           test "$(jq -r '.matchLimit' "$request")" = '5000'
+          test "$(jq -r '.futureSnapshotFallbackEnabled' "$request")" = 'true'
+          test "$(jq -r '.maximumFutureSnapshotLagS' "$request")" = '300'
+          test "$(jq -r '.deleteFailedDerivedArtifactsAuthorized' "$request")" = 'true'
           test "$(jq -r '.lowerAuditThresholdsAuthorized' "$request")" = 'false'
           test "$(jq -r '.observedActionInjectionAuthorized' "$request")" = 'false'
           test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
@@ -51,7 +54,7 @@ jobs:
             fi
           fi
 
-      - name: Apply leak-free prebaseline filter
+      - name: Apply future timeline snapshot fallback
         shell: bash
         run: |
           set -euo pipefail
@@ -59,13 +62,18 @@ jobs:
           git diff --check
           git diff -- \
             apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts \
-            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts
+            apps/api/src/deadlock-live/recommendation-historical-pro-replay-outcomes.ts \
+            apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6-artifact.service.ts \
+            apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6.ts \
+            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts \
+            apps/api/test/recommendation-historical-pro-replay-terminal-outcomes.spec.ts \
+            apps/api/test/recommendation-pro-decision-dataset-v6.spec.ts
 
       - name: Build validation image
         shell: bash
         run: |
           set -euo pipefail
-          image="deadlock-recommendation-v8-prebaseline-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image="deadlock-recommendation-v8-future-fallback-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           sudo docker build --target builder -t "$image" .
           echo "BUILDER_IMAGE=$image" >> "$GITHUB_ENV"
 
@@ -91,18 +99,44 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git add \
             apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts \
-            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts
-          git commit -m 'fix: exclude prebaseline replay decisions'
+            apps/api/src/deadlock-live/recommendation-historical-pro-replay-outcomes.ts \
+            apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6-artifact.service.ts \
+            apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6.ts \
+            apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts \
+            apps/api/test/recommendation-historical-pro-replay-terminal-outcomes.spec.ts \
+            apps/api/test/recommendation-pro-decision-dataset-v6.spec.ts
+          git commit -m 'fix: use future timeline snapshot fallback'
           git fetch origin "$branch"
           git rebase "origin/$branch"
           git push origin "HEAD:$branch"
           git rev-parse HEAD | tee implementation-sha.txt
 
-      - name: Upload validation evidence
+      - name: Delete failed derived artifacts and restart bounded run
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/run-recommendation-v8-terminal-outcome-cleanup-restart-5000-v3.sh
+
+      - name: Capture restarted status
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          {
+            date --iso-8601=seconds
+            df -hT /
+            sudo docker ps -a --filter 'name=deadlock-recommendation-v8-training'
+            sudo docker inspect deadlock-recommendation-v8-training --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}}'
+            curl -s --max-time 15 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status | jq
+          } | tee restarted-status.txt
+
+      - name: Upload validation and restart evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recommendation-v8-prebaseline-filter-v1-${{ github.run_id }}
-          path: implementation-sha.txt
+          name: recommendation-v8-future-timeline-fallback-v2-${{ github.run_id }}
+          path: |
+            implementation-sha.txt
+            restarted-status.txt
           if-no-files-found: warn
           retention-days: 14
