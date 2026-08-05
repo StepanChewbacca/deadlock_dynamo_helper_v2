@@ -113,6 +113,13 @@ def patch_evaluation_dataset_lineage() -> None:
         "datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1';",
         'datasetVersion: typeof RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION;',
     )
+    replace_exact(
+        path,
+        """manifest.sourceDataset.datasetVersion !==
+      'RECOMMENDATION_PRO_DECISION_DATASET_V6_1' ||""",
+        """manifest.sourceDataset.datasetVersion !==
+      RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION ||""",
+    )
 
 
 def main() -> None:
