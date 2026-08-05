@@ -1106,7 +1106,6 @@ async function processPartition(input: {
         stats.excludedWithoutTimelineCount += 1;
         continue;
       }
-      stats.selectedRowCount += 1;
       const policy = await loadPreparedPolicy(
         snapshot,
         row.heroId,
@@ -1150,6 +1149,14 @@ async function processPartition(input: {
           matchEndGameTimeS: timeline.matchEndGameTimeS,
           snapshotStalenessS: input.snapshotStalenessS,
         });
+      const completeOutcomeAvailable = outcomes.some(
+        (outcome) => outcome.complete && outcome.utility !== undefined,
+      );
+      if (!decisionTimelineJoined && !completeOutcomeAvailable) {
+        stats.excludedWithoutTimelineCount += 1;
+        continue;
+      }
+      stats.selectedRowCount += 1;
       const replayRow = createRecommendationHistoricalProReplayRow({
         decision: row,
         decisionTimelineJoined,
