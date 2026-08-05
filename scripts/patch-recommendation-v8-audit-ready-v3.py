@@ -172,7 +172,46 @@ def patch_test_contracts() -> None:
     )
 
 
+def audit_ready_patch_is_applied() -> bool:
+    checks = (
+        (
+            'apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot.ts',
+            'RECOMMENDATION_HISTORICAL_OFFLINE_CANDIDATE_LIMIT = 256',
+        ),
+        (
+            'apps/api/src/deadlock-live/recommendation-historical-pro-replay.ts',
+            "'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2' as const",
+        ),
+        (
+            'apps/api/src/deadlock-live/recommendation-historical-pro-replay-artifact.service.ts',
+            'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS',
+        ),
+        (
+            'apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6.ts',
+            "'RECOMMENDATION_PRO_DECISION_DATASET_V6_2' as const",
+        ),
+        (
+            'apps/api/src/deadlock-live/recommendation-behavioral-v5.ts',
+            'RECOMMENDATION_BEHAVIORAL_V5_FEATURES_2_FUTURE_TIMELINE_FALLBACK',
+        ),
+        (
+            'apps/api/src/deadlock-live/recommendation-value-v8-full-evaluation.ts',
+            'RECOMMENDATION_PRO_DECISION_DATASET_V6_VERSION',
+        ),
+        (
+            'apps/api/test/recommendation-historical-pro-replay-artifact.spec.ts',
+            'excludes decisions when the first future timeline snapshot exceeds staleness',
+        ),
+    )
+    return all(
+        token in (ROOT / path).read_text(encoding='utf-8')
+        for path, token in checks
+    )
+
+
 def main() -> None:
+    if audit_ready_patch_is_applied():
+        return
     legacy.patch_candidate_generator()
     legacy.patch_replay_contract()
     patch_replay_artifact()
