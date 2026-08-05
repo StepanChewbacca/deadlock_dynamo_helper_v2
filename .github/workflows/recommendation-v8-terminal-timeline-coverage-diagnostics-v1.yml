@@ -16,7 +16,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: self-hosted
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout training branch
         uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
           test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
           python3 -m py_compile scripts/diagnose-recommendation-v8-terminal-timeline-coverage.py
 
-      - name: Diagnose missing timeline coverage
+      - name: Diagnose timeline and observed candidate coverage
         shell: bash
         run: |
           set -euo pipefail
@@ -56,17 +56,29 @@ jobs:
             --missing-limit 500 \
             --row-limit 100000 \
             | tee "$run_dir/report.log"
-          sudo python3 - "$replay" "$run_dir/gate-cohorts.json" <<'PY'
+          sudo python3 - "$replay" "$run_dir/gate-cohorts.json" "$run_dir/observed-candidate-misses.json" <<'PY'
           import json
           import sys
           from collections import Counter
 
-          source, output = sys.argv[1:]
+          source, cohort_output, miss_output = sys.argv[1:]
           cohorts = {
               'ALL': Counter(),
               'TIMELINE_OR_TERMINAL': Counter(),
               'NO_TIMELINE_OR_TERMINAL': Counter(),
           }
+          miss_action_types = Counter()
+          miss_items = Counter()
+          miss_phases = Counter()
+          miss_candidate_counts = Counter()
+          miss_same_item_action_types = Counter()
+          miss_examples = []
+          maximum_candidate_count = 0
+          candidate_limit_hit_count = 0
+          same_item_different_action_count = 0
+          empty_candidate_set_count = 0
+          missing_count = 0
+
           with open(source, 'r', encoding='utf-8') as handle:
               for line in handle:
                   if not line.strip():
@@ -87,20 +99,111 @@ jobs:
                       cohorts[key]['behavioralEligibleCount'] += int(behavioral)
                       cohorts[key]['actionEligibleCount'] += int(action)
                       cohorts[key]['stateEligibleCount'] += int(state)
-          result = {}
+
+                  candidates = [
+                      candidate
+                      for candidate in row.get('candidates', [])
+                      if isinstance(candidate, dict)
+                  ]
+                  candidate_count = len(candidates)
+                  maximum_candidate_count = max(maximum_candidate_count, candidate_count)
+                  if observed:
+                      continue
+
+                  missing_count += 1
+                  observed_action = row.get('observedAction', {})
+                  observed_action_key = str(observed_action.get('actionKey', ''))
+                  observed_action_type = str(observed_action.get('actionType', 'UNKNOWN'))
+                  observed_item_id = observed_action.get('itemId')
+                  miss_action_types[observed_action_type] += 1
+                  miss_items[str(observed_item_id)] += 1
+                  miss_phases[str(row.get('phase', 'UNKNOWN'))] += 1
+                  miss_candidate_counts[str(candidate_count)] += 1
+                  if candidate_count == 0:
+                      empty_candidate_set_count += 1
+                  if candidate_count >= 100:
+                      candidate_limit_hit_count += 1
+
+                  same_item = [
+                      candidate
+                      for candidate in candidates
+                      if candidate.get('itemId') == observed_item_id
+                  ]
+                  if same_item:
+                      same_item_different_action_count += 1
+                      for candidate in same_item:
+                          miss_same_item_action_types[
+                              f"{observed_action_type}->{candidate.get('actionType', 'UNKNOWN')}"
+                          ] += 1
+
+                  if len(miss_examples) < 100:
+                      miss_examples.append({
+                          'decisionId': row.get('decisionId'),
+                          'matchId': row.get('matchId'),
+                          'heroId': row.get('heroId'),
+                          'phase': row.get('phase'),
+                          'decisionGameTimeS': row.get('decisionGameTimeS'),
+                          'observedActionKey': observed_action_key,
+                          'observedActionType': observed_action_type,
+                          'observedItemId': observed_item_id,
+                          'candidateCount': candidate_count,
+                          'sameItemCandidateActionKeys': [
+                              candidate.get('actionKey') for candidate in same_item
+                          ],
+                          'firstCandidateKeys': [
+                              candidate.get('actionKey') for candidate in candidates[:20]
+                          ],
+                          'exclusionReasons': row.get('eligibility', {}).get('exclusionReasons', []),
+                      })
+
+          cohort_result = {}
           for key, values in cohorts.items():
               total = values['rowCount']
-              result[key] = dict(values)
-              result[key]['observedActionCoverage'] = (
+              cohort_result[key] = dict(values)
+              cohort_result[key]['observedActionCoverage'] = (
                   values['observedActionCoveredCount'] / total if total else 0
               )
-              result[key]['behavioralEligibilityCoverage'] = (
+              cohort_result[key]['behavioralEligibilityCoverage'] = (
                   values['behavioralEligibleCount'] / total if total else 0
               )
-          with open(output, 'w', encoding='utf-8') as handle:
-              json.dump(result, handle, indent=2)
+
+          all_rows = cohorts['ALL']['rowCount']
+          miss_result = {
+              'schemaVersion': 1,
+              'rowCount': all_rows,
+              'missingObservedActionCount': missing_count,
+              'observedActionCoverage': (
+                  (all_rows - missing_count) / all_rows if all_rows else 0
+              ),
+              'minimumRequiredCoverage': 0.995,
+              'additionalCoveredRowsRequired': max(
+                  0,
+                  int(0.995 * all_rows + 0.999999999) - (all_rows - missing_count),
+              ),
+              'maximumCandidateCount': maximum_candidate_count,
+              'candidateLimitAtLeast100MissCount': candidate_limit_hit_count,
+              'emptyCandidateSetMissCount': empty_candidate_set_count,
+              'sameItemDifferentActionMissCount': same_item_different_action_count,
+              'missActionTypeCounts': dict(miss_action_types.most_common()),
+              'missPhaseCounts': dict(miss_phases.most_common()),
+              'missCandidateCountDistribution': dict(
+                  sorted(miss_candidate_counts.items(), key=lambda item: int(item[0]))
+              ),
+              'sameItemActionTypeTransitions': dict(
+                  miss_same_item_action_types.most_common()
+              ),
+              'topMissingItemIds': dict(miss_items.most_common(100)),
+              'examples': miss_examples,
+          }
+
+          with open(cohort_output, 'w', encoding='utf-8') as handle:
+              json.dump(cohort_result, handle, indent=2)
               handle.write('\n')
-          print(json.dumps(result, indent=2))
+          with open(miss_output, 'w', encoding='utf-8') as handle:
+              json.dump(miss_result, handle, indent=2)
+              handle.write('\n')
+          print(json.dumps(cohort_result, indent=2))
+          print(json.dumps(miss_result, indent=2))
           PY
           sudo chown -R "$(id -u):$(id -g)" "$run_dir"
           echo "DIAGNOSTIC_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
@@ -114,5 +217,6 @@ jobs:
             ${{ env.DIAGNOSTIC_RUN_DIR }}/report.json
             ${{ env.DIAGNOSTIC_RUN_DIR }}/report.log
             ${{ env.DIAGNOSTIC_RUN_DIR }}/gate-cohorts.json
+            ${{ env.DIAGNOSTIC_RUN_DIR }}/observed-candidate-misses.json
           if-no-files-found: warn
           retention-days: 14
