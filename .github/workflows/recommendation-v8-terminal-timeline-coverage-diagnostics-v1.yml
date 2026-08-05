@@ -47,8 +47,8 @@ jobs:
           run_dir="$run_root/runs/$run_id"
           sudo mkdir -p "$run_dir"
           sudo chown -R "$(id -u):$(id -g)" "$run_root"
-          test -s "$replay"
-          test -d "$timeline"
+          sudo test -s "$replay"
+          sudo test -d "$timeline"
           sudo python3 scripts/diagnose-recommendation-v8-terminal-timeline-coverage.py \
             --replay "$replay" \
             --timeline-root "$timeline" \
