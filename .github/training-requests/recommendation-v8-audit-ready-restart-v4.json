@@ -1,9 +1,9 @@
 {
   "operation": "APPLY_AUDIT_READY_FALLBACK_AND_RESTART_5000_V4",
   "state": "REQUESTED",
-  "attempt": 2,
-  "requestedAt": "2026-08-05T20:45:00.000Z",
-  "lastFailure": "GitHub Actions cancellation API returned a transient 500 error; cancellation is now best effort.",
+  "attempt": 3,
+  "requestedAt": "2026-08-05T20:44:00.000Z",
+  "lastFailure": "Dataset V6 version bump left Value V8 evaluation lineage hard-coded to V6_1; lineage now follows the exported Dataset V6 version constant.",
   "matchLimit": 5000,
   "futureSnapshotFallbackEnabled": true,
   "maximumFutureSnapshotLagS": 300,
