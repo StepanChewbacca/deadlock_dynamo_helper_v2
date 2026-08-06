@@ -1,8 +1,8 @@
 {
   "operation": "INSPECT_RECOMMENDATION_V8_RECOVERY",
-  "requestedAt": "2026-08-02T22:11:00Z",
-  "runId": "30701422914-1-bounded-5000-resume-v2",
-  "inspection": 12,
+  "requestedAt": "2026-08-06T17:23:00Z",
+  "runId": "terminal-v2-31055288620-2",
+  "inspection": 13,
   "includeHistoricalCatalogReadiness": true,
   "verifyIsolationGuards": true,
   "includeHostMemoryAndKernelOom": true,
