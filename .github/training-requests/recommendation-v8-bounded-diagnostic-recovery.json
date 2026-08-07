@@ -1,0 +1,16 @@
+{
+  "operation": "RECOVER_RECOMMENDATION_V8_DIAGNOSTIC_START",
+  "requestedAt": "2026-08-07T21:38:00Z",
+  "attempt": 4,
+  "runId": "terminal-v2-31216039691-1",
+  "preserveCompletedReplay": true,
+  "preserveCompletedDatasetV6": true,
+  "preserveCompletedBehavioralV5": true,
+  "diagnosticMaxRows": 50000,
+  "fullTrainingAuthorized": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "auditThresholdsLowered": false,
+  "observedActionInjected": false
+}
