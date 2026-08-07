@@ -3,16 +3,15 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   mkdir,
-  open,
   readFile,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { GzipNdjsonWriter } from './gzip-ndjson';
 import type { MatchTimelinePlayerSnapshot } from './match-timeline-collector.service';
 import {
   validateRecommendationCandidateGeneratorSnapshotArtifact,
@@ -153,8 +152,10 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
   };
   artifact: {
     format: 'NDJSON';
+    compression: 'GZIP';
     fileName: typeof DATASET_FILE_NAME;
     byteLength: number;
+    uncompressedByteLength: number;
     sha256: string;
     rowCount: number;
   };
@@ -329,7 +330,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
       ]);
 
       this.status = { ...this.status, phase: 'BUILDING' };
-      const writer = await LineWriter.create(partialDatasetPath);
+      const writer = await GzipNdjsonWriter.create(partialDatasetPath);
       const accumulator =
         new RecommendationProDecisionDatasetV6AuditAccumulator(
           options.thresholds,
@@ -340,6 +341,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
       let invalidRowCount = 0;
       let timelineJoinedRowCount = 0;
       let missingTimelineRowCount = 0;
+      let uncompressedByteLength = 0;
 
       try {
         for await (const value of ndjson(source.datasetPath)) {
@@ -417,6 +419,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           }
         }
         await writer.close();
+        uncompressedByteLength = writer.uncompressedByteLength;
       } catch (error) {
         await writer.abort();
         throw error;
@@ -520,8 +523,10 @@ export class RecommendationProDecisionDatasetV6ArtifactService
         },
         artifact: {
           format: 'NDJSON',
+          compression: 'GZIP',
           fileName: DATASET_FILE_NAME,
           byteLength: datasetStat.size,
+          uncompressedByteLength,
           sha256: await hashFile(this.datasetPath),
           rowCount: outputRowCount,
         },
@@ -967,53 +972,6 @@ async function exists(path: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-class LineWriter {
-  private buffer = '';
-  private closed = false;
-
-  private constructor(
-    private readonly handle: FileHandle,
-    private readonly path: string,
-  ) {}
-
-  static async create(path: string): Promise<LineWriter> {
-    return new LineWriter(await open(path, 'w'), path);
-  }
-
-  async write(value: unknown): Promise<void> {
-    this.buffer += `${JSON.stringify(value)}\n`;
-    if (this.buffer.length >= 1024 * 1024) {
-      await this.flush();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    await this.flush();
-    await this.handle.close();
-    this.closed = true;
-  }
-
-  async abort(): Promise<void> {
-    if (!this.closed) {
-      await this.handle.close();
-      this.closed = true;
-    }
-    await rm(this.path, { force: true });
-  }
-
-  private async flush(): Promise<void> {
-    if (!this.buffer) {
-      return;
-    }
-    const value = this.buffer;
-    this.buffer = '';
-    await this.handle.write(value);
   }
 }
 

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -126,10 +127,10 @@ describe('Recommendation Dataset V6 artifact', () => {
       auditPassed: true,
       trainingArtifactEligible: true,
     });
-    const datasetRows = (await readFile(
-      join(outputDirectory, 'dataset.ndjson'),
-      'utf8',
-    ))
+    const datasetRows = gunzipSync(
+      await readFile(join(outputDirectory, 'dataset.ndjson')),
+    )
+      .toString('utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as RecommendationProDecisionDatasetV6Row);
@@ -153,6 +154,10 @@ describe('Recommendation Dataset V6 artifact', () => {
       source: {
         kind: 'HISTORICAL_REPLAY',
         sha256: replaySha256,
+      },
+      artifact: {
+        format: 'NDJSON',
+        compression: 'GZIP',
       },
       featureContract: {
         currentGoldAvailable: false,

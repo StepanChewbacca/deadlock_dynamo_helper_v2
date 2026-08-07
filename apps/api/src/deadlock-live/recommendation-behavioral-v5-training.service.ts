@@ -3,16 +3,18 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   mkdir,
-  open,
   readFile,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import {
+  GzipNdjsonWriter,
+  openMaybeGzipNdjsonReadStream,
+} from './gzip-ndjson';
 import {
   clipRecommendationBehavioralV5Probabilities,
   createRecommendationBehavioralV5Model,
@@ -675,7 +677,8 @@ export class RecommendationBehavioralV5TrainingService implements OnModuleInit {
         currentPass,
         currentEpoch: undefined,
       };
-      const propensityWriter = await LineWriter.create(
+      let propensityUncompressedByteLength = 0;
+      const propensityWriter = await GzipNdjsonWriter.create(
         `${this.paths.propensities}.partial`,
       );
       const evaluationAccumulator = new BehavioralV5EvaluationAccumulator(
@@ -776,6 +779,8 @@ export class RecommendationBehavioralV5TrainingService implements OnModuleInit {
           },
         );
         await propensityWriter.close();
+        propensityUncompressedByteLength =
+          propensityWriter.uncompressedByteLength;
       } catch (error) {
         await propensityWriter.abort();
         throw error;
@@ -989,8 +994,11 @@ export class RecommendationBehavioralV5TrainingService implements OnModuleInit {
           },
           propensities: {
             fileName: PROPENSITY_FILE_NAME,
+            format: 'NDJSON',
+            compression: 'GZIP',
             sha256: audit.predictions.sha256,
             byteLength: (await stat(this.paths.propensities)).size,
+            uncompressedByteLength: propensityUncompressedByteLength,
             rowCount: predictionRowCount,
           },
           evaluation: {
@@ -1385,7 +1393,7 @@ function normalizeOptions(
 
 async function* ndjson(path: string): AsyncGenerator<unknown> {
   const lines = createInterface({
-    input: createReadStream(path, { encoding: 'utf8' }),
+    input: await openMaybeGzipNdjsonReadStream(path),
     crlfDelay: Infinity,
   });
   let line = 0;
@@ -1445,53 +1453,6 @@ async function exists(path: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-class LineWriter {
-  private buffer = '';
-  private closed = false;
-
-  private constructor(
-    private readonly handle: FileHandle,
-    private readonly path: string,
-  ) {}
-
-  static async create(path: string): Promise<LineWriter> {
-    return new LineWriter(await open(path, 'w'), path);
-  }
-
-  async write(value: unknown): Promise<void> {
-    this.buffer += `${JSON.stringify(value)}\n`;
-    if (this.buffer.length >= 1024 * 1024) {
-      await this.flush();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    await this.flush();
-    await this.handle.close();
-    this.closed = true;
-  }
-
-  async abort(): Promise<void> {
-    if (!this.closed) {
-      await this.handle.close();
-      this.closed = true;
-    }
-    await rm(this.path, { force: true });
-  }
-
-  private async flush(): Promise<void> {
-    if (!this.buffer) {
-      return;
-    }
-    const value = this.buffer;
-    this.buffer = '';
-    await this.handle.write(value);
   }
 }
 

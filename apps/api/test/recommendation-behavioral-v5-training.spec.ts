@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -133,10 +134,10 @@ describe('Recommendation Behavioral V5 training', () => {
       trainingArtifactEligible: true,
     });
 
-    const propensities = (await readFile(
-      join(outputDirectory, 'propensities.ndjson'),
-      'utf8',
-    ))
+    const propensities = gunzipSync(
+      await readFile(join(outputDirectory, 'propensities.ndjson')),
+    )
+      .toString('utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as RecommendationBehavioralV5PropensityRow);
