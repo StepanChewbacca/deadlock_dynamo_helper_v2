@@ -36,9 +36,47 @@ jobs:
           behavioral="$storage/recommendation-behavioral-v5-terminal-5000-v2"
           report="$RUNNER_TEMP/recommendation-v8-bounded-diagnostic-recovery.txt"
 
-          replay_status="$(curl --silent --show-error --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
-          dataset_status="$(curl --silent --show-error --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status || true)"
-          behavioral_status="$(curl --silent --show-error --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status || true)"
+          test "$(sudo docker inspect --format='{{.State.Running}}' "$container")" = 'true'
+          test "$(sudo docker inspect --format='{{.State.OOMKilled}}' "$container")" = 'false'
+
+          if sudo docker exec "$container" sh -lc "pgrep -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null"; then
+            if ! sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"; then
+              sudo docker exec -d \
+                -e RECOMMENDATION_V8_MINIMUM_AVAILABLE_KB=12582912 \
+                -e RECOMMENDATION_V8_DISK_CHECK_INTERVAL_S=60 \
+                "$container" \
+                sh -lc 'sh /app/scripts/monitor-recommendation-v8-disk-reserve-v1.sh'
+              sleep 2
+            fi
+            sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"
+            {
+              echo "generatedAt=$(date --iso-8601=seconds)"
+              echo 'activePipelinePreserved=true'
+              echo 'diskGuardEnsured=true'
+              echo '=== replay status ==='
+              curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true
+              echo
+              echo '=== Dataset V6 status ==='
+              curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status || true
+              echo
+              echo '=== Behavioral V5 status ==='
+              curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status || true
+              echo
+              echo '=== Value V8 status ==='
+              curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status || true
+              echo
+              echo '=== processes ==='
+              sudo docker exec "$container" sh -lc "ps -eo pid,etime,rss,args | grep -E 'run-recommendation-v8-diagnostic-only-pipeline|monitor-recommendation-v8-disk-reserve' | grep -v grep || true"
+              echo '=== container ==='
+              sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}}' "$container"
+              echo '=== disk ==='
+              df -hT /
+              df -B1 /
+              echo '=== recent errors ==='
+              sudo docker logs --since=60m "$container" 2>&1 | grep -E 'ERROR|WARN|failed|ENOSPC|OOM|killed|audit' | tail -n 200 || true
+            } | tee "$report"
+            exit 0
+          fi
 
           sudo test -s "$replay/audit.json"
           sudo test -s "$replay/manifest.json"
@@ -53,8 +91,6 @@ jobs:
           dataset_audit="$(sudo cat "$dataset/audit.json")"
           dataset_manifest="$(sudo cat "$dataset/manifest.json")"
           behavioral_audit="$(sudo cat "$behavioral/audit.json")"
-          behavioral_manifest="$(sudo cat "$behavioral/manifest.json")"
-          behavioral_evaluation="$(sudo cat "$behavioral/evaluation.json")"
 
           jq -e '.passed == true and .trainingArtifactEligible == true' <<<"$replay_audit"
           jq -e '.auditPassed == true and .trainingArtifactEligible == true' <<<"$replay_manifest"
@@ -62,7 +98,7 @@ jobs:
           jq -e '.auditPassed == true and .trainingArtifactEligible == true' <<<"$dataset_manifest"
           jq -e '.passed == true' <<<"$behavioral_audit"
 
-          expected_replay_sha="$(jq -r '.replaySha256' "$run_dir/run.json")"
+          expected_replay_sha="$(jq -r '.replaySha256 // empty' "$run_dir/run.json")"
           test -n "$expected_replay_sha"
           actual_replay_sha="$(sudo sha256sum "$replay/dataset.ndjson" | awk '{print $1}')"
           test "$actual_replay_sha" = "$expected_replay_sha"
@@ -72,7 +108,6 @@ jobs:
             sudo rm -rf "$storage/recommendation-value-v8-diagnostic-terminal-5000-v2"
           fi
 
-          sudo docker exec "$container" sh -lc "pkill -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs' || true"
           catalog_version_id="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -c 'SELECT c.id FROM item_catalog_versions c WHERE c."clientVersion" = 6637 ORDER BY c.id DESC LIMIT 1;')"
           test -n "$catalog_version_id"
 
@@ -98,6 +133,14 @@ jobs:
             "$container" \
             sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
 
+          if ! sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"; then
+            sudo docker exec -d \
+              -e RECOMMENDATION_V8_MINIMUM_AVAILABLE_KB=12582912 \
+              -e RECOMMENDATION_V8_DISK_CHECK_INTERVAL_S=60 \
+              "$container" \
+              sh -lc 'sh /app/scripts/monitor-recommendation-v8-disk-reserve-v1.sh'
+          fi
+
           recovered=false
           value_status='{}'
           for attempt in $(seq 1 60); do
@@ -116,20 +159,6 @@ jobs:
           {
             echo "generatedAt=$(date --iso-8601=seconds)"
             echo "replaySha256=$actual_replay_sha"
-            echo "=== replay status ==="
-            echo "$replay_status"
-            echo "=== replay audit ==="
-            echo "$replay_audit"
-            echo "=== Dataset V6 status ==="
-            echo "$dataset_status"
-            echo "=== Dataset V6 audit ==="
-            echo "$dataset_audit"
-            echo "=== Behavioral V5 status ==="
-            echo "$behavioral_status"
-            echo "=== Behavioral V5 audit ==="
-            echo "$behavioral_audit"
-            echo "=== Behavioral V5 evaluation ==="
-            echo "$behavioral_evaluation"
             echo "=== Value V8 before ==="
             echo "$value_status_before"
             echo "=== Value V8 after ==="
@@ -141,16 +170,10 @@ jobs:
             echo "=== disk ==="
             df -hT /
             df -B1 /
-            echo "=== training tail ==="
-            tail -n 160 "$run_dir/training.log" || true
-            echo "=== recent errors ==="
-            sudo docker logs --since=60m "$container" 2>&1 | grep -E 'ERROR|WARN|failed|ENOSPC|OOM|killed|audit' | tail -n 200 || true
           } | tee "$report"
 
           test "$recovered" = 'true'
           sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"
-          test "$(sudo docker inspect --format='{{.State.Running}}' "$container")" = 'true'
-          test "$(sudo docker inspect --format='{{.State.OOMKilled}}' "$container")" = 'false'
 
       - name: Upload recovery evidence
         if: always()
