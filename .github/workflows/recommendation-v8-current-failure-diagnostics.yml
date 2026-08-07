@@ -1,0 +1,14 @@
+name: Recommendation V8 Current Failure Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  retired:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Automatic failure diagnostics are retired for the completed recovery chain. Run targeted diagnostics explicitly when needed.'

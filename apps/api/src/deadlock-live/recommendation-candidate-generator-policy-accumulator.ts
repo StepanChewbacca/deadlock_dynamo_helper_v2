@@ -80,6 +80,11 @@ export class RecommendationCandidateGeneratorPolicyAccumulator {
     this.rowCount += 1;
   }
 
+  release(): void {
+    this.heroesById.clear();
+    this.rowCount = 0;
+  }
+
   build(): {
     policies: RecommendationSerializedHeroBuildPolicy[];
     summary: RecommendationCandidateGeneratorPolicySummary;

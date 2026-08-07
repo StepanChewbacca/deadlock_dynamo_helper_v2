@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, type Hash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   mkdir,
@@ -13,6 +13,7 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
 import {
   HERO_BUILD_DECISION_DATASET_V3_SCHEMA_VERSION,
   type HeroBuildDecisionDatasetV3Row,
@@ -22,10 +23,16 @@ import type {
   MatchTimelinePlayerSnapshot,
 } from './match-timeline-collector.service';
 import {
-  generateRecommendationHistoricalCandidatesFromValidatedSnapshot,
-  validateRecommendationCandidateGeneratorSnapshotArtifact,
+  candidateGeneratorCatalogPayload,
+  generateRecommendationHistoricalCandidatesFromPreparedPolicy,
+  prepareRecommendationSerializedHeroBuildPolicy,
+  validateRecommendationCandidateGeneratorSnapshotMetadata,
+  validateRecommendationSerializedHeroBuildPolicy,
   type RecommendationCandidateGeneratorSnapshotArtifact,
   type RecommendationCandidateGeneratorSnapshotRegistry,
+  type RecommendationCandidateGeneratorSnapshotRegistryEntry,
+  type RecommendationPreparedHeroBuildPolicy,
+  type RecommendationSerializedHeroBuildPolicy,
 } from './recommendation-candidate-generator-snapshot';
 import {
   createRecommendationHistoricalProReplayRow,
@@ -36,9 +43,13 @@ import {
   type RecommendationHistoricalProReplayAudit,
   type RecommendationHistoricalProReplayThresholds,
 } from './recommendation-historical-pro-replay';
-import { buildRecommendationHistoricalShortHorizonOutcomes } from './recommendation-historical-pro-replay-outcomes';
+import {
+  buildRecommendationHistoricalShortHorizonOutcomes,
+  hasFreshRecommendationDecisionTimelineSnapshot,
+} from './recommendation-historical-pro-replay-outcomes';
+import { RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION } from './recommendation-historical-postgres-timeline-cache.service';
 import { RecommendationHistoricalProReplayAuditAccumulator } from './recommendation-historical-pro-replay-streaming-audit';
-import { sha256StableJson } from './stable-json';
+import { sha256StableJson, updateStableJsonHash } from './stable-json';
 
 const SOURCE_DATASET_VERSION = 'CONTEXTUAL_V3_DECISION_DATASET_1';
 const DEFAULT_SOURCE_DIRECTORY =
@@ -135,8 +146,13 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     selectionRule: 'LATEST_TRAINING_WINDOW_END_STRICTLY_BEFORE_MATCH_START';
   };
   timelineSource: {
+    source: 'POSTGRESQL_RAW_MATCH_METADATA_CACHE';
+    cacheVersion: typeof RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION;
     directory: string;
     snapshotStalenessS: number;
+    decisionSnapshotSelection: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS';
+    horizonSnapshotSelection: 'NEAREST_AFTER_DECISION_WITHIN_STALENESS';
+    terminalOutcomeSelection: 'FINAL_OUTCOME_WHEN_MATCH_END_PRECEDES_HORIZON';
     requiredForOutput: true;
   };
   artifact: {
@@ -153,12 +169,16 @@ export interface RecommendationHistoricalProReplayArtifactManifest {
     resumeEnabled: boolean;
   };
   featureContract: {
-    featureCutoff: 'DECISION_TIME_PRE_ACTION';
+    featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK';
     observedActionInjectedIntoCandidates: false;
     v5_3UsedAsInput: false;
     userLiveUsedAsInput: false;
     shortHorizonTargets: ['3m', '5m', '10m'];
-    finalOutcomeAuxiliaryOnly: true;
+    finalOutcomeAuxiliaryOnly: false;
+    terminalOutcomeBackfill: true;
+    historicalOfflineCandidateLimit: 256;
+    compactCandidateCatalogReferences: true;
+    futureSnapshotFallbackAllowed: true;
   };
   auditPassed: boolean;
   trainingArtifactEligible: boolean;
@@ -180,9 +200,11 @@ interface BuildPaths {
   audit: string;
   work: string;
   checkpoint: string;
+  finalizationCheckpoint: string;
   sourceParts: string;
   outputParts: string;
   partStats: string;
+  snapshotCache: string;
 }
 
 interface BuildCheckpoint {
@@ -195,6 +217,12 @@ interface BuildCheckpoint {
   updatedAt: string;
 }
 
+interface FinalizationCheckpoint {
+  completedPartitions: number[];
+  byteLength: number;
+  updatedAt: string;
+}
+
 interface SourceArtifact {
   datasetPath: string;
   datasetVersion: string;
@@ -203,15 +231,26 @@ interface SourceArtifact {
   rowCount: number;
 }
 
+interface PreparedCandidateGeneratorSnapshotArtifact {
+  schemaVersion: RecommendationCandidateGeneratorSnapshotArtifact['schemaVersion'];
+  artifactVersion: RecommendationCandidateGeneratorSnapshotArtifact['artifactVersion'];
+  snapshot: RecommendationCandidateGeneratorSnapshotArtifact['snapshot'];
+  generatorOptions: RecommendationCandidateGeneratorSnapshotArtifact['generatorOptions'];
+  catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+  policyPathsByHeroId: ReadonlyMap<number, string>;
+  componentsByParent: ReadonlyMap<number, number[]>;
+}
+
 interface SnapshotBundle {
   registrySha256: string;
-  artifacts: RecommendationCandidateGeneratorSnapshotArtifact[];
+  artifacts: PreparedCandidateGeneratorSnapshotArtifact[];
 }
 
 interface TimelineData {
   available: boolean;
   snapshots: MatchTimelinePlayerSnapshot[];
   objectives: MatchTimelineObjectiveEvent[];
+  matchEndGameTimeS?: number;
 }
 
 interface PartitionStats {
@@ -331,12 +370,19 @@ export class RecommendationHistoricalProReplayArtifactService
       const snapshots = await loadSnapshotBundle(
         this.snapshotRegistryPath,
         options.expectedSnapshotRegistrySha256,
+        this.paths.snapshotCache,
       );
       const optionsHash = sha256StableJson({
         partitionCount: options.partitionCount,
         snapshotStalenessS: options.snapshotStalenessS,
         maxRows: options.maxRows,
         thresholds: options.thresholds,
+        partitionStrategy: 'MATCH_ID_HASH_V3',
+        candidateSupportStrategy: 'STATE_PRIMARY_PLUS_HERO_SUPPORT_UNION_V3_LIMIT_256',
+        timelineJoinContract: 'DECISION_FUTURE_FALLBACK_OR_CONFIRMED_TERMINAL_V4',
+        terminalOutcomeContract: 'FINAL_WIN_LOSS_AFTER_CONFIRMED_MATCH_END_V1',
+        timelineCacheVersion:
+          RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
       });
       let checkpoint = options.resume
         ? await readJson<BuildCheckpoint>(this.paths.checkpoint)
@@ -441,6 +487,11 @@ export class RecommendationHistoricalProReplayArtifactService
           'Scanned source row count does not match the source manifest.',
         );
       }
+      if (coreAudit.rowCount !== totals.outputRowCount) {
+        additionalReasons.push(
+          'Physical replay row count does not match partition output totals.',
+        );
+      }
       if (totals.invalidSourceRowCount > 0) {
         additionalReasons.push('Replay source contains invalid rows.');
       }
@@ -513,8 +564,17 @@ export class RecommendationHistoricalProReplayArtifactService
             'LATEST_TRAINING_WINDOW_END_STRICTLY_BEFORE_MATCH_START',
         },
         timelineSource: {
+          source: 'POSTGRESQL_RAW_MATCH_METADATA_CACHE',
+          cacheVersion:
+            RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_VERSION,
           directory: this.timelineDirectory,
           snapshotStalenessS: options.snapshotStalenessS,
+          decisionSnapshotSelection:
+            'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS',
+          horizonSnapshotSelection:
+            'NEAREST_AFTER_DECISION_WITHIN_STALENESS',
+          terminalOutcomeSelection:
+            'FINAL_OUTCOME_WHEN_MATCH_END_PRECEDES_HORIZON',
           requiredForOutput: true,
         },
         artifact: {
@@ -531,12 +591,16 @@ export class RecommendationHistoricalProReplayArtifactService
           resumeEnabled: options.resume,
         },
         featureContract: {
-          featureCutoff: 'DECISION_TIME_PRE_ACTION',
+          featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK',
           observedActionInjectedIntoCandidates: false,
           v5_3UsedAsInput: false,
           userLiveUsedAsInput: false,
           shortHorizonTargets: ['3m', '5m', '10m'],
-          finalOutcomeAuxiliaryOnly: true,
+          finalOutcomeAuxiliaryOnly: false,
+          terminalOutcomeBackfill: true,
+          historicalOfflineCandidateLimit: 256,
+          compactCandidateCatalogReferences: true,
+          futureSnapshotFallbackAllowed: true,
         },
         auditPassed: audit.passed,
         trainingArtifactEligible,
@@ -565,7 +629,10 @@ export class RecommendationHistoricalProReplayArtifactService
         auditAvailable: true,
         auditPassed: audit.passed,
       };
-      await rm(this.paths.work, { recursive: true, force: true });
+      await Promise.all([
+        rm(this.paths.work, { recursive: true, force: true }),
+        rm(this.paths.snapshotCache, { recursive: true, force: true }),
+      ]);
       this.logger.log(
         `Recommendation historical pro replay completed with ` +
           `${totals.outputRowCount} rows.`,
@@ -670,6 +737,7 @@ async function loadSourceArtifact(
 async function loadSnapshotBundle(
   registryPath: string,
   expectedSha256: string | undefined,
+  cacheRoot: string,
 ): Promise<SnapshotBundle> {
   const raw = await readFile(registryPath, 'utf8');
   const registrySha256 = createHash('sha256').update(raw).digest('hex');
@@ -692,7 +760,9 @@ async function loadSnapshotBundle(
     throw new Error('Invalid candidate generator snapshot registry.');
   }
 
-  const artifacts: RecommendationCandidateGeneratorSnapshotArtifact[] = [];
+  await rm(cacheRoot, { recursive: true, force: true });
+  await mkdir(cacheRoot, { recursive: true });
+  const artifacts: PreparedCandidateGeneratorSnapshotArtifact[] = [];
   const snapshotIds = new Set<string>();
   for (const entry of registry.snapshots) {
     if (
@@ -701,28 +771,15 @@ async function loadSnapshotBundle(
     ) {
       throw new Error('Snapshot registry fileName must be a local file name.');
     }
-    const path = join(dirname(registryPath), entry.fileName);
-    const artifactRaw = await readFile(path, 'utf8');
-    const artifactSha256 = createHash('sha256')
-      .update(artifactRaw)
-      .digest('hex');
-    if (artifactSha256 !== requiredSha(entry.artifactSha256, 'artifactSha256')) {
-      throw new Error(
-        `Candidate generator artifact ${entry.fileName} SHA-256 mismatch.`,
-      );
-    }
-    const artifact = JSON.parse(
-      artifactRaw,
-    ) as RecommendationCandidateGeneratorSnapshotArtifact;
-    validateRecommendationCandidateGeneratorSnapshotArtifact(artifact);
-    if (
-      artifact.snapshot.snapshotId !== entry.snapshotId ||
-      artifact.snapshot.trainingWindowEnd !== entry.trainingWindowEnd
-    ) {
-      throw new Error(
-        `Candidate generator registry metadata does not match ${entry.fileName}.`,
-      );
-    }
+    const cacheDirectory = join(
+      cacheRoot,
+      createHash('sha256').update(entry.snapshotId).digest('hex').slice(0, 16),
+    );
+    const artifact = await loadPreparedSnapshotArtifact({
+      path: join(dirname(registryPath), entry.fileName),
+      entry,
+      cacheDirectory,
+    });
     if (snapshotIds.has(artifact.snapshot.snapshotId)) {
       throw new Error(
         `Candidate generator registry duplicates ${artifact.snapshot.snapshotId}.`,
@@ -738,6 +795,220 @@ async function loadSnapshotBundle(
       left.snapshot.snapshotId.localeCompare(right.snapshot.snapshotId),
   );
   return { registrySha256, artifacts };
+}
+
+async function loadPreparedSnapshotArtifact(input: {
+  path: string;
+  entry: RecommendationCandidateGeneratorSnapshotRegistryEntry;
+  cacheDirectory: string;
+}): Promise<PreparedCandidateGeneratorSnapshotArtifact> {
+  await rm(input.cacheDirectory, { recursive: true, force: true });
+  await mkdir(input.cacheDirectory, { recursive: true });
+
+  const artifactHash = createHash('sha256');
+  const decoder = new StringDecoder('utf8');
+  const policyPathsByHeroId = new Map<number, string>();
+  let mode: 'HEADER' | 'POLICIES' | 'TAIL' = 'HEADER';
+  let headerBuffer = '';
+  let tailBuffer = '';
+  let policyBuffer = '';
+  let policyDepth = 0;
+  let policyInString = false;
+  let policyEscaped = false;
+  let policyCount = 0;
+  let header:
+    | Pick<
+        RecommendationCandidateGeneratorSnapshotArtifact,
+        'schemaVersion' | 'artifactVersion' | 'snapshot' | 'generatorOptions'
+      >
+    | undefined;
+  let policyHash: Hash | undefined;
+
+  const storePolicy = async (): Promise<void> => {
+    const serialized = JSON.parse(
+      policyBuffer,
+    ) as RecommendationSerializedHeroBuildPolicy;
+    validateRecommendationSerializedHeroBuildPolicy(serialized);
+    if (policyPathsByHeroId.has(serialized.heroId)) {
+      throw new Error(
+        `Candidate generator snapshot duplicates hero ${serialized.heroId}.`,
+      );
+    }
+    const policyPath = join(
+      input.cacheDirectory,
+      `hero-${serialized.heroId}.json`,
+    );
+    await writeFile(policyPath, `${policyBuffer}\n`, 'utf8');
+    policyPathsByHeroId.set(serialized.heroId, policyPath);
+    if (!policyHash) {
+      throw new Error('Candidate generator policy hash was not initialized.');
+    }
+    if (policyCount > 0) {
+      policyHash.update(',');
+    }
+    updateStableJsonHash(policyHash, serialized);
+    policyCount += 1;
+    policyBuffer = '';
+  };
+
+  const consume = async (initialText: string): Promise<void> => {
+    let text = initialText;
+    let index = 0;
+    while (index < text.length) {
+      if (mode === 'HEADER') {
+        headerBuffer += text.slice(index);
+        headerBuffer = headerBuffer.replace(/^\uFEFF/, '');
+        const match = /"policies"\s*:\s*\[/.exec(headerBuffer);
+        if (!match) {
+          if (Buffer.byteLength(headerBuffer) > 16 * 1024 * 1024) {
+            throw new Error('Candidate snapshot header exceeds 16 MiB.');
+          }
+          return;
+        }
+        const headerRaw =
+          `${headerBuffer.slice(0, match.index)}"policies":[]}`;
+        const parsed = JSON.parse(headerRaw) as Pick<
+          RecommendationCandidateGeneratorSnapshotArtifact,
+          'schemaVersion' | 'artifactVersion' | 'snapshot' | 'generatorOptions'
+        >;
+        header = parsed;
+        policyHash = createHash('sha256');
+        policyHash.update('{"generatorOptions":');
+        updateStableJsonHash(policyHash, parsed.generatorOptions);
+        policyHash.update(',"policies":[');
+        text = headerBuffer.slice(match.index + match[0].length);
+        headerBuffer = '';
+        mode = 'POLICIES';
+        index = 0;
+        continue;
+      }
+
+      if (mode === 'TAIL') {
+        tailBuffer += text.slice(index);
+        return;
+      }
+
+      const character = text[index];
+      index += 1;
+      if (policyDepth === 0) {
+        if (/\s/.test(character) || character === ',') {
+          continue;
+        }
+        if (character === ']') {
+          mode = 'TAIL';
+          tailBuffer += text.slice(index);
+          return;
+        }
+        if (character !== '{') {
+          throw new Error(
+            `Unexpected token ${JSON.stringify(character)} in snapshot policies.`,
+          );
+        }
+        policyBuffer = character;
+        policyDepth = 1;
+        policyInString = false;
+        policyEscaped = false;
+        continue;
+      }
+
+      policyBuffer += character;
+      if (policyInString) {
+        if (policyEscaped) {
+          policyEscaped = false;
+        } else if (character === '\\') {
+          policyEscaped = true;
+        } else if (character === '"') {
+          policyInString = false;
+        }
+        continue;
+      }
+      if (character === '"') {
+        policyInString = true;
+      } else if (character === '{' || character === '[') {
+        policyDepth += 1;
+      } else if (character === '}' || character === ']') {
+        policyDepth -= 1;
+        if (policyDepth === 0) {
+          await storePolicy();
+        }
+      }
+    }
+  };
+
+  for await (const chunk of createReadStream(input.path)) {
+    const bytes = chunk as Buffer;
+    artifactHash.update(bytes);
+    await consume(decoder.write(bytes));
+  }
+  await consume(decoder.end());
+
+  if (!header || !policyHash || (mode as string) !== 'TAIL' || policyDepth !== 0) {
+    throw new Error('Candidate generator snapshot ended before parsing completed.');
+  }
+  if (policyCount === 0) {
+    throw new Error('Candidate generator snapshot contains no hero policies.');
+  }
+  policyHash.update(']}');
+  const actualPolicySha256 = policyHash.digest('hex');
+
+  const tail = tailBuffer.trim();
+  if (!tail.startsWith(',')) {
+    throw new Error('Candidate generator snapshot catalog tail is invalid.');
+  }
+  const parsedTail = JSON.parse(`{${tail.slice(1)}`) as {
+    catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+  };
+  const metadata = {
+    ...header,
+    catalog: parsedTail.catalog,
+  };
+  validateRecommendationCandidateGeneratorSnapshotMetadata(metadata);
+
+  const artifactSha256 = artifactHash.digest('hex');
+  if (
+    artifactSha256 !== requiredSha(input.entry.artifactSha256, 'artifactSha256')
+  ) {
+    throw new Error(
+      `Candidate generator artifact ${input.entry.fileName} SHA-256 mismatch.`,
+    );
+  }
+  if (actualPolicySha256 !== metadata.snapshot.policySha256) {
+    throw new Error(
+      `Candidate generator policy SHA-256 mismatch: ${actualPolicySha256} versus ` +
+        `${metadata.snapshot.policySha256}.`,
+    );
+  }
+  const actualCatalogSha256 = sha256StableJson(
+    candidateGeneratorCatalogPayload({
+      ...metadata,
+      policies: [],
+    }),
+  );
+  if (actualCatalogSha256 !== metadata.snapshot.catalogSha256) {
+    throw new Error(
+      `Candidate generator catalog SHA-256 mismatch: ${actualCatalogSha256} versus ` +
+        `${metadata.snapshot.catalogSha256}.`,
+    );
+  }
+  if (
+    metadata.snapshot.snapshotId !== input.entry.snapshotId ||
+    metadata.snapshot.trainingWindowEnd !== input.entry.trainingWindowEnd
+  ) {
+    throw new Error(
+      `Candidate generator registry metadata does not match ${input.entry.fileName}.`,
+    );
+  }
+
+  return {
+    ...metadata,
+    policyPathsByHeroId,
+    componentsByParent: new Map<number, number[]>(
+      metadata.catalog.items.map((item) => [
+        item.itemId,
+        [...item.componentItemIds],
+      ]),
+    ),
+  };
 }
 
 async function partitionSource(input: {
@@ -766,7 +1037,10 @@ async function partitionSource(input: {
         handle = await open(sourcePartPath(input.paths, partition), 'a');
         handles.set(partition, handle);
       }
-      await handle.write(`${JSON.stringify(row)}\n`);
+      await writeAll(
+        handle,
+        Buffer.from(`${JSON.stringify(row)}\n`, 'utf8'),
+      );
       count += 1;
       if (count % 50_000 === 0) {
         input.progress(count);
@@ -783,7 +1057,7 @@ async function partitionSource(input: {
 async function processPartition(input: {
   index: number;
   paths: BuildPaths;
-  snapshots: readonly RecommendationCandidateGeneratorSnapshotArtifact[];
+  snapshots: readonly PreparedCandidateGeneratorSnapshotArtifact[];
   timelineDirectory: string;
   snapshotStalenessS: number;
 }): Promise<PartitionStats> {
@@ -810,6 +1084,10 @@ async function processPartition(input: {
     string,
     ReadonlyMap<number, RecommendationHistoricalCatalogItem>
   >();
+  const preparedPolicyCache = new Map<
+    string,
+    RecommendationPreparedHeroBuildPolicy
+  >();
   let timelineMatchId: number | undefined;
   let timeline: TimelineData = emptyTimeline();
 
@@ -834,11 +1112,19 @@ async function processPartition(input: {
         stats.excludedWithoutTimelineCount += 1;
         continue;
       }
-      stats.selectedRowCount += 1;
+      const policy = await loadPreparedPolicy(
+        snapshot,
+        row.heroId,
+        preparedPolicyCache,
+      );
       const candidates =
-        generateRecommendationHistoricalCandidatesFromValidatedSnapshot({
+        generateRecommendationHistoricalCandidatesFromPreparedPolicy({
           decision: row,
-          artifact: snapshot,
+          snapshot: snapshot.snapshot,
+          generatorOptions: snapshot.generatorOptions,
+          catalog: snapshot.catalog,
+          policy,
+          componentsByParent: snapshot.componentsByParent,
         });
       let catalogItems = catalogBySnapshotId.get(
         snapshot.snapshot.snapshotId,
@@ -855,15 +1141,31 @@ async function processPartition(input: {
           catalogItems,
         );
       }
+      const decisionTimelineJoined =
+        hasFreshRecommendationDecisionTimelineSnapshot({
+          decision: row,
+          snapshots: timeline.snapshots,
+          snapshotStalenessS: input.snapshotStalenessS,
+        });
       const outcomes =
         buildRecommendationHistoricalShortHorizonOutcomes({
           decision: row,
           snapshots: timeline.snapshots,
           objectives: timeline.objectives,
+          matchEndGameTimeS: timeline.matchEndGameTimeS,
           snapshotStalenessS: input.snapshotStalenessS,
         });
+      const completeOutcomeAvailable = outcomes.some(
+        (outcome) => outcome.complete && outcome.utility !== undefined,
+      );
+      if (!decisionTimelineJoined && !completeOutcomeAvailable) {
+        stats.excludedWithoutTimelineCount += 1;
+        continue;
+      }
+      stats.selectedRowCount += 1;
       const replayRow = createRecommendationHistoricalProReplayRow({
         decision: row,
+        decisionTimelineJoined,
         candidateActions: candidates,
         catalogItemsById: catalogItems,
         shortHorizonOutcomes: outcomes,
@@ -882,15 +1184,43 @@ async function processPartition(input: {
   }
 }
 
+async function loadPreparedPolicy(
+  snapshot: PreparedCandidateGeneratorSnapshotArtifact,
+  heroId: number,
+  cache: Map<string, RecommendationPreparedHeroBuildPolicy>,
+): Promise<RecommendationPreparedHeroBuildPolicy | undefined> {
+  const path = snapshot.policyPathsByHeroId.get(heroId);
+  if (!path) {
+    return undefined;
+  }
+  const key = `${snapshot.snapshot.snapshotId}:${heroId}`;
+  const cached = cache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const serialized = JSON.parse(
+    await readFile(path, 'utf8'),
+  ) as RecommendationSerializedHeroBuildPolicy;
+  const prepared = prepareRecommendationSerializedHeroBuildPolicy(serialized);
+  if (cache.size >= 4) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest) {
+      cache.delete(oldest);
+    }
+  }
+  cache.set(key, prepared);
+  return prepared;
+}
+
 function selectValidatedCandidateGeneratorSnapshot(
-  artifacts: readonly RecommendationCandidateGeneratorSnapshotArtifact[],
+  artifacts: readonly PreparedCandidateGeneratorSnapshotArtifact[],
   matchStartTime: string,
-): RecommendationCandidateGeneratorSnapshotArtifact | undefined {
+): PreparedCandidateGeneratorSnapshotArtifact | undefined {
   const matchTime = Date.parse(matchStartTime);
   if (!Number.isFinite(matchTime)) {
     throw new Error('Replay matchStartTime must be an ISO timestamp.');
   }
-  let selected: RecommendationCandidateGeneratorSnapshotArtifact | undefined;
+  let selected: PreparedCandidateGeneratorSnapshotArtifact | undefined;
   for (const artifact of artifacts) {
     const trainingEnd = Date.parse(artifact.snapshot.trainingWindowEnd);
     if (trainingEnd >= matchTime) {
@@ -939,10 +1269,22 @@ async function loadTimeline(
       left.gameTimeS - right.gameTimeS ||
       left.objectiveEventId.localeCompare(right.objectiveEventId),
   );
+  const manifestMatchEndGameTimeS = Number(manifest.matchEndGameTimeS);
+  const inferredMatchEndGameTimeS = snapshots.reduce(
+    (maximum, snapshot) => Math.max(maximum, snapshot.gameTimeS),
+    0,
+  );
+  const matchEndGameTimeS =
+    Number.isFinite(manifestMatchEndGameTimeS) && manifestMatchEndGameTimeS > 0
+      ? manifestMatchEndGameTimeS
+      : inferredMatchEndGameTimeS > 0
+        ? inferredMatchEndGameTimeS
+        : undefined;
   return {
     available: snapshots.length > 0,
     snapshots,
     objectives,
+    matchEndGameTimeS,
   };
 }
 
@@ -951,23 +1293,85 @@ async function combineParts(
   partitionCount: number,
 ): Promise<void> {
   const partial = `${paths.dataset}.partial`;
-  await rm(partial, { force: true });
-  const output = await open(partial, 'w');
+  let checkpoint = await readJson<FinalizationCheckpoint>(
+    paths.finalizationCheckpoint,
+  );
+  if (!checkpoint) {
+    await rm(partial, { force: true });
+    checkpoint = {
+      completedPartitions: [],
+      byteLength: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    await atomicJson(paths.finalizationCheckpoint, checkpoint);
+  } else {
+    validateFinalizationCheckpoint(checkpoint, partitionCount);
+  }
+
+  const partialSize = (await exists(partial)) ? (await stat(partial)).size : 0;
+  if (partialSize < checkpoint.byteLength) {
+    throw new Error(
+      `Replay finalization partial is shorter than its checkpoint: ` +
+        `${partialSize} versus ${checkpoint.byteLength}.`,
+    );
+  }
+
+  const output = await open(partial, 'a+');
   try {
+    await output.truncate(checkpoint.byteLength);
+    const complete = new Set(checkpoint.completedPartitions);
     for (let index = 0; index < partitionCount; index += 1) {
       const path = outputPartPath(paths, index);
-      if (!(await exists(path))) {
+      if (complete.has(index)) {
+        await rm(path, { force: true });
         continue;
       }
-      for await (const chunk of createReadStream(path)) {
-        await output.write(chunk as Buffer);
+      if (!(await exists(path))) {
+        throw new Error(`Replay output partition ${index} is unavailable.`);
       }
+      for await (const chunk of createReadStream(path)) {
+        await writeAll(output, chunk as Buffer);
+      }
+      await output.sync();
+      checkpoint.byteLength = (await output.stat()).size;
+      checkpoint.completedPartitions.push(index);
+      checkpoint.completedPartitions.sort((left, right) => left - right);
+      checkpoint.updatedAt = new Date().toISOString();
+      await atomicJson(paths.finalizationCheckpoint, checkpoint);
+      complete.add(index);
+      await rm(path, { force: true });
     }
   } finally {
     await output.close();
   }
   await rm(paths.dataset, { force: true });
   await rename(partial, paths.dataset);
+  await rm(paths.finalizationCheckpoint, { force: true });
+}
+
+function validateFinalizationCheckpoint(
+  checkpoint: FinalizationCheckpoint,
+  partitionCount: number,
+): void {
+  if (
+    !Array.isArray(checkpoint.completedPartitions) ||
+    !Number.isSafeInteger(checkpoint.byteLength) ||
+    checkpoint.byteLength < 0
+  ) {
+    throw new Error('Replay finalization checkpoint is invalid.');
+  }
+  const unique = new Set<number>();
+  for (const index of checkpoint.completedPartitions) {
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index >= partitionCount ||
+      unique.has(index)
+    ) {
+      throw new Error('Replay finalization checkpoint partitions are invalid.');
+    }
+    unique.add(index);
+  }
 }
 
 async function loadPartitionTotals(
@@ -1039,7 +1443,12 @@ function compareSnapshots(
 }
 
 function emptyTimeline(): TimelineData {
-  return { available: false, snapshots: [], objectives: [] };
+  return {
+    available: false,
+    snapshots: [],
+    objectives: [],
+    matchEndGameTimeS: undefined,
+  };
 }
 
 function emptyPartitionStats(index: number): PartitionStats {
@@ -1062,9 +1471,11 @@ function createPaths(outputDirectory: string): BuildPaths {
     audit: join(outputDirectory, 'audit.json'),
     work,
     checkpoint: join(work, 'checkpoint.json'),
+    finalizationCheckpoint: join(work, 'finalization-checkpoint.json'),
     sourceParts: join(work, 'source-parts'),
     outputParts: join(work, 'output-parts'),
     partStats: join(work, 'part-stats'),
+    snapshotCache: join(outputDirectory, 'snapshot-cache'),
   };
 }
 
@@ -1116,7 +1527,7 @@ function normalizeOptions(
     ),
     snapshotStalenessS: boundedInteger(
       request.snapshotStalenessS,
-      120,
+      300,
       0,
       3_600,
       'snapshotStalenessS',
@@ -1165,6 +1576,22 @@ async function* ndjson(
     } catch {
       throw new Error(`Invalid JSON in ${path} at line ${line}.`);
     }
+  }
+}
+
+async function writeAll(handle: FileHandle, value: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < value.length) {
+    const { bytesWritten } = await handle.write(
+      value,
+      offset,
+      value.length - offset,
+      null,
+    );
+    if (bytesWritten <= 0) {
+      throw new Error('Replay writer made no progress while writing.');
+    }
+    offset += bytesWritten;
   }
 }
 
@@ -1249,8 +1676,9 @@ class LineWriter {
     if (!this.buffer) {
       return;
     }
-    await this.handle.write(this.buffer);
+    const value = Buffer.from(this.buffer, 'utf8');
     this.buffer = '';
+    await writeAll(this.handle, value);
   }
 }
 

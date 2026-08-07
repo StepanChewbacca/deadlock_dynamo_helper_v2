@@ -1,0 +1,40 @@
+{
+  "operation": "RECOVER_RECOMMENDATION_V8_SELF_HOSTED_RUNNER_V1",
+  "state": "CONSUMED",
+  "requestedAt": "2026-07-31T21:20:00Z",
+  "attempt": 2,
+  "targetRunId": 30664768948,
+  "preserveWorkflow": "Recommendation V8 Snapshot OOM Restart V1",
+  "cancelOnlyStaleRecommendationV8SelfHostedRuns": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T21:03:08.440Z",
+  "cancelledRuns": [
+    {
+      "id": 30665136188,
+      "name": "Recommendation V8 Replay Streaming Deploy",
+      "status": "queued"
+    },
+    {
+      "id": 30665136156,
+      "name": "Recommendation V8 Install Nonrelease Full Guard V1",
+      "status": "queued"
+    },
+    {
+      "id": 30665136201,
+      "name": "Recommendation V8 Recovery Status V3",
+      "status": "queued"
+    },
+    {
+      "id": 30665136161,
+      "name": "Recommendation V8 Release Stage Watch V1",
+      "status": "queued"
+    },
+    {
+      "id": 30665136197,
+      "name": "Recommendation V8 Catalog Readiness SQL V1",
+      "status": "in_progress"
+    }
+  ]
+}

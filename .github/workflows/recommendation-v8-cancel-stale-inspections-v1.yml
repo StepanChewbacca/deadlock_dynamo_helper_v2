@@ -1,0 +1,39 @@
+name: Recommendation V8 Cancel Stale Inspections V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-cancel-stale-inspections-v1.json'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const request = require(`${process.env.GITHUB_WORKSPACE}/.github/training-requests/recommendation-v8-cancel-stale-inspections-v1.json`);
+            for (const runId of request.runIds) {
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runId,
+                });
+                core.notice(`Cancellation requested for stale inspection ${runId}.`);
+              } catch (error) {
+                if (error.status === 404 || error.status === 409) {
+                  core.notice(`Inspection ${runId} is already terminal.`);
+                } else {
+                  throw error;
+                }
+              }
+            }

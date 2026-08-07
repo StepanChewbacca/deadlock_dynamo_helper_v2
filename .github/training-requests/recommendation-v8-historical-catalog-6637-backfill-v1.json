@@ -1,0 +1,20 @@
+{
+  "state": "CONSUMED",
+  "operation": "BACKFILL_HISTORICAL_CATALOG_6637_V1",
+  "requestedAt": "2026-07-31T14:18:00Z",
+  "clientVersion": 6637,
+  "sourceRevision": 10836828,
+  "versionDatetime": "2026-07-20T13:25:04",
+  "nextClientVersion": 6638,
+  "nextVersionDatetime": "2026-07-23T15:12:47",
+  "policyTrainingWindowEnd": "2026-07-22T09:32:54.000Z",
+  "minimumBoundaryMarginHours": 24,
+  "source": "DEADLOCK_API_STEAM_INFO_ALL_V1_ROBUST_POLICY_WINDOW",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T14:21:28.816800Z",
+  "catalogVersionId": 2,
+  "catalogPayloadHash": "dbbd2ec9b27255b0b07986d904f4f7c2528c089b64c331d4e50e0ba42861e11e",
+  "appliedCommit": "1f1f72a64313372e5a40a7822d5933c87256a4b2"
+}

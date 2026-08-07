@@ -1,0 +1,67 @@
+name: Recommendation V8 Deadlock API Version Inspect V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-deadlock-api-version-inspect-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-deadlock-api-version-inspect-v1
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Inspect public API version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/deadlock-api-version-inspect.txt"
+          versions="$RUNNER_TEMP/client-versions.json"
+          steam_info="$RUNNER_TEMP/steam-info-all.json"
+          openapi="$RUNNER_TEMP/openapi.json"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 https://api.deadlock-api.com/v1/assets/client-versions -o "$versions"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 https://api.deadlock-api.com/v1/assets/steam-info/all -o "$steam_info"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 https://api.deadlock-api.com/openapi.json -o "$openapi"
+          {
+            echo "generatedAt=$(date --iso-8601=seconds)"
+            echo
+            echo '=== client versions around V3 window ==='
+            jq '[.[] | select(. >= 6600)]' "$versions"
+            echo
+            echo '=== steam info around V3 window ==='
+            jq '[.[] | select((.client_version // .clientVersion // 0) >= 6600)]' "$steam_info"
+            echo
+            echo '=== steam info keys ==='
+            jq '.[0] | keys' "$steam_info"
+            echo
+            echo '=== 6640 steam info ==='
+            jq '[.[] | select((.client_version // .clientVersion) == 6640)]' "$steam_info"
+            echo
+            echo '=== OpenAPI steam info schemas ==='
+            jq '.paths["/v1/assets/steam-info/all"], .components.schemas.SteamInfo' "$openapi"
+          } | tee "$report"
+
+      - name: Upload API inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-deadlock-api-version-inspect-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/deadlock-api-version-inspect.txt
+            ${{ runner.temp }}/client-versions.json
+            ${{ runner.temp }}/steam-info-all.json
+            ${{ runner.temp }}/openapi.json
+          if-no-files-found: warn
+          retention-days: 14

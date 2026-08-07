@@ -1,0 +1,78 @@
+name: Recommendation V8 Storage Cleanup V2
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-storage-cleanup-v2.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-storage-cleanup-v2
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Restore monitor and clean audited obsolete artifacts
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare audit directory and restore training monitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_root='/home/ubuntu/apps/deadlock_dynamo_helper-training/storage-audits'
+          audit_dir="$audit_root/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          active_run='/home/ubuntu/apps/deadlock_dynamo_helper-training/runs/30330788656-1'
+          sudo mkdir -p "$audit_dir"
+          sudo chown -R "$(id -u):$(id -g)" '/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          if [ ! -s "$active_run/status.json" ]; then
+            echo "Active training status is missing: $active_run/status.json" >&2
+            exit 1
+          fi
+          if ! sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-training-supervisor.mjs' >/dev/null"; then
+            echo 'Active Recommendation V8 supervisor is not running.' >&2
+            exit 1
+          fi
+          ln -sfn "$active_run" '/home/ubuntu/apps/deadlock_dynamo_helper-training/current'
+          cp /home/ubuntu/apps/deadlock_dynamo_helper-training/storage-audits/30331025363-1/storage-cleanup-audit.txt "$audit_dir/previous-failed-cleanup-audit.txt" 2>/dev/null || true
+          cp /home/ubuntu/apps/deadlock_dynamo_helper-training/storage-audits/30331025363-1/storage-cleanup-summary.json "$audit_dir/previous-failed-cleanup-summary.json" 2>/dev/null || true
+          echo "CLEANUP_AUDIT_DIR=$audit_dir" >> "$GITHUB_ENV"
+          echo "CLEANUP_AUDIT_REPORT=$audit_dir/storage-cleanup-v2-audit.txt" >> "$GITHUB_ENV"
+          echo "CLEANUP_AUDIT_SUMMARY=$audit_dir/storage-cleanup-v2-summary.json" >> "$GITHUB_ENV"
+          cat "$active_run/status.json"
+
+      - name: Validate cleanup script
+        run: bash -n scripts/audit-clean-recommendation-v8-storage-v2.sh
+
+      - name: Run resilient audited cleanup
+        shell: bash
+        env:
+          AUDIT_REPORT: ${{ env.CLEANUP_AUDIT_REPORT }}
+          AUDIT_SUMMARY: ${{ env.CLEANUP_AUDIT_SUMMARY }}
+        run: bash scripts/audit-clean-recommendation-v8-storage-v2.sh
+
+      - name: Show final audit and monitoring commands
+        if: always()
+        shell: bash
+        run: |
+          cat "$CLEANUP_AUDIT_SUMMARY" 2>/dev/null || true
+          echo 'Follow training: sudo tail -f /home/ubuntu/apps/deadlock_dynamo_helper-training/current/training.log'
+          echo 'Read status: sudo cat /home/ubuntu/apps/deadlock_dynamo_helper-training/current/status.json | jq'
+          echo 'Source Dataset V3: curl -s http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq'
+          echo 'Full Value V8: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-full-evaluation/status | jq'
+
+      - name: Upload cleanup audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-storage-cleanup-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CLEANUP_AUDIT_DIR }}
+          if-no-files-found: warn
+          retention-days: 30

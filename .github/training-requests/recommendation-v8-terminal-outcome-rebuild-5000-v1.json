@@ -1,0 +1,19 @@
+{
+  "operation": "APPLY_TERMINAL_OUTCOMES_AND_REBUILD_5000_V1",
+  "state": "REQUESTED",
+  "requestedAt": "2026-08-03T14:26:00.000Z",
+  "matchLimit": 5000,
+  "rebuildReplay": true,
+  "fullTrainingAuthorized": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "observedActionInjectionAuthorized": false,
+  "lowerAuditThresholdsAuthorized": false,
+  "terminalOutcomeContract": {
+    "confirmedMatchEndRequired": true,
+    "winUtility": 1,
+    "lossUtility": -1,
+    "horizons": ["3m", "5m", "10m"]
+  }
+}

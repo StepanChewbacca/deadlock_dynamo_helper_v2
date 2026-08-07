@@ -1,0 +1,4 @@
+{
+  "requestedAt": "2026-07-28T19:36:00Z",
+  "reason": "Capture exact Historical Replay failure after resume supervisor exited with code 1. Read-only diagnostics only; preserve Dataset V3 and candidate snapshot."
+}

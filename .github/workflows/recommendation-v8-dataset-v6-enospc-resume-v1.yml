@@ -1,0 +1,485 @@
+name: Recommendation V8 Dataset V6 ENOSPC Resume V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-dataset-v6-enospc-resume-v1.json'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: recommendation-v8-dataset-v6-enospc-resume-v1
+  cancel-in-progress: false
+
+jobs:
+  release-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.gate.outputs.should-run }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Validate recovery request
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-dataset-v6-enospc-resume-v1.json'
+          if [ "$(jq -r '.state' "$request")" != 'REQUESTED' ]; then
+            echo 'should-run=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$(jq -r '.operation' "$request")" = 'GZIP_DATASET_V6_CLEAN_AND_RESUME_5000_V1'
+          test "$(jq -r '.matchLimit' "$request")" = '5000'
+          test "$(jq -r '.replayAlreadyComplete' "$request")" = 'true'
+          test "$(jq -r '.replayRowCount' "$request")" = '1023598'
+          test "$(jq -r '.replayPartitionCount' "$request")" = '16'
+          test "$(jq -r '.replayAuditPassed' "$request")" = 'true'
+          test "$(jq -r '.preserveReplayArtifact' "$request")" = 'true'
+          test "$(jq -r '.compressDatasetV6' "$request")" = 'true'
+          test "$(jq -r '.datasetCompression' "$request")" = 'GZIP'
+          test "$(jq -r '.minimumFreeGiB' "$request")" = '40'
+          test "$(jq -r '.minimumRuntimeReserveGiB' "$request")" = '12'
+          test "$(jq -r '.observedActionInjectionAuthorized' "$request")" = 'false'
+          test "$(jq -r '.lowerAuditThresholdsAuthorized' "$request")" = 'false'
+          test "$(jq -r '.fullTrainingAuthorized' "$request")" = 'false'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'should-run=true' >> "$GITHUB_OUTPUT"
+
+      - name: Cancel stale Recommendation V8 runs
+        if: steps.gate.outputs.should-run == 'true'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const current = Number(context.runId);
+            for (const status of ['queued', 'in_progress', 'pending']) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                { owner: context.repo.owner, repo: context.repo.repo, status, per_page: 100 },
+              );
+              for (const run of runs) {
+                if (run.id === current || typeof run.name !== 'string' || !run.name.startsWith('Recommendation V8')) {
+                  continue;
+                }
+                try {
+                  await github.request(
+                    'POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',
+                    { owner: context.repo.owner, repo: context.repo.repo, run_id: run.id },
+                  );
+                } catch (error) {
+                  core.warning(`Unable to force-cancel ${run.id}: ${error.message}`);
+                }
+              }
+            }
+
+  patch-clean-resume:
+    needs: release-runner
+    if: needs.release-runner.outputs.should-run == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 240
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Apply compressed artifact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/patch-recommendation-v8-dataset-v6-gzip-v1.py
+          python3 scripts/patch-recommendation-v8-behavioral-gzip-v1.py
+          git diff --check
+          grep -R "compression: 'GZIP'" apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6-artifact.service.ts
+          grep -R "compression: 'GZIP'" apps/api/src/deadlock-live/recommendation-behavioral-v5-training.service.ts
+          grep -R "openMaybeGzipNdjsonReadStream" apps/api/src/deadlock-live/recommendation-value-v8-diagnostic-training.service.ts
+
+      - name: Build and run regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder="deadlock-recommendation-v8-dataset-gzip-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$builder" .
+          sudo docker run --rm --entrypoint yarn "$builder" \
+            workspace @deadlock-live-probe/api test \
+            recommendation-pro-decision-dataset-v6-artifact.spec.ts \
+            recommendation-behavioral-v5-training.spec.ts \
+            recommendation-value-v8-diagnostic-training.spec.ts \
+            --runInBand
+          sudo docker run --rm --entrypoint yarn "$builder" \
+            workspace @deadlock-live-probe/api build
+
+      - name: Publish validated source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='agent/recommendation-value-v8-passive-shadow-1'
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            apps/api/src/deadlock-live/gzip-ndjson.ts \
+            apps/api/src/deadlock-live/recommendation-pro-decision-dataset-v6-artifact.service.ts \
+            apps/api/src/deadlock-live/recommendation-behavioral-v5-training.service.ts \
+            apps/api/src/deadlock-live/recommendation-value-v8-diagnostic-training.service.ts \
+            apps/api/test/recommendation-pro-decision-dataset-v6-artifact.spec.ts \
+            apps/api/test/recommendation-behavioral-v5-training.spec.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: compress Recommendation V8 training artifacts'
+          fi
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin "HEAD:$branch"
+          implementation_sha="$(git rev-parse HEAD)"
+          echo "IMPLEMENTATION_SHA=$implementation_sha" >> "$GITHUB_ENV"
+
+      - name: Cancel workflows triggered by source publish
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const current = Number(context.runId);
+            for (const status of ['queued', 'in_progress', 'pending']) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                { owner: context.repo.owner, repo: context.repo.repo, status, per_page: 100 },
+              );
+              for (const run of runs) {
+                if (run.id === current || typeof run.name !== 'string' || !run.name.startsWith('Recommendation V8')) continue;
+                try {
+                  await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                  });
+                } catch (error) {
+                  core.warning(`Unable to force-cancel ${run.id}: ${error.message}`);
+                }
+              }
+            }
+
+      - name: Build patched training image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${IMPLEMENTATION_SHA}-dataset-gzip-v1"
+          sudo docker build -t "$image" .
+          sudo docker run --rm --entrypoint node "$image" \
+            --check /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs
+          echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Verify completed replay and failed Dataset V6
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          replay="$storage/recommendation-historical-pro-replay-terminal-5000-v2"
+          dataset="$storage/recommendation-pro-decision-dataset-v6-terminal-5000-v2"
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          run_id="dataset-gzip-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+
+          replay_status="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status)"
+          dataset_status="$(curl --silent --show-error --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status)"
+          echo "$replay_status" | tee "$run_dir/replay-before.json"
+          echo "$dataset_status" | tee "$run_dir/dataset-before.json"
+          jq -e '.state == "COMPLETE" and .phase == "COMPLETE" and .processedPartitionCount == 16 and .partitionCount == 16 and .sourceRowCount == 1023598 and .outputRowCount == 1023598 and .datasetAvailable == true and .manifestAvailable == true and .auditAvailable == true and .auditPassed == true' <<<"$replay_status"
+          jq -e '.state == "FAILED" and (.error | test("ENOSPC|no space"; "i"))' <<<"$dataset_status"
+
+          curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/manifest > "$run_dir/replay-manifest.json"
+          curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/audit > "$run_dir/replay-audit.json"
+          jq -e '.auditPassed == true and .trainingArtifactEligible == true and .artifact.rowCount == 1023598' "$run_dir/replay-manifest.json"
+          jq -e '.passed == true and .trainingArtifactEligible == true' "$run_dir/replay-audit.json"
+          replay_file="$(jq -r '.artifact.fileName' "$run_dir/replay-manifest.json")"
+          replay_sha="$(jq -r '.artifact.sha256' "$run_dir/replay-manifest.json")"
+          sudo test -s "$replay/$replay_file"
+          actual_sha="$(sudo sha256sum "$replay/$replay_file" | awk '{print $1}')"
+          test "$actual_sha" = "$replay_sha"
+
+          {
+            echo "generatedAt=$(date --iso-8601=seconds)"
+            df -hT /
+            df -B1 /
+            sudo du -xhd1 "$storage" 2>/dev/null | sort -h | tail -n 100
+            sudo docker system df
+          } | tee "$run_dir/disk-before-cleanup.txt"
+
+          echo "V8_STORAGE=$storage" >> "$GITHUB_ENV"
+          echo "V8_REPLAY=$replay" >> "$GITHUB_ENV"
+          echo "V8_DATASET=$dataset" >> "$GITHUB_ENV"
+          echo "V8_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "V8_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "V8_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "REPLAY_SHA=$replay_sha" >> "$GITHUB_ENV"
+
+      - name: Remove only failed and obsolete outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          if sudo docker ps -a --format '{{.Names}}' | grep -Fxq "$container"; then
+            sudo docker exec "$container" sh -lc "pkill -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs' || true; pkill -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' || true" || true
+            sudo docker rm -f "$container" >/dev/null 2>&1 || true
+          fi
+
+          sudo rm -rf \
+            "$V8_DATASET" \
+            "$V8_STORAGE/recommendation-behavioral-v5-terminal-5000-v2" \
+            "$V8_STORAGE/recommendation-value-v8-diagnostic-terminal-5000-v2"
+          sudo find "$V8_STORAGE" -maxdepth 3 -type f \
+            \( -name '*.partial' -o -name '*.tmp' \) -mmin +10 -delete 2>/dev/null || true
+          if sudo test -d "$V8_STORAGE/recommendation-v8-failed-artifacts"; then
+            sudo find "$V8_STORAGE/recommendation-v8-failed-artifacts" -maxdepth 6 -type f -printf '%s %p\n' 2>/dev/null | sort -n > "$V8_RUN_DIR/failed-artifact-inventory.txt" || true
+            sudo rm -rf "$V8_STORAGE/recommendation-v8-failed-artifacts"
+          fi
+          sudo docker builder prune -af
+          sudo docker image prune -af --filter 'until=24h'
+
+          free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
+          minimum_free_bytes=$((40 * 1024 * 1024 * 1024))
+          test "$free_bytes" -ge "$minimum_free_bytes"
+          sudo test -s "$V8_REPLAY/dataset.ndjson"
+          sudo test -s "$V8_REPLAY/manifest.json"
+          sudo test -s "$V8_REPLAY/audit.json"
+          test "$(sudo sha256sum "$V8_REPLAY/dataset.ndjson" | awk '{print $1}')" = "$REPLAY_SHA"
+
+          {
+            echo "generatedAt=$(date --iso-8601=seconds)"
+            echo "freeBytes=$free_bytes"
+            echo "minimumFreeBytes=$minimum_free_bytes"
+            df -hT /
+            df -B1 /
+            sudo du -xhd1 "$V8_STORAGE" 2>/dev/null | sort -h | tail -n 100
+            sudo docker system df
+          } | tee "$V8_RUN_DIR/disk-after-cleanup.txt"
+
+      - name: Start patched isolated API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          catalog_row="$(sudo docker exec aboba-telegramovich-postgres-1 psql -U postgres -d deadlock_builds -X -A -t -F '|' -c 'SELECT c.id, c."clientVersion" FROM item_catalog_versions c WHERE c."clientVersion" = 6637 ORDER BY c.id DESC LIMIT 1;')"
+          test "$(echo "$catalog_row" | cut -d'|' -f2)" = '6637'
+          catalog_version_id="$(echo "$catalog_row" | cut -d'|' -f1)"
+          echo "CATALOG_VERSION_ID=$catalog_version_id" >> "$GITHUB_ENV"
+
+          ln -sfn "$V8_RUN_DIR" "$V8_RUN_ROOT/current"
+          : > "$V8_RUN_DIR/training.log"
+          cat > "$V8_RUN_DIR/run.json" <<JSON
+          {
+            "runId": "$V8_RUN_ID",
+            "state": "RUNNING",
+            "stage": "DATASET_V6_GZIP_RESUME",
+            "matchLimit": 5000,
+            "implementationSha": "$IMPLEMENTATION_SHA",
+            "replayReused": true,
+            "replaySha256": "$REPLAY_SHA",
+            "datasetCompression": "GZIP",
+            "behavioralPropensityCompression": "GZIP",
+            "fullTrainingAuthorized": false,
+            "productionRankingChanged": false,
+            "passiveShadowActivated": false,
+            "randomizedCanaryAuthorized": false,
+            "observedActionInjected": false,
+            "auditThresholdsLowered": false,
+            "restartedAt": "$(date --iso-8601=seconds)"
+          }
+          JSON
+
+          sudo docker run -d \
+            --name deadlock-recommendation-v8-training \
+            --restart=no \
+            --cpus=2 \
+            --memory=6g \
+            --memory-swap=6g \
+            --pids-limit=256 \
+            --network aboba-telegramovich_default \
+            -p 127.0.0.1:3010:3000 \
+            --env-file "$deploy_dir/.env" \
+            -e DB_HOST=aboba-telegramovich-postgres-1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=postgres \
+            -e DB_NAME=deadlock_builds \
+            -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false \
+            -e DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED=false \
+            -e DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED=false \
+            -e DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED=false \
+            -e DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/policy-v3 \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_DIR=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1 \
+            -e DEADLOCK_RECOMMENDATION_HISTORICAL_PRO_REPLAY_SOURCE_DIR=/app/apps/api/storage/recommendation-v8-bounded-5000-v1/replay-v3 \
+            -e DEADLOCK_RECOMMENDATION_HISTORICAL_PRO_REPLAY_DIR=/app/apps/api/storage/recommendation-historical-pro-replay-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_REGISTRY_PATH=/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1/registry.json \
+            -e DEADLOCK_RECOMMENDATION_DATASET_V6_REPLAY_DIR=/app/apps/api/storage/recommendation-historical-pro-replay-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_DATASET_V6_DIR=/app/apps/api/storage/recommendation-pro-decision-dataset-v6-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_BEHAVIORAL_V5_SOURCE_DIR=/app/apps/api/storage/recommendation-pro-decision-dataset-v6-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_BEHAVIORAL_V5_DIR=/app/apps/api/storage/recommendation-behavioral-v5-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_DATASET_DIR=/app/apps/api/storage/recommendation-pro-decision-dataset-v6-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_BEHAVIORAL_DIR=/app/apps/api/storage/recommendation-behavioral-v5-terminal-5000-v2 \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_DIAGNOSTIC_DIR=/app/apps/api/storage/recommendation-value-v8-diagnostic-terminal-5000-v2 \
+            -e NODE_OPTIONS=--max-old-space-size=4096 \
+            --mount type=volume,src=deadlock_dynamo_helper_deadlock-storage,dst=/app/apps/api/storage \
+            --mount "type=bind,src=$V8_RUN_DIR,dst=/runner" \
+            "$TRAINING_IMAGE"
+
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent --max-time 10 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          exit 1
+
+      - name: Start disk guard and resume pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          reserve_kb=$((12 * 1024 * 1024))
+          sudo docker exec -d \
+            -e RECOMMENDATION_V8_MINIMUM_AVAILABLE_KB="$reserve_kb" \
+            -e RECOMMENDATION_V8_DISK_CHECK_INTERVAL_S=60 \
+            "$container" \
+            sh /app/scripts/monitor-recommendation-v8-disk-reserve-v1.sh
+
+          sudo docker exec -d \
+            -e API_BASE_URL=http://127.0.0.1:3000 \
+            -e SNAPSHOT_ID=v8-5000-c6637-30701422914 \
+            -e CANDIDATE_GENERATOR_VERSION=RECOMMENDATION_CANDIDATE_GENERATOR_V6_2_SUPPORT_UNION_5000 \
+            -e CANDIDATE_POLICY_VERSION=RECOMMENDATION_CANDIDATE_POLICY_V6_2_SUPPORT_UNION_5000 \
+            -e CATALOG_VERSION_ID="$CATALOG_VERSION_ID" \
+            -e TRAINING_WINDOW_START=2026-07-18T12:31:22.000Z \
+            -e TRAINING_WINDOW_END=2026-07-22T09:32:54.000Z \
+            -e TUNING_START=2026-07-26T05:57:36.000Z \
+            -e FUTURE_TEST_START=2026-07-27T20:43:24.000Z \
+            -e REPLAY_PARTITION_COUNT=16 \
+            -e REPLAY_SNAPSHOT_STALENESS_S=300 \
+            -e DATASET_DECISION_SNAPSHOT_STALENESS_S=300 \
+            -e DIAGNOSTIC_MAX_ROWS=2000000 \
+            -e PIPELINE_POLL_INTERVAL_MS=10000 \
+            -e PIPELINE_TIMEOUT_MS=172800000 \
+            -e PIPELINE_REQUEST_TIMEOUT_MS=30000 \
+            -e PIPELINE_REQUEST_RETRY_COUNT=240 \
+            -e PIPELINE_REQUEST_RETRY_DELAY_MS=5000 \
+            "$container" \
+            sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
+
+          for attempt in $(seq 1 180); do
+            replay_status="$(curl --silent --show-error --max-time 15 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status || true)"
+            dataset_status="$(curl --silent --show-error --max-time 15 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status || true)"
+            replay_state="$(jq -r '.state // empty' <<<"$replay_status" 2>/dev/null || true)"
+            replay_audit="$(jq -r '.auditPassed // false' <<<"$replay_status" 2>/dev/null || true)"
+            dataset_state="$(jq -r '.state // empty' <<<"$dataset_status" 2>/dev/null || true)"
+            dataset_dir="$(jq -r '.outputDirectory // empty' <<<"$dataset_status" 2>/dev/null || true)"
+            test "$replay_state" = 'COMPLETE'
+            test "$replay_audit" = 'true'
+            if [ "$dataset_state" = 'FAILED' ]; then
+              echo "$dataset_status" | tee "$V8_RUN_DIR/dataset-restarted.json"
+              tail -n 300 "$V8_RUN_DIR/training.log" || true
+              exit 1
+            fi
+            if [ "$dataset_dir" = '/app/apps/api/storage/recommendation-pro-decision-dataset-v6-terminal-5000-v2' ] && { [ "$dataset_state" = 'RUNNING' ] || [ "$dataset_state" = 'COMPLETE' ]; }; then
+              echo "$dataset_status" | tee "$V8_RUN_DIR/dataset-restarted.json"
+              break
+            fi
+            sleep 2
+          done
+
+          test -s "$V8_RUN_DIR/dataset-restarted.json"
+          jq -e '.state == "RUNNING" or (.state == "COMPLETE" and .auditPassed == true)' "$V8_RUN_DIR/dataset-restarted.json"
+          sudo docker exec "$container" sh -lc "pgrep -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null"
+          sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"
+          sudo docker inspect "$container" --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}}' | tee "$V8_RUN_DIR/container-restarted.txt"
+          test "$(sudo docker inspect "$container" --format='{{.State.Running}}')" = 'true'
+          test "$(sudo docker inspect "$container" --format='{{.State.OOMKilled}}')" = 'false'
+          df -hT / | tee "$V8_RUN_DIR/disk-at-restart.txt"
+          tail -n 100 "$V8_RUN_DIR/training.log" | tee "$V8_RUN_DIR/training-tail.txt"
+
+      - name: Consume recovery request
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='agent/recommendation-value-v8-passive-shadow-1'
+          request='.github/training-requests/recommendation-v8-dataset-v6-enospc-resume-v1.json'
+          tmp="$(mktemp)"
+          jq \
+            --arg completedAt "$(date --iso-8601=seconds)" \
+            --arg implementationSha "$IMPLEMENTATION_SHA" \
+            --arg image "$TRAINING_IMAGE" \
+            --arg runId "$V8_RUN_ID" \
+            '.state = "CONSUMED" | .completedAt = $completedAt | .implementationSha = $implementationSha | .image = $image | .runId = $runId' \
+            "$request" > "$tmp"
+          mv "$tmp" "$request"
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$request"
+          git commit -m 'chore: consume Dataset V6 ENOSPC recovery'
+          git fetch origin "$branch"
+          git rebase "origin/$branch"
+          git push origin "HEAD:$branch"
+
+      - name: Cancel workflows triggered by evidence publish
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const current = Number(context.runId);
+            for (const status of ['queued', 'in_progress', 'pending']) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                { owner: context.repo.owner, repo: context.repo.repo, status, per_page: 100 },
+              );
+              for (const run of runs) {
+                if (run.id === current || typeof run.name !== 'string' || !run.name.startsWith('Recommendation V8')) continue;
+                try {
+                  await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                  });
+                } catch (error) {
+                  core.warning(`Unable to force-cancel ${run.id}: ${error.message}`);
+                }
+              }
+            }
+
+      - name: Upload recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-dataset-v6-enospc-resume-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.V8_RUN_DIR }}/replay-before.json
+            ${{ env.V8_RUN_DIR }}/dataset-before.json
+            ${{ env.V8_RUN_DIR }}/replay-manifest.json
+            ${{ env.V8_RUN_DIR }}/replay-audit.json
+            ${{ env.V8_RUN_DIR }}/disk-before-cleanup.txt
+            ${{ env.V8_RUN_DIR }}/disk-after-cleanup.txt
+            ${{ env.V8_RUN_DIR }}/dataset-restarted.json
+            ${{ env.V8_RUN_DIR }}/container-restarted.txt
+            ${{ env.V8_RUN_DIR }}/disk-at-restart.txt
+            ${{ env.V8_RUN_DIR }}/training-tail.txt
+            ${{ env.V8_RUN_DIR }}/run.json
+            ${{ env.V8_RUN_DIR }}/training.log
+          if-no-files-found: warn
+          retention-days: 14

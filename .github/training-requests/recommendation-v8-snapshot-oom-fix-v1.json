@@ -1,0 +1,13 @@
+{
+  "operation": "FIX_RECOMMENDATION_V8_SNAPSHOT_OOM_V1",
+  "state": "CONSUMED",
+  "requestedAt": "2026-07-31T20:54:00Z",
+  "attempt": 2,
+  "observedContainerExitCode": 137,
+  "observedPhase": "CANDIDATE_SNAPSHOT_WRITING",
+  "sourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T20:51:43.873708Z"
+}

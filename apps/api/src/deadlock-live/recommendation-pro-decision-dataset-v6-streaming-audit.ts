@@ -75,7 +75,8 @@ export class RecommendationProDecisionDatasetV6AuditAccumulator {
       row.versions.candidateGenerator,
     );
     this.decisionSourceDistribution[row.decisionSource] += 1;
-    this.timelineJoinCount += row.state.timelineJoined ? 1 : 0;
+    this.timelineJoinCount +=
+      row.state.timelineJoined || row.terminalOutcomeApplied === true ? 1 : 0;
     this.shortHorizonDecisionCount += hasShortHorizonOutcome(row) ? 1 : 0;
     this.observedActionInCandidateSetCount += row.observedActionInCandidateSet
       ? 1
@@ -117,7 +118,7 @@ export class RecommendationProDecisionDatasetV6AuditAccumulator {
     }
     if (timelineJoinCoverage < this.thresholds.minimumTimelineJoinCoverage) {
       reasons.push(
-        `Timeline join coverage ${timelineJoinCoverage} is below ` +
+        `Timeline join or confirmed terminal outcome coverage ${timelineJoinCoverage} is below ` +
           `${this.thresholds.minimumTimelineJoinCoverage}.`,
       );
     }

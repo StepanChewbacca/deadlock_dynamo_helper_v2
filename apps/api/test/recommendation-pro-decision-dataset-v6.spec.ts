@@ -162,7 +162,7 @@ function replayRow(input: {
 }): RecommendationHistoricalProReplayRow {
   return {
     schemaVersion: 1,
-    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     dataSource: 'PRO_HISTORICAL',
     decisionId: input.decisionId,
     matchId: input.matchId,

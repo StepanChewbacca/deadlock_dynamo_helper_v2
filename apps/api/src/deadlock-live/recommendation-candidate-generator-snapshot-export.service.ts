@@ -4,11 +4,14 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   mkdir,
+  open,
   readFile,
   rename,
+  rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Repository } from 'typeorm';
@@ -23,7 +26,7 @@ import {
   ItemCatalogVersion,
 } from './entities/item-catalog-version.entity';
 import {
-  createRecommendationCandidateGeneratorSnapshotArtifact,
+  createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies,
   RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION,
   type RecommendationCandidateGeneratorSnapshotArtifact,
   type RecommendationCandidateGeneratorSnapshotRegistry,
@@ -244,6 +247,7 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         },
       });
       const built = accumulator.build();
+      accumulator.release();
       this.status = {
         ...this.status,
         heroCount: built.summary.heroCount,
@@ -259,7 +263,8 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         phase: 'WRITING',
       };
 
-      const artifact = createRecommendationCandidateGeneratorSnapshotArtifact({
+      const artifact =
+        createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies({
         snapshot: {
           snapshotId: request.snapshotId,
           generatorVersion: request.generatorVersion,
@@ -275,8 +280,11 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         },
       });
       const artifactPath = this.artifactPath(request.snapshotId);
-      const artifactRaw = `${JSON.stringify(artifact, undefined, 2)}\n`;
-      const artifactSha256 = sha256Text(artifactRaw);
+      const artifactWrite = await writeCandidateSnapshotPartial(
+        artifactPath,
+        artifact,
+      );
+      const artifactSha256 = artifactWrite.sha256;
       const audit = buildAudit({
         generatedAt: new Date().toISOString(),
         request,
@@ -286,16 +294,17 @@ export class RecommendationCandidateGeneratorSnapshotExportService
         catalog,
         artifact,
         artifactFileName: basename(artifactPath),
-        artifactByteLength: Buffer.byteLength(artifactRaw),
+        artifactByteLength: artifactWrite.byteLength,
         artifactSha256,
       });
       if (!audit.passed) {
+        await rm(artifactWrite.partialPath, { force: true });
         throw new Error(
           `Candidate generator snapshot audit failed: ${audit.reasons.join(' ')}`,
         );
       }
 
-      await atomicWrite(artifactPath, artifactRaw);
+      await rename(artifactWrite.partialPath, artifactPath);
       await atomicJson(this.auditPath(request.snapshotId), audit);
       await this.appendRegistryEntry({
         fileName: basename(artifactPath),
@@ -749,6 +758,126 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
+const SNAPSHOT_STREAM_BUFFER_LIMIT_BYTES = 1024 * 1024;
+
+async function writeCandidateSnapshotPartial(
+  path: string,
+  artifact: RecommendationCandidateGeneratorSnapshotArtifact,
+): Promise<{ partialPath: string; byteLength: number; sha256: string }> {
+  const partialPath = `${path}.partial`;
+  await rm(partialPath, { force: true });
+  const handle = await open(partialPath, 'w');
+  const writer = new BufferedHashedSnapshotWriter(handle);
+  try {
+    await writer.append(
+      `{"schemaVersion":${artifact.schemaVersion},` +
+        `"artifactVersion":${JSON.stringify(artifact.artifactVersion)},` +
+        `"snapshot":${JSON.stringify(artifact.snapshot)},` +
+        `"generatorOptions":${JSON.stringify(artifact.generatorOptions)},` +
+        '"policies":[',
+    );
+    for (
+      let policyIndex = 0;
+      policyIndex < artifact.policies.length;
+      policyIndex += 1
+    ) {
+      const policy = artifact.policies[policyIndex];
+      if (policyIndex > 0) {
+        await writer.append(',');
+      }
+      await writer.append(
+        `{"heroId":${policy.heroId},` +
+          `"playerCount":${policy.playerCount},` +
+          `"stateCount":${policy.stateCount},` +
+          `"transitionCount":${policy.transitionCount},` +
+          '"states":[',
+      );
+      for (
+        let stateIndex = 0;
+        stateIndex < policy.states.length;
+        stateIndex += 1
+      ) {
+        if (stateIndex > 0) {
+          await writer.append(',');
+        }
+        await writer.append(JSON.stringify(policy.states[stateIndex]));
+      }
+      await writer.append(']}');
+    }
+    await writer.append(`],"catalog":${JSON.stringify(artifact.catalog)}}\n`);
+    const descriptor = await writer.close();
+    return { partialPath, ...descriptor };
+  } catch (error) {
+    await writer.abort();
+    await rm(partialPath, { force: true });
+    throw error;
+  }
+}
+
+class BufferedHashedSnapshotWriter {
+  private buffer = '';
+  private readonly hash = createHash('sha256');
+  private byteLength = 0;
+  private closed = false;
+
+  constructor(private readonly handle: FileHandle) {}
+
+  async append(value: string): Promise<void> {
+    if (this.closed) {
+      throw new Error('Candidate snapshot writer is already closed.');
+    }
+    this.buffer += value;
+    if (Buffer.byteLength(this.buffer) >= SNAPSHOT_STREAM_BUFFER_LIMIT_BYTES) {
+      await this.flush();
+    }
+  }
+
+  async close(): Promise<{ byteLength: number; sha256: string }> {
+    if (this.closed) {
+      throw new Error('Candidate snapshot writer is already closed.');
+    }
+    await this.flush();
+    await this.handle.sync();
+    await this.handle.close();
+    this.closed = true;
+    return {
+      byteLength: this.byteLength,
+      sha256: this.hash.digest('hex'),
+    };
+  }
+
+  async abort(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    await this.handle.close().catch(() => undefined);
+  }
+
+  private async flush(): Promise<void> {
+    if (!this.buffer) {
+      return;
+    }
+    const value = Buffer.from(this.buffer, 'utf8');
+    this.buffer = '';
+    let offset = 0;
+    while (offset < value.length) {
+      const { bytesWritten } = await this.handle.write(
+        value,
+        offset,
+        value.length - offset,
+        null,
+      );
+      if (bytesWritten <= 0) {
+        throw new Error('Candidate snapshot writer made no progress.');
+      }
+      offset += bytesWritten;
+    }
+    this.hash.update(value);
+    this.byteLength += value.length;
+  }
+}
+
 async function atomicWrite(path: string, content: string): Promise<void> {
   const partial = `${path}.partial`;
   await writeFile(partial, content, 'utf8');
@@ -840,10 +969,6 @@ function positiveInteger(value: unknown, name: string): number {
 function nonNegativeInteger(value: unknown): number {
   const result = Number(value);
   return Number.isSafeInteger(result) && result >= 0 ? result : 0;
-}
-
-function sha256Text(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 function clone<T>(value: T): T {

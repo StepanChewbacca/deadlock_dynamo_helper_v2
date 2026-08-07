@@ -1,0 +1,19 @@
+{
+  "state": "CONSUMED",
+  "operation": "REPLAY_RECOVERY_RESUME_V3",
+  "requestedAt": "2026-07-31T13:29:00Z",
+  "sourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "sourceDatasetRowCount": 6188423,
+  "failedReplaySha256": "cf9e0bda5fb3308a468f4ce3bc9fe0d6c87083f5e73f2e2ab31d405da590862b",
+  "archiveRoot": "recommendation-v8-failed-artifacts/cf9e0bda5fb3-30634050634",
+  "preserveSnapshotId": "v8-20260722-c1-ff04970fda51",
+  "network": "aboba-telegramovich_default",
+  "storageVolume": "deadlock_dynamo_helper_deadlock-storage",
+  "diagnosticFirst": true,
+  "fullTrainingRequiresDiagnosticGate": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T13:29:02.103928Z",
+  "deployedCommit": "5cc9e6ec1c169ef9f1436b58ef2341f1f303c468"
+}

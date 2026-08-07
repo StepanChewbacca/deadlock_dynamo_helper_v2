@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
 import {
   mkdir,
@@ -12,7 +13,6 @@ import {
   truncate,
   writeFile,
 } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { In, Repository } from 'typeorm';
@@ -481,6 +481,13 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
           await writer.close();
         }
 
+        const physicalHeroRowCount = await countNdjsonRows(heroFilePath);
+        if (physicalHeroRowCount !== heroAudit.rowCount) {
+          throw new Error(
+            `Contextual V3 hero ${heroId} physical row count ${physicalHeroRowCount} ` +
+              `does not match audited row count ${heroAudit.rowCount}.`,
+          );
+        }
         await pipeline(
           createReadStream(heroFilePath),
           createWriteStream(this.partialDatasetPath, { flags: 'a' }),
@@ -503,6 +510,13 @@ export class HeroBuildDecisionDatasetV3Service implements OnModuleInit {
       this.status = { ...this.status, phase: 'FINALIZING' };
       await rm(this.datasetPath, { force: true });
       await rename(this.partialDatasetPath, this.datasetPath);
+      const physicalRowCount = await countNdjsonRows(this.datasetPath);
+      if (physicalRowCount !== checkpoint.audit.rowCount) {
+        throw new Error(
+          `Contextual V3 physical row count ${physicalRowCount} does not match ` +
+            `the audited row count ${checkpoint.audit.rowCount}.`,
+        );
+      }
       const artifactStat = await stat(this.datasetPath);
       const generatedAt = new Date().toISOString();
       const audit = buildAudit(checkpoint, generatedAt);
@@ -946,14 +960,22 @@ function boundedInteger(
 
 class BufferedNdjsonWriter {
   private buffer = '';
+  private closed = false;
 
-  private constructor(private readonly handle: FileHandle) {}
+  private constructor(
+    private readonly stream: ReturnType<typeof createWriteStream>,
+  ) {}
 
   static async create(path: string): Promise<BufferedNdjsonWriter> {
-    return new BufferedNdjsonWriter(await open(path, 'w'));
+    return new BufferedNdjsonWriter(
+      createWriteStream(path, { flags: 'w', encoding: 'utf8' }),
+    );
   }
 
   async write(row: HeroBuildDecisionDatasetV3Row): Promise<void> {
+    if (this.closed) {
+      throw new Error('Contextual V3 writer is already closed.');
+    }
     this.buffer += `${JSON.stringify(row)}\n`;
     if (Buffer.byteLength(this.buffer) >= NDJSON_BUFFER_LIMIT_BYTES) {
       await this.flush();
@@ -961,8 +983,13 @@ class BufferedNdjsonWriter {
   }
 
   async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     await this.flush();
-    await this.handle.close();
+    this.closed = true;
+    this.stream.end();
+    await once(this.stream, 'close');
   }
 
   private async flush(): Promise<void> {
@@ -971,7 +998,9 @@ class BufferedNdjsonWriter {
     }
     const value = this.buffer;
     this.buffer = '';
-    await this.handle.write(value);
+    if (!this.stream.write(value, 'utf8')) {
+      await once(this.stream, 'drain');
+    }
   }
 }
 
@@ -1024,6 +1053,19 @@ function isCheckpoint(value: DatasetCheckpoint | undefined): value is DatasetChe
     Number.isSafeInteger(value.nextHeroIndex) &&
     Number.isSafeInteger(value.datasetByteLength)
   );
+}
+
+async function countNdjsonRows(path: string): Promise<number> {
+  let rowCount = 0;
+  for await (const chunk of createReadStream(path)) {
+    const value = chunk as Buffer;
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] === 10) {
+        rowCount += 1;
+      }
+    }
+  }
+  return rowCount;
 }
 
 async function ensureFile(path: string): Promise<void> {

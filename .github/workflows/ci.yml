@@ -33,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
+      - name: Validate Recommendation V8 pipeline runners
+        run: node --check scripts/run-recommendation-v8-pipeline.mjs && node --check scripts/run-recommendation-v8-real-data-v2.mjs && node --check scripts/run-recommendation-v8-training-supervisor.mjs
+
       - name: Build shared package
         run: yarn workspace @deadlock-live-probe/shared build
 

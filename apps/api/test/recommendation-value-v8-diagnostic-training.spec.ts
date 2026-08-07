@@ -236,7 +236,7 @@ function decisionRow(input: {
   const outcome = input.observedGood ? 0.8 : -0.8;
   return {
     schemaVersion: 1,
-    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
     dataSource: 'PRO_HISTORICAL',
     decisionSource: 'HISTORICAL_REPLAY',
     decisionId: input.decisionId,
@@ -284,8 +284,8 @@ function decisionRow(input: {
       candidateGenerator: 'generator-1',
       candidateGeneratorPolicy: 'policy-1',
       candidateGeneratorPolicySha256: 'b'.repeat(64),
-      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_1',
-      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK',
+      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     },
     eligibility: {
       stateModel: true,
@@ -347,11 +347,11 @@ async function writeDatasetArtifact(
     writeFile(join(directory, 'dataset.ndjson'), dataset, 'utf8'),
     writeJson(join(directory, 'manifest.json'), {
       schemaVersion: 1,
-      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
       generatedAt: '2026-08-10T00:00:00.000Z',
       source: {
         kind: 'HISTORICAL_REPLAY',
-        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
         directory: '/source',
         fileName: 'dataset.ndjson',
         sha256: 'c'.repeat(64),
@@ -393,7 +393,7 @@ async function writeDatasetArtifact(
       build: { fullCorpus: true },
       featureContract: {
         featureCutoff: 'DECISION_TIME_PRE_ACTION',
-        stateFeatureVersion: 'RECOMMENDATION_STATE_FEATURES_V6_1',
+        stateFeatureVersion: 'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK',
         decisionSource: 'HISTORICAL_REPLAY',
         candidateSpecificFeatures: true,
         observedActionInjectedIntoCandidates: false,
@@ -410,7 +410,7 @@ async function writeDatasetArtifact(
     }),
     writeJson(join(directory, 'audit.json'), {
       schemaVersion: 1,
-      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
       generatedAt: '2026-08-10T00:00:00.000Z',
       passed: true,
       trainingArtifactEligible: true,
@@ -444,7 +444,7 @@ async function writeBehavioralArtifact(
       featureVersion: RECOMMENDATION_BEHAVIORAL_V5_FEATURE_VERSION,
       generatedAt: '2026-08-11T00:00:00.000Z',
       source: {
-        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+        datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
         directory: '/dataset',
         fileName: 'dataset.ndjson',
         sha256: datasetSha256,

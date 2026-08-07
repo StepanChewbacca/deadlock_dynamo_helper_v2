@@ -1,0 +1,9 @@
+{
+  "state": "CONSUMED",
+  "requestedAt": "2026-07-28T20:04:00Z",
+  "reason": "The validated bounded-memory runtime is already running in the isolated training container. Verify Dataset V3 and immutable snapshot registry, then resume Historical Replay without rebuilding or replacing artifacts.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-28T20:03:50Z"
+}

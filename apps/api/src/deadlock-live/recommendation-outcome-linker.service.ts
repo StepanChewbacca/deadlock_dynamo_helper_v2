@@ -14,6 +14,9 @@ export class RecommendationOutcomeLinkerService implements OnModuleInit {
   private readonly logger = new Logger(
     RecommendationOutcomeLinkerService.name,
   );
+  private readonly enabled =
+    process.env.DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED?.trim().toLowerCase() !==
+    'false';
   private running = false;
 
   constructor(
@@ -24,12 +27,16 @@ export class RecommendationOutcomeLinkerService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
+    if (!this.enabled) {
+      this.logger.log('Recommendation outcome linker is disabled for this runtime.');
+      return;
+    }
     void this.linkPendingOutcomes();
   }
 
   @Interval(OUTCOME_LINK_INTERVAL_MS)
   async linkPendingOutcomes(): Promise<void> {
-    if (this.running) {
+    if (!this.enabled || this.running) {
       return;
     }
     this.running = true;

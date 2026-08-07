@@ -15,6 +15,7 @@ RUN yarn install --frozen-lockfile --ignore-engines
 COPY packages/shared ./packages/shared
 COPY packages/deadlock-build-domain ./packages/deadlock-build-domain
 COPY apps/api ./apps/api
+COPY scripts ./scripts
 
 # Build typescript projects
 RUN yarn workspace @deadlock-live-probe/shared build
@@ -33,6 +34,7 @@ COPY --from=builder /app/packages/deadlock-build-domain/package.json ./packages/
 COPY --from=builder /app/packages/deadlock-build-domain/dist ./packages/deadlock-build-domain/dist
 COPY --from=builder /app/apps/api/package.json /app/apps/api/run-migrations.js ./apps/api/
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/scripts ./scripts
 
 # Install production dependencies only
 RUN yarn install --production --frozen-lockfile --ignore-engines

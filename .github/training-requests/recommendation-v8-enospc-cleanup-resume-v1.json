@@ -1,0 +1,20 @@
+{
+  "operation": "CLEAN_AND_RESUME_RECOMMENDATION_V8_BOUNDED_5000_ENOSPC_V1",
+  "state": "REQUESTED",
+  "requestedAt": "2026-08-02T13:31:00Z",
+  "failure": "ENOSPC: no space left on device, write",
+  "preserveCheckpoint": true,
+  "expectedCompletedPartitions": 12,
+  "partitionCount": 16,
+  "preserveSourceDatasetSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "preserveSnapshotId": "v8-5000-c6637-30701422914",
+  "preserveCatalogClientVersion": 6637,
+  "deleteObsoleteFailedDatasets": true,
+  "pruneUnusedDockerBuildData": true,
+  "useDiskBoundedFinalization": true,
+  "diagnosticOnly": true,
+  "fullTrainingAuthorized": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

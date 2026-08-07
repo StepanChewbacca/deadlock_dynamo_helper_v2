@@ -11,7 +11,7 @@ import {
 
 export const RECOMMENDATION_HISTORICAL_PRO_REPLAY_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_HISTORICAL_PRO_REPLAY_VERSION =
-  'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1' as const;
+  'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2' as const;
 
 export interface RecommendationHistoricalProReplayThresholds {
   minimumTimelineCoverage: number;
@@ -23,7 +23,7 @@ export const DEFAULT_RECOMMENDATION_HISTORICAL_PRO_REPLAY_THRESHOLDS:
   RecommendationHistoricalProReplayThresholds = {
     minimumTimelineCoverage: 0.99,
     minimumCandidateMetadataCoverage: 0.999,
-    minimumObservedActionCandidateCoverage: 0.99,
+    minimumObservedActionCandidateCoverage: 0.995,
   };
 
 export interface RecommendationFrozenCandidateGeneratorSnapshot {
@@ -66,7 +66,9 @@ export interface RecommendationHistoricalShortHorizonOutcome {
   horizon: '3m' | '5m' | '10m';
   complete: boolean;
   utility?: number;
+  outcomeSource?: 'TIMELINE_SNAPSHOT' | 'TERMINAL_FINAL_OUTCOME';
   snapshotGameTimeS?: number;
+  terminalGameTimeS?: number;
 }
 
 export interface RecommendationHistoricalReplayCandidate {
@@ -102,6 +104,9 @@ export interface RecommendationHistoricalProReplayRow {
   team: number;
   decisionGameTimeS: number;
   phase: HeroBuildDecisionDatasetV3Row['phase'];
+  timeline?: {
+    decisionSnapshotJoined: boolean;
+  };
   state: {
     inventoryBeforeStateKey: string;
     previousActionKeys: string[];
@@ -156,6 +161,7 @@ export interface RecommendationHistoricalProReplayAudit {
 
 export interface CreateRecommendationHistoricalProReplayRowInput {
   decision: HeroBuildDecisionDatasetV3Row;
+  decisionTimelineJoined?: boolean;
   candidateActions: RecommendationHistoricalCandidateInput[];
   catalogItemsById: ReadonlyMap<number, RecommendationHistoricalCatalogItem>;
   shortHorizonOutcomes: RecommendationHistoricalShortHorizonOutcome[];
@@ -201,12 +207,17 @@ export function createRecommendationHistoricalProReplayRow(
   const completeOutcomeAvailable = normalizedOutcomes.some(
     (outcome) => outcome.complete && outcome.utility !== undefined,
   );
+  const decisionTimelineJoined =
+    input.decisionTimelineJoined ?? completeOutcomeAvailable;
   const allCandidateMetadataAvailable =
     candidates.length > 0 &&
     candidates.every((candidate) => candidate.catalogMetadataAvailable);
   const hasChoiceSet = candidates.length >= 2;
   const exclusionReasons: string[] = [];
 
+  if (!decisionTimelineJoined) {
+    exclusionReasons.push('MISSING_DECISION_TIMELINE_SNAPSHOT');
+  }
   if (!completeOutcomeAvailable) {
     exclusionReasons.push('MISSING_COMPLETE_SHORT_HORIZON_OUTCOME');
   }
@@ -241,6 +252,9 @@ export function createRecommendationHistoricalProReplayRow(
     team: input.decision.team,
     decisionGameTimeS: input.decision.gameTimeS,
     phase: input.decision.phase,
+    timeline: {
+      decisionSnapshotJoined: decisionTimelineJoined,
+    },
     state: {
       inventoryBeforeStateKey: input.decision.inventoryBeforeStateKey,
       previousActionKeys: [...input.decision.previousActionKeys],
@@ -306,11 +320,10 @@ export function buildRecommendationHistoricalProReplayAudit(
     )
       ? 0
       : 1;
-    timelineRowCount += row.shortHorizonOutcomes.some(
-      (outcome) => outcome.complete,
-    )
-      ? 1
-      : 0;
+    const timelineOrTerminalOutcomeAvailable =
+      row.timeline?.decisionSnapshotJoined === true ||
+      row.shortHorizonOutcomes.some((outcome) => outcome.complete);
+    timelineRowCount += timelineOrTerminalOutcomeAvailable ? 1 : 0;
     candidateCount += row.candidates.length;
     candidateWithMetadataCount += row.candidates.filter(
       (candidate) => candidate.catalogMetadataAvailable,
@@ -437,7 +450,7 @@ function historicalCandidateFromRecommendationAction(
   }
 
   return {
-    actionKey: action.actionKey,
+    actionKey: `${action.sourceActionType}:${action.itemId}`,
     actionType: action.sourceActionType,
     itemId: action.itemId,
     rank,
@@ -482,7 +495,6 @@ function normalizeCandidates(
       confidence: candidate.confidence,
       predictedStateKey: candidate.predictedStateKey,
       catalogMetadataAvailable: catalog !== undefined,
-      catalog: catalog ? cloneCatalogItem(catalog) : undefined,
     });
   }
 
@@ -510,9 +522,40 @@ function normalizeOutcomes(
       finiteNumber(outcome.utility, `${outcome.horizon} utility`);
     }
     if (outcome.snapshotGameTimeS !== undefined) {
-      nonNegativeInteger(
+      nonNegativeFiniteNumber(
         outcome.snapshotGameTimeS,
         `${outcome.horizon} snapshotGameTimeS`,
+      );
+    }
+    if (outcome.terminalGameTimeS !== undefined) {
+      nonNegativeFiniteNumber(
+        outcome.terminalGameTimeS,
+        `${outcome.horizon} terminalGameTimeS`,
+      );
+    }
+    if (outcome.outcomeSource === 'TERMINAL_FINAL_OUTCOME') {
+      if (
+        !outcome.complete ||
+        outcome.utility === undefined ||
+        outcome.terminalGameTimeS === undefined
+      ) {
+        throw new Error(
+          `Terminal ${outcome.horizon} outcome requires utility and terminalGameTimeS.`,
+        );
+      }
+      if (outcome.snapshotGameTimeS !== undefined) {
+        throw new Error(
+          `Terminal ${outcome.horizon} outcome must not include snapshotGameTimeS.`,
+        );
+      }
+    }
+    if (
+      outcome.outcomeSource === 'TIMELINE_SNAPSHOT' &&
+      outcome.complete &&
+      outcome.snapshotGameTimeS === undefined
+    ) {
+      throw new Error(
+        `Timeline ${outcome.horizon} outcome requires snapshotGameTimeS.`,
       );
     }
     byHorizon.set(outcome.horizon, { ...outcome });
@@ -631,15 +674,6 @@ function cloneSnapshot(
   return { ...snapshot };
 }
 
-function cloneCatalogItem(
-  item: RecommendationHistoricalCatalogItem,
-): RecommendationHistoricalCatalogItem {
-  return {
-    ...item,
-    tags: [...item.tags],
-    componentItemIds: [...item.componentItemIds],
-  };
-}
 
 function ratio(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
@@ -680,6 +714,14 @@ function probability(value: unknown, name: string): number {
   const normalized = finiteNumber(value, name);
   if (normalized < 0 || normalized > 1) {
     throw new Error(`${name} must be between 0 and 1.`);
+  }
+  return normalized;
+}
+
+function nonNegativeFiniteNumber(value: unknown, name: string): number {
+  const normalized = finiteNumber(value, name);
+  if (normalized < 0) {
+    throw new Error(`${name} must be non-negative.`);
   }
   return normalized;
 }

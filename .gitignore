@@ -8,3 +8,5 @@ storage
 !.env.example
 .idea
 .qwen
+__pycache__/
+*.pyc

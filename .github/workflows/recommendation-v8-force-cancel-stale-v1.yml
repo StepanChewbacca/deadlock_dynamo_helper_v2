@@ -1,0 +1,66 @@
+name: Recommendation V8 Force Cancel Stale V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-force-cancel-stale-v1.json'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  force-cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Validate request
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-force-cancel-stale-v1.json'
+          test "$(jq -r '.state' "$request")" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'FORCE_CANCEL_STALE_RECOMMENDATION_V8_V1'
+          test "$(jq -r '.preserveRunId' "$request")" = '31054170144'
+
+      - name: Force cancel stale Recommendation V8 runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const preserve = 31054170144;
+            const current = Number(context.runId);
+            for (const status of ['queued', 'in_progress', 'pending']) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                { owner: context.repo.owner, repo: context.repo.repo, status, per_page: 100 },
+              );
+              for (const run of runs) {
+                if (
+                  run.id === current ||
+                  run.id === preserve ||
+                  typeof run.name !== 'string' ||
+                  !run.name.startsWith('Recommendation V8')
+                ) {
+                  continue;
+                }
+                try {
+                  await github.request(
+                    'POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',
+                    {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id,
+                    },
+                  );
+                  core.notice(`Force-cancelled ${run.id}: ${run.name}`);
+                } catch (error) {
+                  core.warning(`Unable to force-cancel ${run.id}: ${error.message}`);
+                }
+              }
+            }

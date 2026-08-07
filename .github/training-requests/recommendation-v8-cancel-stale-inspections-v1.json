@@ -1,0 +1,10 @@
+{
+  "operation": "CANCEL_STALE_RECOMMENDATION_V8_INSPECTIONS_V1",
+  "requestedAt": "2026-08-02T22:14:00Z",
+  "inspection": 7,
+  "runIds": [30769555509],
+  "reason": "Release the self-hosted runner from a consumed catalog SQL inspection so the current replay audit probe can run.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

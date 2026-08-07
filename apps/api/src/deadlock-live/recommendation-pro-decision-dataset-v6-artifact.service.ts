@@ -3,16 +3,15 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   mkdir,
-  open,
   readFile,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { GzipNdjsonWriter } from './gzip-ndjson';
 import type { MatchTimelinePlayerSnapshot } from './match-timeline-collector.service';
 import {
   validateRecommendationCandidateGeneratorSnapshotArtifact,
@@ -25,6 +24,7 @@ import {
   type RecommendationHistoricalCatalogItem,
   type RecommendationHistoricalProReplayRow,
 } from './recommendation-historical-pro-replay';
+import { selectRecommendationDecisionTimelineSnapshot } from './recommendation-historical-pro-replay-outcomes';
 import {
   createRecommendationProDecisionDatasetV6Row,
   DEFAULT_RECOMMENDATION_DATASET_V6_THRESHOLDS,
@@ -145,15 +145,17 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
   timelineSource: {
     directory: string;
     decisionSnapshotStalenessS: number;
-    featureCutoff: 'LATEST_PLAYER_SNAPSHOT_AT_OR_BEFORE_DECISION';
+    featureCutoff: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS';
   };
   splitDescriptor: RecommendationDatasetV6SplitDescriptor & {
     sha256: string;
   };
   artifact: {
     format: 'NDJSON';
+    compression: 'GZIP';
     fileName: typeof DATASET_FILE_NAME;
     byteLength: number;
+    uncompressedByteLength: number;
     sha256: string;
     rowCount: number;
   };
@@ -162,7 +164,7 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
     diagnosticMaxRows?: number;
   };
   featureContract: {
-    featureCutoff: 'DECISION_TIME_PRE_ACTION';
+    featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK';
     stateFeatureVersion: typeof RECOMMENDATION_STATE_FEATURE_VERSION_V6;
     decisionSource: 'HISTORICAL_REPLAY';
     candidateSpecificFeatures: true;
@@ -172,7 +174,10 @@ export interface RecommendationProDecisionDatasetV6ArtifactManifest {
     v5_3UsedAsInput: false;
     userLiveUsedAsInput: false;
     futureTestEligibleForSelection: false;
-    finalOutcomeAuxiliary: true;
+    finalOutcomeAuxiliary: false;
+    terminalOutcomeBackfill: true;
+    futureSnapshotFallbackAllowed: true;
+    maximumFutureSnapshotLagS: 300;
     shortHorizonTargets: ['3m', '5m', '10m'];
   };
   auditPassed: boolean;
@@ -325,7 +330,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
       ]);
 
       this.status = { ...this.status, phase: 'BUILDING' };
-      const writer = await LineWriter.create(partialDatasetPath);
+      const writer = await GzipNdjsonWriter.create(partialDatasetPath);
       const accumulator =
         new RecommendationProDecisionDatasetV6AuditAccumulator(
           options.thresholds,
@@ -336,6 +341,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
       let invalidRowCount = 0;
       let timelineJoinedRowCount = 0;
       let missingTimelineRowCount = 0;
+      let uncompressedByteLength = 0;
 
       try {
         for await (const value of ndjson(source.datasetPath)) {
@@ -413,6 +419,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           }
         }
         await writer.close();
+        uncompressedByteLength = writer.uncompressedByteLength;
       } catch (error) {
         await writer.abort();
         throw error;
@@ -508,7 +515,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
         timelineSource: {
           directory: this.timelineDirectory,
           decisionSnapshotStalenessS: options.decisionSnapshotStalenessS,
-          featureCutoff: 'LATEST_PLAYER_SNAPSHOT_AT_OR_BEFORE_DECISION',
+          featureCutoff: 'LATEST_AT_OR_BEFORE_ELSE_EARLIEST_AFTER_WITHIN_STALENESS',
         },
         splitDescriptor: {
           ...splitDescriptor,
@@ -516,8 +523,10 @@ export class RecommendationProDecisionDatasetV6ArtifactService
         },
         artifact: {
           format: 'NDJSON',
+          compression: 'GZIP',
           fileName: DATASET_FILE_NAME,
           byteLength: datasetStat.size,
+          uncompressedByteLength,
           sha256: await hashFile(this.datasetPath),
           rowCount: outputRowCount,
         },
@@ -526,7 +535,7 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           diagnosticMaxRows: options.maxRows,
         },
         featureContract: {
-          featureCutoff: 'DECISION_TIME_PRE_ACTION',
+          featureCutoff: 'DECISION_TIME_WITH_FUTURE_SNAPSHOT_FALLBACK',
           stateFeatureVersion: RECOMMENDATION_STATE_FEATURE_VERSION_V6,
           decisionSource: 'HISTORICAL_REPLAY',
           candidateSpecificFeatures: true,
@@ -536,7 +545,10 @@ export class RecommendationProDecisionDatasetV6ArtifactService
           v5_3UsedAsInput: false,
           userLiveUsedAsInput: false,
           futureTestEligibleForSelection: false,
-          finalOutcomeAuxiliary: true,
+          finalOutcomeAuxiliary: false,
+          terminalOutcomeBackfill: true,
+          futureSnapshotFallbackAllowed: true,
+          maximumFutureSnapshotLagS: 300,
           shortHorizonTargets: ['3m', '5m', '10m'],
         },
         auditPassed: audit.passed,
@@ -755,27 +767,18 @@ function selectDecisionTimelineSnapshot(input: {
   snapshots: readonly MatchTimelinePlayerSnapshot[];
   stalenessS: number;
 }): MatchTimelinePlayerSnapshot | undefined {
-  let selected: MatchTimelinePlayerSnapshot | undefined;
-  for (const snapshot of input.snapshots) {
-    if (snapshot.gameTimeS > input.replayRow.decisionGameTimeS) {
-      break;
-    }
-    if (
-      String(snapshot.matchId) !== input.replayRow.matchId ||
-      snapshot.steamId !== input.replayRow.playerId ||
-      snapshot.heroId !== input.replayRow.heroId
-    ) {
-      continue;
-    }
-    selected = snapshot;
-  }
-  if (
-    !selected ||
-    input.replayRow.decisionGameTimeS - selected.gameTimeS > input.stalenessS
-  ) {
+  const matchId = Number(input.replayRow.matchId);
+  if (!Number.isSafeInteger(matchId)) {
     return undefined;
   }
-  return clone(selected);
+  return selectRecommendationDecisionTimelineSnapshot({
+    matchId,
+    heroId: input.replayRow.heroId,
+    team: input.replayRow.team,
+    gameTimeS: input.replayRow.decisionGameTimeS,
+    snapshots: input.snapshots,
+    snapshotStalenessS: input.stalenessS,
+  });
 }
 
 function validateReplaySnapshotLineage(
@@ -969,53 +972,6 @@ async function exists(path: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-class LineWriter {
-  private buffer = '';
-  private closed = false;
-
-  private constructor(
-    private readonly handle: FileHandle,
-    private readonly path: string,
-  ) {}
-
-  static async create(path: string): Promise<LineWriter> {
-    return new LineWriter(await open(path, 'w'), path);
-  }
-
-  async write(value: unknown): Promise<void> {
-    this.buffer += `${JSON.stringify(value)}\n`;
-    if (this.buffer.length >= 1024 * 1024) {
-      await this.flush();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    await this.flush();
-    await this.handle.close();
-    this.closed = true;
-  }
-
-  async abort(): Promise<void> {
-    if (!this.closed) {
-      await this.handle.close();
-      this.closed = true;
-    }
-    await rm(this.path, { force: true });
-  }
-
-  private async flush(): Promise<void> {
-    if (!this.buffer) {
-      return;
-    }
-    const value = this.buffer;
-    this.buffer = '';
-    await this.handle.write(value);
   }
 }
 

@@ -1,0 +1,18 @@
+{
+  "state": "CONSUMED",
+  "operation": "APPLY_ISOLATED_RUNTIME_GUARDS_V1",
+  "requestedAt": "2026-07-31T13:49:00Z",
+  "retry": 2,
+  "guards": [
+    "DEADLOCK_RECENT_MATCH_CRAWLER_ENABLED",
+    "DEADLOCK_REFERENCE_DATA_IMPORT_ENABLED",
+    "DEADLOCK_RECOMMENDATION_OUTCOME_LINKER_ENABLED",
+    "DEADLOCK_TIMELINE_RECIPE_REFRESH_ENABLED"
+  ],
+  "currentRecoveryRunId": "30634525625-1-replay-resume-v3",
+  "restartCurrentHealthyWriter": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-31T13:50:36.961881Z"
+}

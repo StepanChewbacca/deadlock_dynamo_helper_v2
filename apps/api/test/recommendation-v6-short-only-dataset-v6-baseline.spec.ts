@@ -122,7 +122,7 @@ function count(mean: number, observations: number) {
 function row(): RecommendationProDecisionDatasetV6Row {
   return {
     schemaVersion: 1,
-    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+    datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
     dataSource: 'PRO_HISTORICAL',
     decisionSource: 'HISTORICAL_REPLAY',
     decisionId: 'decision-future',
@@ -170,8 +170,8 @@ function row(): RecommendationProDecisionDatasetV6Row {
       candidateGenerator: 'generator-1',
       candidateGeneratorPolicy: 'policy-1',
       candidateGeneratorPolicySha256: 'e'.repeat(64),
-      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_1',
-      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+      stateFeatures: 'RECOMMENDATION_STATE_FEATURES_V6_2_FUTURE_TIMELINE_FALLBACK',
+      replay: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     },
     eligibility: {
       stateModel: true,

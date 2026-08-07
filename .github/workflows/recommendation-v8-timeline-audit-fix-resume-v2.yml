@@ -1,0 +1,48 @@
+name: Recommendation V8 Timeline Audit Fix Resume V2
+
+on:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-timeline-audit-fix-resume-v2.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-terminal-outcome-rebuild-5000-v2
+  cancel-in-progress: false
+
+jobs:
+  terminal-outcome-rebuild-v2:
+    runs-on: self-hosted
+    timeout-minutes: 180
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Reconcile active run or restart isolated bounded training
+        shell: bash
+        run: bash scripts/run-recommendation-v8-terminal-outcome-reconcile-5000-v4.sh
+
+      - name: Upload cleanup and restart evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-terminal-outcome-5000-v4-${{ github.run_id }}
+          path: |
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-before.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/disk-after.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/removed-artifacts.txt
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/runs/terminal-cleanup-v3-${{ github.run_id }}-${{ github.run_attempt }}/evidence/**
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/run.json
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/replay-status.json
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/training.log
+            /home/ubuntu/apps/deadlock_dynamo_helper-training-5000/current/docker-stats.txt
+          if-no-files-found: warn
+          retention-days: 14

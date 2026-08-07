@@ -1,0 +1,14 @@
+{
+  "state": "CONSUMED",
+  "operation": "POSTGRES_TIMELINE_REPLAY",
+  "requestedAt": "2026-07-28T22:00:00Z",
+  "reason": "Hydrate immutable historical player timelines and objective events from PostgreSQL raw_match_metadata, preserve the audited Dataset V3 and candidate snapshot, rebuild only Historical Replay and invalid downstream offline artifacts, and keep production, passive shadow, and randomized canary disabled.",
+  "expectedSourceSha256": "ff04970fda519ca5ebbfa49991af05ef99b99038d3f9f39f64fc9b0d07018fad",
+  "expectedSourceRowCount": 6188423,
+  "snapshotId": "v8-20260722-c1-ff04970fda51",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false,
+  "consumedAt": "2026-07-28T22:08:13Z",
+  "deployedCommit": "3cb1c83eeedb297ab9193f618b72c322f5abd7da"
+}

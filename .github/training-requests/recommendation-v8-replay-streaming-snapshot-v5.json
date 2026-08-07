@@ -1,0 +1,9 @@
+{
+  "state": "CONSUMED",
+  "requestedAt": "2026-07-28T20:39:00Z",
+  "consumedAt": "2026-07-29T00:00:00Z",
+  "reason": "Historical Replay streaming and canonical catalog SHA fixes were validated and deployed. The replay completed; the remaining audit failure is data-source coverage, not the previous runtime failure.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

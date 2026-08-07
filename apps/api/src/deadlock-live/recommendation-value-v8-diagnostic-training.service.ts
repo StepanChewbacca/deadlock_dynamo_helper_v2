@@ -13,6 +13,7 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { openMaybeGzipNdjsonReadStream } from './gzip-ndjson';
 import type { RecommendationBehavioralV5PropensityRow } from './recommendation-behavioral-v5-training.service';
 import {
   RECOMMENDATION_BEHAVIORAL_V5_MODEL_VERSION,
@@ -1242,7 +1243,7 @@ async function artifactDescriptor(path: string, rowCount?: number) {
 
 async function* ndjson(path: string): AsyncGenerator<unknown> {
   const lines = createInterface({
-    input: createReadStream(path, { encoding: 'utf8' }),
+    input: await openMaybeGzipNdjsonReadStream(path),
     crlfDelay: Infinity,
   });
   let line = 0;

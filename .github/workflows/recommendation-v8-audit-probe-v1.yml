@@ -1,0 +1,147 @@
+name: Recommendation V8 Audit Probe V1
+
+on:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-audit-probe-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Inspect bounded replay audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          container='deadlock-recommendation-v8-training'
+          storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
+          replay="$storage/recommendation-historical-pro-replay-v1"
+          bounded_root='/home/ubuntu/apps/deadlock_dynamo_helper-training-5000'
+          bounded_run_dir="$(readlink -f "$bounded_root/current" 2>/dev/null || true)"
+          report="$RUNNER_TEMP/recommendation-v8-audit-probe.txt"
+          audit_json="$RUNNER_TEMP/recommendation-historical-pro-replay-audit.json"
+          manifest_json="$RUNNER_TEMP/recommendation-historical-pro-replay-manifest.json"
+          replay_status_json="$RUNNER_TEMP/recommendation-historical-pro-replay-status.json"
+          dataset_status_json="$RUNNER_TEMP/recommendation-pro-decision-dataset-v6-status.json"
+          behavioral_status_json="$RUNNER_TEMP/recommendation-behavioral-v5-status.json"
+          diagnostic_status_json="$RUNNER_TEMP/recommendation-value-v8-diagnostic-status.json"
+
+          sudo cat "$replay/audit.json" > "$audit_json" 2>/dev/null || printf '{}\n' > "$audit_json"
+          sudo cat "$replay/manifest.json" > "$manifest_json" 2>/dev/null || printf '{}\n' > "$manifest_json"
+          curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status > "$replay_status_json" || printf '{}\n' > "$replay_status_json"
+          curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status > "$dataset_status_json" || printf '{}\n' > "$dataset_status_json"
+          curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status > "$behavioral_status_json" || printf '{}\n' > "$behavioral_status_json"
+          curl --silent --show-error --max-time 20 http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status > "$diagnostic_status_json" || printf '{}\n' > "$diagnostic_status_json"
+
+          {
+            echo "generatedAt=$(date --iso-8601=seconds)"
+            echo "boundedRunDir=$bounded_run_dir"
+            echo
+            echo '=== container ==='
+            sudo docker ps -a --filter "name=^/${container}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+            sudo docker inspect --format='running={{.State.Running}} status={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} startedAt={{.State.StartedAt}}' "$container" 2>/dev/null || true
+            echo
+            echo '=== replay status ==='
+            cat "$replay_status_json"
+            echo
+            echo '=== replay audit ==='
+            cat "$audit_json"
+            echo
+            echo '=== replay manifest ==='
+            cat "$manifest_json"
+            echo
+            echo '=== downstream status ==='
+            cat "$dataset_status_json"
+            echo
+            cat "$behavioral_status_json"
+            echo
+            cat "$diagnostic_status_json"
+            echo
+            echo '=== bounded training files ==='
+            if [ -n "$bounded_run_dir" ]; then
+              cat "$bounded_run_dir/run.json" 2>/dev/null || true
+              cat "$bounded_run_dir/status.json" 2>/dev/null || true
+              tail -n 240 "$bounded_run_dir/training.log" 2>/dev/null || true
+            fi
+            echo
+            echo '=== recent container audit logs ==='
+            sudo docker logs --since=3h "$container" 2>&1 | grep -E 'audit|Audit|failed|FAILED|COMPLETE|coverage|Replay|Dataset V6|Behavioral|diagnostic' | tail -n 300 || true
+            echo
+            echo '=== storage ==='
+            df -hT /
+            sudo du -sh "$replay" 2>/dev/null || true
+          } | tee "$report"
+
+          jq -n \
+            --arg generatedAt "$(date --iso-8601=seconds)" \
+            --arg commitSha "$GITHUB_SHA" \
+            --slurpfile replayStatus "$replay_status_json" \
+            --slurpfile audit "$audit_json" \
+            --slurpfile manifest "$manifest_json" \
+            --slurpfile datasetStatus "$dataset_status_json" \
+            --slurpfile behavioralStatus "$behavioral_status_json" \
+            --slurpfile diagnosticStatus "$diagnostic_status_json" \
+            '{
+              generatedAt: $generatedAt,
+              commitSha: $commitSha,
+              replayStatus: $replayStatus[0],
+              audit: $audit[0],
+              manifest: $manifest[0],
+              downstream: {
+                datasetV6: $datasetStatus[0],
+                behavioralV5: $behavioralStatus[0],
+                valueV8Diagnostic: $diagnosticStatus[0]
+              }
+            }' > "$RUNNER_TEMP/recommendation-v8-audit-probe-result.json"
+
+      - name: Publish audit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='agent/recommendation-value-v8-passive-shadow-1'
+          result_path='.github/training-results/recommendation-v8-audit-probe-v1.json'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin "$branch"
+          git checkout "$branch"
+          git pull --rebase origin "$branch"
+          mkdir -p "$(dirname "$result_path")"
+          cp "$RUNNER_TEMP/recommendation-v8-audit-probe-result.json" "$result_path"
+          git add "$result_path"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'chore: publish V8 replay audit probe result'
+          for attempt in 1 2 3; do
+            if git push origin "$branch"; then
+              exit 0
+            fi
+            git pull --rebase origin "$branch"
+          done
+          exit 1
+
+      - name: Upload audit probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-audit-probe-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/recommendation-v8-audit-probe.txt
+            ${{ runner.temp }}/recommendation-v8-audit-probe-result.json
+            ${{ runner.temp }}/recommendation-historical-pro-replay-audit.json
+            ${{ runner.temp }}/recommendation-historical-pro-replay-manifest.json
+          if-no-files-found: warn
+          retention-days: 7

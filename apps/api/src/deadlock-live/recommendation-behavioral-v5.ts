@@ -7,7 +7,7 @@ export const RECOMMENDATION_BEHAVIORAL_V5_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_BEHAVIORAL_V5_MODEL_VERSION =
   'RECOMMENDATION_BEHAVIORAL_V5_HASHED_CONDITIONAL_CHOICE_1' as const;
 export const RECOMMENDATION_BEHAVIORAL_V5_FEATURE_VERSION =
-  'RECOMMENDATION_BEHAVIORAL_V5_FEATURES_1' as const;
+  'RECOMMENDATION_BEHAVIORAL_V5_FEATURES_2_FUTURE_TIMELINE_FALLBACK' as const;
 
 export interface RecommendationBehavioralV5Model {
   schemaVersion: typeof RECOMMENDATION_BEHAVIORAL_V5_SCHEMA_VERSION;
@@ -248,6 +248,14 @@ function candidateFeatures(
   const timeBucket = Math.floor(row.state.gameTimeS / 300);
 
   add('bias');
+  add(
+    'timeline-future-fallback',
+    row.state.timelineSnapshotFutureFallback === true ? 1 : 0,
+  );
+  add(
+    'timeline-snapshot-lag',
+    bounded(row.state.timelineSnapshotLagS ?? 0, -300, 300) / 300,
+  );
   add(`item:${itemId}`);
   add(`action:${candidate.actionKey}`);
   add(`hero-item:${heroId}:${itemId}`);

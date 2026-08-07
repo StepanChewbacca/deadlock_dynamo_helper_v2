@@ -1,0 +1,12 @@
+{
+  "operation": "INSTALL_NONRELEASE_FULL_GUARD_V1",
+  "requestedAt": "2026-07-31T14:04:00Z",
+  "runId": "30634525625-1-replay-resume-v3",
+  "catalogId": 1,
+  "catalogClientVersion": "6640",
+  "catalogReleaseEligible": false,
+  "fullTrainingAllowed": false,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

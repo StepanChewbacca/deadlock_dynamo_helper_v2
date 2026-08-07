@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-08-07T20:46:45+00:00",
+  "workflowRunId": "31216039691",
+  "implementationSha": "ef391d50f6dddf27391c215b97399a005f071972",
+  "image": "deadlock-recommendation-v8-training:ef391d50f6dddf27391c215b97399a005f071972-terminal-outcomes-5000-v2",
+  "runId": "terminal-v2-31216039691-1",
+  "run": {
+    "runId": "terminal-v2-31216039691-1",
+    "state": "RUNNING",
+    "stage": "HISTORICAL_REPLAY",
+    "matchLimit": 5000,
+    "implementationSha": "ef391d50f6dddf27391c215b97399a005f071972",
+    "outputDirectories": {
+      "replay": "recommendation-historical-pro-replay-terminal-5000-v2",
+      "datasetV6": "recommendation-pro-decision-dataset-v6-terminal-5000-v2",
+      "behavioralV5": "recommendation-behavioral-v5-terminal-5000-v2",
+      "valueV8Diagnostic": "recommendation-value-v8-diagnostic-terminal-5000-v2"
+    },
+    "rebuildReplay": true,
+    "fullTrainingAuthorized": false,
+    "productionRankingChanged": false,
+    "passiveShadowActivated": false,
+    "randomizedCanaryAuthorized": false,
+    "observedActionInjected": false,
+    "auditThresholdsLowered": false,
+    "trainingRestartedAt": "2026-08-07T20:46:44.652482Z"
+  },
+  "replayStatus": {
+    "state": "RUNNING",
+    "phase": "PREPARING",
+    "sourceRowCount": 0,
+    "selectedSourceRowCount": 0,
+    "processedPartitionCount": 0,
+    "partitionCount": 0,
+    "outputRowCount": 0,
+    "excludedWithoutTimelineCount": 0,
+    "excludedWithoutGeneratorSnapshotCount": 0,
+    "outputDirectory": "/app/apps/api/storage/recommendation-historical-pro-replay-terminal-5000-v2",
+    "datasetPath": "/app/apps/api/storage/recommendation-historical-pro-replay-terminal-5000-v2/dataset.ndjson",
+    "datasetAvailable": false,
+    "manifestAvailable": false,
+    "auditAvailable": false,
+    "startedAt": "2026-08-07T20:46:42.463Z"
+  }
+}

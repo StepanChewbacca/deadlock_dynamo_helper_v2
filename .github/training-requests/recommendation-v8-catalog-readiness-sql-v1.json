@@ -1,0 +1,15 @@
+{
+  "operation": "INSPECT_CATALOG_READINESS_SQL_V1",
+  "state": "CONSUMED",
+  "requestedAt": "2026-07-31T13:59:00Z",
+  "consumedAt": "2026-08-02T22:13:00Z",
+  "inspection": 2,
+  "inspectRawPayloadVersionKeys": true,
+  "sourceWindowStart": "2026-07-18T12:31:22.000Z",
+  "sourceWindowEnd": "2026-07-28T15:34:17.000Z",
+  "policyWindowEnd": "2026-07-22T09:32:54.000Z",
+  "readOnly": true,
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

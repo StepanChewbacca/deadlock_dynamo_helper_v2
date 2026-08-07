@@ -1,0 +1,65 @@
+name: Recommendation V8 Storage Cleanup
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-storage-cleanup.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Audit and clean obsolete recommendation artifacts
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare audit directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_root='/home/ubuntu/apps/deadlock_dynamo_helper-training/storage-audits'
+          audit_dir="$audit_root/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo mkdir -p "$audit_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$audit_root"
+          echo "CLEANUP_AUDIT_DIR=$audit_dir" >> "$GITHUB_ENV"
+          echo "CLEANUP_AUDIT_REPORT=$audit_dir/storage-cleanup-audit.txt" >> "$GITHUB_ENV"
+          echo "CLEANUP_AUDIT_SUMMARY=$audit_dir/storage-cleanup-summary.json" >> "$GITHUB_ENV"
+
+      - name: Validate cleanup script
+        run: bash -n scripts/audit-clean-recommendation-v8-storage.sh
+
+      - name: Audit and clean obsolete artifacts
+        shell: bash
+        env:
+          AUDIT_REPORT: ${{ env.CLEANUP_AUDIT_REPORT }}
+          AUDIT_SUMMARY: ${{ env.CLEANUP_AUDIT_SUMMARY }}
+        run: bash scripts/audit-clean-recommendation-v8-storage.sh
+
+      - name: Show cleanup summary
+        if: always()
+        shell: bash
+        run: |
+          cat "$CLEANUP_AUDIT_SUMMARY" 2>/dev/null || true
+          echo 'Training monitor: sudo tail -f /home/ubuntu/apps/deadlock_dynamo_helper-training/current/training.log'
+          echo 'Training status: sudo cat /home/ubuntu/apps/deadlock_dynamo_helper-training/current/status.json | jq'
+
+      - name: Upload cleanup audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-storage-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CLEANUP_AUDIT_REPORT }}
+            ${{ env.CLEANUP_AUDIT_SUMMARY }}
+          if-no-files-found: warn
+          retention-days: 30

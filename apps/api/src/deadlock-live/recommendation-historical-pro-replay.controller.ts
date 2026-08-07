@@ -7,15 +7,13 @@ import {
   NotFoundException,
   Post,
 } from '@nestjs/common';
-import {
-  RecommendationHistoricalProReplayArtifactService,
-  type RecommendationHistoricalProReplayStartRequest,
-} from './recommendation-historical-pro-replay-artifact.service';
+import type { RecommendationHistoricalProReplayStartRequest } from './recommendation-historical-pro-replay-artifact.service';
+import { RecommendationHistoricalProReplayFacadeService } from './recommendation-historical-pro-replay-facade.service';
 
 @Controller('deadlock/analysis/recommendation-historical-pro-replay')
 export class RecommendationHistoricalProReplayController {
   constructor(
-    private readonly replayService: RecommendationHistoricalProReplayArtifactService,
+    private readonly replayService: RecommendationHistoricalProReplayFacadeService,
   ) {}
 
   @Post('start')

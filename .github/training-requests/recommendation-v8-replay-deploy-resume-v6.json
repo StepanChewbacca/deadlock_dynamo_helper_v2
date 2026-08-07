@@ -1,0 +1,8 @@
+{
+  "state": "SUPERSEDED",
+  "supersededAt": "2026-07-28T20:01:00Z",
+  "reason": "Superseded by Recommendation V8 Replay Streaming Deploy, which verifies preserved artifacts inside the container and avoids direct Docker volume permission failures.",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

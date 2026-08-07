@@ -1,0 +1,167 @@
+name: Recommendation V8 Clean Dataset V3 Rebuild V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/recommendation-value-v8-passive-shadow-1
+    paths:
+      - '.github/training-requests/recommendation-v8-clean-v3-rebuild-v2.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-vps-training
+  cancel-in-progress: false
+
+jobs:
+  fix-validate-clean-and-start:
+    name: Validate fixes, delete old offline artifacts, and rebuild Dataset V3
+    runs-on: self-hosted
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout training branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/recommendation-value-v8-passive-shadow-1
+          fetch-depth: 0
+
+      - name: Apply fail-closed source and replay fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/run-patch-recommendation-v8-clean-rebuild.py
+          git diff --check
+
+      - name: Build patched builder image
+        shell: bash
+        run: |
+          set -euo pipefail
+          builder_image="deadlock-recommendation-v8-clean-builder:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build --target builder -t "$builder_image" .
+          echo "BUILDER_IMAGE=$builder_image" >> "$GITHUB_ENV"
+
+      - name: Run targeted regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker run --rm --entrypoint yarn "$BUILDER_IMAGE" workspace @deadlock-live-probe/api test recommendation-historical-pro-replay-fractional-snapshot.spec.ts recommendation-candidate-generator-snapshot-export.spec.ts --runInBand
+
+      - name: Build isolated runtime image
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_image="deadlock-recommendation-v8-clean:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo docker build -t "$runtime_image" .
+          echo "TRAINING_IMAGE=$runtime_image" >> "$GITHUB_ENV"
+
+      - name: Commit validated fixes to the training branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Recommendation V8 Recovery'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/api/src/deadlock-live/hero-build-decision-dataset-v3.service.ts apps/api/src/deadlock-live/recommendation-historical-pro-replay.ts apps/api/src/deadlock-live/recommendation-candidate-generator-snapshot-export.service.ts scripts/run-recommendation-v8-clean-diagnostic-supervisor.mjs
+          git commit -m 'fix: rebuild Recommendation V8 source safely'
+          git push origin HEAD:agent/recommendation-value-v8-passive-shadow-1
+
+      - name: Resolve isolated storage and stop failed training container
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          production_api_container="$(cd "$deploy_dir" && sudo docker compose ps -q api)"
+          if [ -z "$production_api_container" ]; then
+            echo 'Production API container is not running.' >&2
+            exit 1
+          fi
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_api_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_api_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
+          if [ -z "$storage_type" ] || [ -z "$storage_source" ]; then
+            echo 'Could not resolve the production storage mount.' >&2
+            exit 1
+          fi
+          sudo docker rm -f deadlock-recommendation-v8-training >/dev/null 2>&1 || true
+          echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
+
+      - name: Delete old Dataset V3 and all derived offline artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          directories=(build-decision-dataset-v3 recommendation-candidate-generator-snapshots recommendation-historical-pro-replay-v1 recommendation-pro-decision-dataset-v6-1 recommendation-behavioral-v5-1 recommendation-value-v8-diagnostic-1 recommendation-v6-short-only-dataset-v6-baseline-1 recommendation-value-v8-full-evaluation-1 recommendation-value-v8-passive-shadow-1)
+          for directory in "${directories[@]}"; do
+            path="$STORAGE_MOUNT_SOURCE/$directory"
+            if [ -e "$path" ]; then
+              echo "Deleting $path ($(sudo du -sh "$path" 2>/dev/null | awk '{print $1}'))"
+              sudo rm -rf --one-file-system "$path"
+            fi
+          done
+          for directory in "${directories[@]}"; do
+            test ! -e "$STORAGE_MOUNT_SOURCE/$directory"
+          done
+
+      - name: Prepare a new clean run directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          run_id="clean-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          cp scripts/run-recommendation-v8-clean-diagnostic-supervisor.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs "$run_dir/"
+          ln -sfn "$run_dir" "$run_root/current"
+          : > "$run_dir/training.log"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+
+      - name: Start clean isolated training API
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          mount_args=()
+          if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
+            mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
+            mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
+          fi
+          sudo docker run -d --name deadlock-recommendation-v8-training --restart=no --network aboba-telegramovich_default -p 127.0.0.1:3010:3000 --env-file "$deploy_dir/.env" -e DB_HOST=aboba-telegramovich-postgres-1 -e DB_PORT=5432 -e DB_USER=postgres -e DB_NAME=deadlock_builds -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false -e NODE_OPTIONS=--max-old-space-size=8192 "${mount_args[@]}" --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" "$TRAINING_IMAGE"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          exit 1
+
+      - name: Start detached clean Dataset V3 rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo docker exec -d -e API_BASE_URL=http://127.0.0.1:3000 -e TRAINING_RUN_ID="$TRAINING_RUN_ID" -e TRAINING_LOG_PATH=/runner/training.log -e TRAINING_STATUS_PATH=/runner/status.json -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-diagnostic-only-pipeline.mjs -e MINIMUM_SOURCE_MATCH_COUNT=25000 -e DIAGNOSTIC_MAX_ROWS=10000 -e TRAINING_POLL_INTERVAL_MS=15000 -e SOURCE_DATASET_TIMEOUT_MS=43200000 -e PIPELINE_POLL_INTERVAL_MS=15000 -e PIPELINE_TIMEOUT_MS=172800000 deadlock-recommendation-v8-training node /runner/run-recommendation-v8-clean-diagnostic-supervisor.mjs
+          for attempt in $(seq 1 30); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-clean-diagnostic-supervisor.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              curl -s http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          cat "$TRAINING_RUN_DIR/training.log" || true
+          exit 1

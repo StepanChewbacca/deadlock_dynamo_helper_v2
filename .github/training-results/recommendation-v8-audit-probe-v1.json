@@ -1,0 +1,193 @@
+{
+  "generatedAt": "2026-08-02T22:17:27+00:00",
+  "commitSha": "2ca47d147d294f1cbf5982931bf8e75a4ff5422c",
+  "replayStatus": {
+    "state": "COMPLETE",
+    "phase": "COMPLETE",
+    "sourceRowCount": 1023598,
+    "selectedSourceRowCount": 1023598,
+    "processedPartitionCount": 16,
+    "partitionCount": 16,
+    "outputRowCount": 1023598,
+    "excludedWithoutTimelineCount": 0,
+    "excludedWithoutGeneratorSnapshotCount": 0,
+    "outputDirectory": "/app/apps/api/storage/recommendation-historical-pro-replay-v1",
+    "datasetPath": "/app/apps/api/storage/recommendation-historical-pro-replay-v1/dataset.ndjson",
+    "datasetAvailable": true,
+    "manifestAvailable": true,
+    "auditAvailable": true,
+    "startedAt": "2026-08-02T14:22:46.497Z",
+    "completedAt": "2026-08-02T20:21:26.676Z",
+    "auditPassed": false
+  },
+  "audit": {
+    "schemaVersion": 1,
+    "replayVersion": "RECOMMENDATION_HISTORICAL_PRO_REPLAY_1",
+    "generatedAt": "2026-08-02T20:21:26.676Z",
+    "passed": false,
+    "rowCount": 1023598,
+    "sourceCounts": {
+      "PRO_HISTORICAL": 1023598,
+      "PRO_FUTURE_HOLDOUT": 0,
+      "USER_LIVE": 0
+    },
+    "integrity": {
+      "duplicateDecisionIdCount": 0,
+      "emptyCandidateSetCount": 0,
+      "nonDeterministicCandidateOrderCount": 0,
+      "observedActionInjectedCount": 0,
+      "snapshotLeakageCount": 0
+    },
+    "coverage": {
+      "timelineRowCount": 949457,
+      "timelineCoverage": 0.9275682445647607,
+      "candidateCount": 102359800,
+      "candidateWithMetadataCount": 102359800,
+      "candidateMetadataCoverage": 1,
+      "observedActionInCandidateSetCount": 1015898,
+      "observedActionCandidateCoverage": 0.9924775155871739,
+      "stateModelEligibleCount": 949457,
+      "behavioralModelEligibleCount": 1015898,
+      "actionModelEligibleCount": 941812
+    },
+    "thresholds": {
+      "minimumTimelineCoverage": 0.99,
+      "minimumCandidateMetadataCoverage": 0.999,
+      "minimumObservedActionCandidateCoverage": 0.99
+    },
+    "reasons": [
+      "Timeline coverage 0.9275682445647607 is below 0.99."
+    ],
+    "source": {
+      "datasetVersion": "CONTEXTUAL_V3_DECISION_DATASET_1",
+      "expectedRowCount": 1023598,
+      "scannedRowCount": 1023598,
+      "selectedRowCount": 1023598,
+      "excludedWithoutTimelineCount": 0,
+      "excludedWithoutGeneratorSnapshotCount": 0,
+      "invalidSourceRowCount": 0
+    },
+    "snapshots": {
+      "registrySha256": "b3c888183fe6f7a386415324cb7a7da5c3e2c732adf94c41b805294c2ee51c4e",
+      "snapshotCount": 1,
+      "snapshotIds": [
+        "v8-5000-c6637-30701422914"
+      ]
+    },
+    "build": {
+      "partitionCount": 16,
+      "fullCorpus": true,
+      "resumeEnabled": true
+    },
+    "trainingArtifactEligible": false
+  },
+  "manifest": {
+    "schemaVersion": 1,
+    "replayVersion": "RECOMMENDATION_HISTORICAL_PRO_REPLAY_1",
+    "generatedAt": "2026-08-02T20:21:26.676Z",
+    "source": {
+      "kind": "POSTGRESQL_CONTEXTUAL_V3_SNAPSHOT",
+      "datasetVersion": "CONTEXTUAL_V3_DECISION_DATASET_1",
+      "directory": "/app/apps/api/storage/recommendation-v8-bounded-5000-v1/replay-v3",
+      "fileName": "dataset.ndjson",
+      "sha256": "0c51dee1589ea1cf0ae286973ca898c0d7d8891f0b05a58e68524d657d705e8b",
+      "byteLength": 947577648,
+      "manifestRowCount": 1023598,
+      "scannedRowCount": 1023598,
+      "selectedRowCount": 1023598
+    },
+    "candidateGeneratorSnapshots": {
+      "registryPath": "/app/apps/api/storage/recommendation-candidate-generator-snapshots-5000-v1/registry.json",
+      "registrySha256": "b3c888183fe6f7a386415324cb7a7da5c3e2c732adf94c41b805294c2ee51c4e",
+      "snapshotCount": 1,
+      "snapshotIds": [
+        "v8-5000-c6637-30701422914"
+      ],
+      "selectionRule": "LATEST_TRAINING_WINDOW_END_STRICTLY_BEFORE_MATCH_START"
+    },
+    "timelineSource": {
+      "source": "POSTGRESQL_RAW_MATCH_METADATA_CACHE",
+      "cacheVersion": "RECOMMENDATION_HISTORICAL_POSTGRES_TIMELINE_CACHE_1",
+      "directory": "/app/apps/api/storage/match-timeline-events-v1",
+      "snapshotStalenessS": 300,
+      "decisionSnapshotSelection": "LATEST_AT_OR_BEFORE_WITHIN_STALENESS",
+      "horizonSnapshotSelection": "NEAREST_AFTER_DECISION_WITHIN_STALENESS",
+      "requiredForOutput": true
+    },
+    "artifact": {
+      "format": "NDJSON",
+      "fileName": "dataset.ndjson",
+      "byteLength": 59632559834,
+      "sha256": "4d3aa9d7ae819ecc314cbaa389314a90058ac330f87ffbd5e42aa4cff759d33f",
+      "rowCount": 1023598
+    },
+    "build": {
+      "partitionCount": 16,
+      "fullCorpus": true,
+      "resumeEnabled": true
+    },
+    "featureContract": {
+      "featureCutoff": "DECISION_TIME_PRE_ACTION",
+      "observedActionInjectedIntoCandidates": false,
+      "v5_3UsedAsInput": false,
+      "userLiveUsedAsInput": false,
+      "shortHorizonTargets": [
+        "3m",
+        "5m",
+        "10m"
+      ],
+      "finalOutcomeAuxiliaryOnly": true
+    },
+    "auditPassed": false,
+    "trainingArtifactEligible": false
+  },
+  "downstream": {
+    "datasetV6": {
+      "state": "IDLE",
+      "phase": "PREPARING",
+      "sourceRowCount": 0,
+      "outputRowCount": 0,
+      "timelineJoinedRowCount": 0,
+      "missingTimelineRowCount": 0,
+      "outputDirectory": "/app/apps/api/storage/recommendation-pro-decision-dataset-v6-1",
+      "datasetPath": "/app/apps/api/storage/recommendation-pro-decision-dataset-v6-1/dataset.ndjson",
+      "datasetAvailable": false,
+      "manifestAvailable": false,
+      "auditAvailable": false
+    },
+    "behavioralV5": {
+      "state": "IDLE",
+      "phase": "PREPARING",
+      "currentPass": 0,
+      "totalPasses": 0,
+      "sourceRowCount": 0,
+      "trainEligibleDecisionCount": 0,
+      "tuningEligibleDecisionCount": 0,
+      "futureTestEligibleDecisionCount": 0,
+      "predictionRowCount": 0,
+      "outputDirectory": "/app/apps/api/storage/recommendation-behavioral-v5-1",
+      "modelAvailable": false,
+      "propensitiesAvailable": false,
+      "evaluationAvailable": false,
+      "auditAvailable": false,
+      "manifestAvailable": false
+    },
+    "valueV8Diagnostic": {
+      "state": "IDLE",
+      "phase": "PREPARING",
+      "currentPass": 0,
+      "totalPasses": 0,
+      "trainDecisionCount": 0,
+      "tuningDecisionCount": 0,
+      "futureTestDecisionCount": 0,
+      "propensityJoinCount": 0,
+      "outputDirectory": "/app/apps/api/storage/recommendation-value-v8-diagnostic-1",
+      "modelAvailable": false,
+      "stateOofAvailable": false,
+      "predictionsAvailable": false,
+      "evaluationAvailable": false,
+      "auditAvailable": false,
+      "manifestAvailable": false
+    }
+  }
+}

@@ -1,0 +1,123 @@
+name: Recommendation V8 Apply Isolated Runtime Guards V1
+
+on:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-apply-isolated-runtime-guards-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recommendation-v8-apply-isolated-runtime-guards-v1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='.github/training-requests/recommendation-v8-apply-isolated-runtime-guards-v1.json'
+          state="$(jq -r '.state // empty' "$request")"
+          if [ "$state" = 'CONSUMED' ]; then
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$state" = 'REQUESTED'
+          test "$(jq -r '.operation' "$request")" = 'APPLY_ISOLATED_RUNTIME_GUARDS_V1'
+          test "$(jq -r '.productionRankingChanged' "$request")" = 'false'
+          test "$(jq -r '.passiveShadowActivated' "$request")" = 'false'
+          test "$(jq -r '.randomizedCanaryAuthorized' "$request")" = 'false'
+          echo 'apply=true' >> "$GITHUB_OUTPUT"
+
+      - name: Apply isolated runtime guards
+        if: steps.request.outputs.apply == 'true'
+        run: python3 scripts/patch-recommendation-v8-isolated-runtime-side-effects-v1.py
+
+      - name: Setup Node.js
+        if: steps.request.outputs.apply == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        if: steps.request.outputs.apply == 'true'
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build shared package
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/shared build
+
+      - name: Build domain package
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/build-domain build
+
+      - name: Build API
+        if: steps.request.outputs.apply == 'true'
+        run: yarn workspace @deadlock-live-probe/api build
+
+      - name: Run API tests
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set +e
+          yarn workspace @deadlock-live-probe/api test --runInBand > "$RUNNER_TEMP/api-isolation-tests.log" 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 300 "$RUNNER_TEMP/api-isolation-tests.log"
+            exit "$status"
+          fi
+          tail -n 80 "$RUNNER_TEMP/api-isolation-tests.log"
+
+      - name: Mark request consumed
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          path = Path('.github/training-requests/recommendation-v8-apply-isolated-runtime-guards-v1.json')
+          value = json.loads(path.read_text())
+          value['state'] = 'CONSUMED'
+          value['consumedAt'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          path.write_text(json.dumps(value, indent=2) + '\n')
+          PY
+
+      - name: Commit validated isolation guards
+        if: steps.request.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/api/src/deadlock-live/recent-match-crawler.service.ts apps/api/src/deadlock-live/reference-data-import.service.ts apps/api/src/deadlock-live/recommendation-outcome-linker.service.ts apps/api/src/deadlock-live/recipe-aware-timeline-reconciliation.service.ts .github/training-requests/recommendation-v8-apply-isolated-runtime-guards-v1.json
+          if git diff --cached --quiet; then
+            echo 'Isolation source guards are already applied.'
+            exit 0
+          fi
+          git commit -m 'fix: isolate Recommendation V8 training runtime side effects'
+          git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Upload failed test log
+        if: failure() && steps.request.outputs.apply == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-isolation-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/api-isolation-tests.log
+          if-no-files-found: ignore
+          retention-days: 7

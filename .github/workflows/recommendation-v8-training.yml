@@ -1,0 +1,293 @@
+name: Recommendation V8 VPS Training
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/training-requests/recommendation-v8-current.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recommendation-v8-vps-training
+  cancel-in-progress: false
+
+jobs:
+  audit-clean-and-start:
+    name: Audit VPS, clean safe artifacts, and start detached training
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare run directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_root='/home/ubuntu/apps/deadlock_dynamo_helper-training'
+          run_dir="$run_root/runs/$run_id"
+          sudo mkdir -p "$run_dir"
+          sudo chown -R "$(id -u):$(id -g)" "$run_root"
+          cp scripts/run-recommendation-v8-training-supervisor.mjs "$run_dir/"
+          cp scripts/run-recommendation-v8-real-data-v2.mjs "$run_dir/"
+          ln -sfn "$run_dir" "$run_root/current"
+          echo "TRAINING_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          echo "TRAINING_RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          echo "TRAINING_AUDIT_REPORT=$run_dir/vps-audit.txt" >> "$GITHUB_ENV"
+
+      - name: Audit VPS storage and active runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          cd "$deploy_dir"
+          production_api_container="$(sudo docker compose ps -q api)"
+          if [ -z "$production_api_container" ]; then
+            echo 'Production API container is not running.' >&2
+            exit 1
+          fi
+          storage_type="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Type}}{{end}}{{end}}' "$production_api_container")"
+          storage_name="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Name}}{{end}}{{end}}' "$production_api_container")"
+          storage_source="$(sudo docker inspect --format='{{range .Mounts}}{{if eq .Destination "/app/apps/api/storage"}}{{.Source}}{{end}}{{end}}' "$production_api_container")"
+          if [ -z "$storage_type" ] || [ -z "$storage_source" ]; then
+            echo 'Could not resolve the production storage mount.' >&2
+            exit 1
+          fi
+          {
+            echo "Audit generated at: $(date --iso-8601=seconds)"
+            echo "Production API container: $production_api_container"
+            echo "Storage type: $storage_type"
+            echo "Storage name: $storage_name"
+            echo "Storage source: $storage_source"
+            echo
+            echo '=== Filesystems before cleanup ==='
+            df -hT
+            echo
+            echo '=== Inodes before cleanup ==='
+            df -ih
+            echo
+            echo '=== Memory ==='
+            free -h
+            echo
+            echo '=== Docker usage before cleanup ==='
+            sudo docker system df -v
+            echo
+            echo '=== Production runtime model and storage environment ==='
+            sudo docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' "$production_api_container" | grep -E 'DEADLOCK_(CONTEXTUAL_V3|RECOMMENDATION_VALUE_V6|BUILD_DECISION_DATASET_V3|TIMELINE|RECOMMENDATION_TELEMETRY)' | sort || true
+            echo
+            echo '=== Storage directory sizes before cleanup ==='
+            sudo du -xhd1 "$storage_source" 2>/dev/null | sort -h
+            echo
+            echo '=== Largest storage files before cleanup ==='
+            sudo find "$storage_source" -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -nr | head -n 100 | numfmt --field=1 --to=iec-i --suffix=B || true
+          } | tee "$TRAINING_AUDIT_REPORT"
+          echo "PRODUCTION_API_CONTAINER=$production_api_container" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_TYPE=$storage_type" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_NAME=$storage_name" >> "$GITHUB_ENV"
+          echo "STORAGE_MOUNT_SOURCE=$storage_source" >> "$GITHUB_ENV"
+
+      - name: Stop stale training container and clean safe artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          training_container='deadlock-recommendation-v8-training'
+          if sudo docker ps --format '{{.Names}}' | grep -Fxq "$training_container"; then
+            if sudo docker exec "$training_container" sh -lc "pgrep -f 'run-recommendation-v8-training-supervisor.mjs' >/dev/null"; then
+              echo 'An active Recommendation V8 training supervisor already exists.' >&2
+              exit 1
+            fi
+            sudo docker rm -f "$training_container"
+          else
+            sudo docker rm -f "$training_container" >/dev/null 2>&1 || true
+          fi
+
+          safe_directories=(
+            'build-evaluation'
+            'build-evaluation-v2'
+            'contextual-v3-candidate-evaluation-v2'
+            'contextual-v3-final-test'
+            'recommendation-decision-dataset-v4-historical-bootstrap'
+            'recommendation-decision-dataset-v5'
+            'recommendation-behavioral-v4-training'
+            'recommendation-value-v4-training'
+            'recommendation-policy-v4-evaluation'
+            'recommendation-candidate-generator-snapshots'
+            'recommendation-historical-pro-replay-v1'
+            'recommendation-pro-decision-dataset-v6-1'
+            'recommendation-behavioral-v5-1'
+            'recommendation-value-v8-diagnostic-1'
+            'recommendation-v6-short-only-dataset-v6-baseline-1'
+            'recommendation-value-v8-full-evaluation-1'
+            'recommendation-value-v8-passive-shadow-1'
+          )
+
+          {
+            echo
+            echo '=== Safe artifact cleanup ==='
+            echo 'Preserved explicitly:'
+            echo '- build-decision-dataset-v3 source dataset'
+            echo '- match-timeline-events-v1'
+            echo '- recommendation decision telemetry'
+            echo '- contextual-v3-training production model'
+            echo '- recommendation-value-v6-training frozen baseline model'
+            echo '- recommendation-value-v6-live-candidates production model'
+            for directory in "${safe_directories[@]}"; do
+              path="$STORAGE_MOUNT_SOURCE/$directory"
+              if [ ! -e "$path" ]; then
+                echo "SKIP missing: $directory"
+                continue
+              fi
+              size="$(sudo du -sh "$path" 2>/dev/null | awk '{print $1}')"
+              echo "DELETE regenerable: $directory ($size)"
+              sudo find "$path" -maxdepth 3 -type f \( -name 'manifest.json' -o -name 'audit.json' -o -name 'evaluation.json' \) -print -exec sha256sum {} \; 2>/dev/null || true
+              sudo rm -rf --one-file-system "$path"
+            done
+            echo
+            echo '=== Stale partial files ==='
+            sudo find "$STORAGE_MOUNT_SOURCE" -xdev -type f \( -name '*.partial' -o -name '*.tmp' -o -name '*.lock' \) -mmin +1440 -print -delete 2>/dev/null || true
+            echo
+            echo '=== Docker cleanup ==='
+            sudo docker container prune -f --filter 'until=168h'
+            sudo docker image prune -af --filter 'until=168h'
+            sudo docker builder prune -af --filter 'until=168h'
+            find "$TRAINING_RUN_ROOT/runs" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print -exec rm -rf {} + || true
+          } | tee -a "$TRAINING_AUDIT_REPORT"
+
+      - name: Audit VPS after cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo
+            echo '=== Filesystems after cleanup ==='
+            df -hT
+            echo
+            echo '=== Docker usage after cleanup ==='
+            sudo docker system df
+            echo
+            echo '=== Storage directory sizes after cleanup ==='
+            sudo du -xhd1 "$STORAGE_MOUNT_SOURCE" 2>/dev/null | sort -h
+          } | tee -a "$TRAINING_AUDIT_REPORT"
+
+      - name: Build isolated training image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="deadlock-recommendation-v8-training:${GITHUB_SHA}"
+          sudo docker build -t "$image" .
+          echo "TRAINING_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Start isolated training API container
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_dir='/home/ubuntu/apps/deadlock_dynamo_helper'
+          mount_args=()
+          if [ "$STORAGE_MOUNT_TYPE" = 'volume' ]; then
+            mount_args+=(--mount "type=volume,src=$STORAGE_MOUNT_NAME,dst=/app/apps/api/storage")
+          elif [ "$STORAGE_MOUNT_TYPE" = 'bind' ]; then
+            mount_args+=(--mount "type=bind,src=$STORAGE_MOUNT_SOURCE,dst=/app/apps/api/storage")
+          else
+            echo "Unsupported storage mount type: $STORAGE_MOUNT_TYPE" >&2
+            exit 1
+          fi
+
+          sudo docker run -d \
+            --name deadlock-recommendation-v8-training \
+            --restart=no \
+            --network aboba-telegramovich_default \
+            -p 127.0.0.1:3010:3000 \
+            --env-file "$deploy_dir/.env" \
+            -e DB_HOST=aboba-telegramovich-postgres-1 \
+            -e DB_PORT=5432 \
+            -e DB_USER=postgres \
+            -e DB_NAME=deadlock_builds \
+            -e DEADLOCK_TIMELINE_COLLECTOR_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_SHADOW_ENABLED=false \
+            -e DEADLOCK_CONTEXTUAL_V3_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V6_LIVE_MODE=DISABLED \
+            -e DEADLOCK_RECOMMENDATION_VALUE_V8_SHADOW_ENABLED=false \
+            -e NODE_OPTIONS=--max-old-space-size=8192 \
+            "${mount_args[@]}" \
+            --mount "type=bind,src=$TRAINING_RUN_DIR,dst=/runner" \
+            "$TRAINING_IMAGE"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status >/dev/null; then
+              echo 'Isolated training API is ready.'
+              exit 0
+            fi
+            if [ "$(sudo docker inspect --format='{{.State.Running}}' deadlock-recommendation-v8-training)" != 'true' ]; then
+              sudo docker logs --tail=300 deadlock-recommendation-v8-training
+              exit 1
+            fi
+            sleep 2
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          echo 'Isolated training API did not become ready.' >&2
+          exit 1
+
+      - name: Trigger detached training supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$TRAINING_RUN_DIR/training.log"
+          sudo docker exec -d \
+            -e API_BASE_URL=http://127.0.0.1:3000 \
+            -e TRAINING_RUN_ID="$TRAINING_RUN_ID" \
+            -e TRAINING_LOG_PATH=/runner/training.log \
+            -e TRAINING_STATUS_PATH=/runner/status.json \
+            -e TRAINING_PIPELINE_SCRIPT=/runner/run-recommendation-v8-real-data-v2.mjs \
+            -e MINIMUM_SOURCE_MATCH_COUNT=25000 \
+            -e DIAGNOSTIC_MAX_ROWS=10000 \
+            -e PIPELINE_POLL_INTERVAL_MS=15000 \
+            -e PIPELINE_TIMEOUT_MS=172800000 \
+            deadlock-recommendation-v8-training \
+            node /runner/run-recommendation-v8-training-supervisor.mjs
+
+          for attempt in $(seq 1 20); do
+            if [ -s "$TRAINING_RUN_DIR/status.json" ] && sudo docker exec deadlock-recommendation-v8-training sh -lc "pgrep -f 'run-recommendation-v8-training-supervisor.mjs' >/dev/null"; then
+              cat "$TRAINING_RUN_DIR/status.json"
+              echo 'Detached training supervisor is running. The GitHub Action will now finish.'
+              exit 0
+            fi
+            sleep 1
+          done
+          sudo docker logs --tail=300 deadlock-recommendation-v8-training
+          cat "$TRAINING_RUN_DIR/training.log" || true
+          echo 'Detached training supervisor did not start.' >&2
+          exit 1
+
+      - name: Print monitoring commands
+        shell: bash
+        run: |
+          {
+            echo
+            echo '=== Monitoring ==='
+            echo "Follow training: sudo tail -f $TRAINING_RUN_ROOT/current/training.log"
+            echo "Read status: sudo cat $TRAINING_RUN_ROOT/current/status.json | jq"
+            echo 'Check container: sudo docker ps --filter name=deadlock-recommendation-v8-training'
+            echo 'Source Dataset V3: curl -s http://127.0.0.1:3010/deadlock/analysis/build-decision-dataset-v3/status | jq'
+            echo 'Dataset V6: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status | jq'
+            echo 'Behavioral V5: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status | jq'
+            echo 'Value V8 diagnostic: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status | jq'
+            echo 'Full Value V8: curl -s http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-full-evaluation/status | jq'
+          } | tee -a "$TRAINING_AUDIT_REPORT"
+
+      - name: Upload VPS audit and launch metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recommendation-v8-vps-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.TRAINING_AUDIT_REPORT }}
+            ${{ env.TRAINING_RUN_DIR }}/status.json
+            ${{ env.TRAINING_RUN_DIR }}/resolved-training-config.json
+            ${{ env.TRAINING_RUN_DIR }}/training.log
+          if-no-files-found: warn
+          retention-days: 30

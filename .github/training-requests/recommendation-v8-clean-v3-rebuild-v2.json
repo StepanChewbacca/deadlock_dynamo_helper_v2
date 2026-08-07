@@ -1,0 +1,11 @@
+{
+  "requestedAt": "2026-07-28T16:10:00Z",
+  "reason": "Delete the corrupted Dataset V3, fix partial writes, validate physical row count, stream full candidate snapshots, accept fractional timeline game times, and rebuild from PostgreSQL from scratch.",
+  "deleteOldDatasetV3": true,
+  "deleteDerivedOfflineArtifacts": true,
+  "fullPolicyTrainingQuantile": 0.6,
+  "runMode": "DIAGNOSTIC_NON_RELEASE_CURRENT_CATALOG_FALLBACK",
+  "productionRankingChanged": false,
+  "passiveShadowActivated": false,
+  "randomizedCanaryAuthorized": false
+}

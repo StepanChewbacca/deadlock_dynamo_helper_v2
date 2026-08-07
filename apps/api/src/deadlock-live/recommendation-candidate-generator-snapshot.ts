@@ -23,6 +23,7 @@ import { sha256StableJson } from './stable-json';
 export const RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_SCHEMA_VERSION = 1;
 export const RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION =
   'RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_1' as const;
+export const RECOMMENDATION_HISTORICAL_OFFLINE_CANDIDATE_LIMIT = 256;
 
 export interface RecommendationSerializedHeroBuildPolicyState {
   stateKey: string;
@@ -49,6 +50,25 @@ export interface RecommendationCandidateGeneratorSnapshotArtifact {
     version: string;
     items: RecommendationHistoricalCatalogItem[];
   };
+}
+
+export type RecommendationCandidateGeneratorSnapshotMetadata = Omit<
+  RecommendationCandidateGeneratorSnapshotArtifact,
+  'policies'
+>;
+
+export interface RecommendationPreparedHeroBuildPolicy {
+  heroId: number;
+  policy: HeroBuildPolicy;
+  parsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
+  supportPolicy: HeroBuildPolicy;
+  supportParsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
 }
 
 export interface RecommendationCandidateGeneratorSnapshotRegistryEntry {
@@ -83,6 +103,39 @@ export function candidateGeneratorCatalogPayload(
   };
 }
 
+export function validateRecommendationCandidateGeneratorSnapshotMetadata(
+  artifact: RecommendationCandidateGeneratorSnapshotMetadata,
+): void {
+  if (
+    artifact.schemaVersion !==
+      RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_SCHEMA_VERSION ||
+    artifact.artifactVersion !==
+      RECOMMENDATION_CANDIDATE_GENERATOR_SNAPSHOT_VERSION
+  ) {
+    throw new Error('Unsupported recommendation candidate generator snapshot.');
+  }
+  validateSnapshotIdentity(artifact.snapshot);
+  validateGeneratorOptions(artifact.generatorOptions);
+  if (
+    !artifact.catalog ||
+    !Array.isArray(artifact.catalog.items) ||
+    !artifact.catalog.version.trim()
+  ) {
+    throw new Error('Candidate generator snapshot catalog is invalid.');
+  }
+  if (artifact.catalog.version !== artifact.snapshot.catalogVersion) {
+    throw new Error('Candidate generator snapshot catalog version does not match metadata.');
+  }
+  const normalizedCatalog = normalizeCatalogItems(artifact.catalog.items);
+  const itemIds = new Set<number>();
+  for (const item of normalizedCatalog) {
+    if (itemIds.has(item.itemId)) {
+      throw new Error(`Candidate generator snapshot duplicates item ${item.itemId}.`);
+    }
+    itemIds.add(item.itemId);
+  }
+}
+
 export function validateRecommendationCandidateGeneratorSnapshotArtifact(
   artifact: RecommendationCandidateGeneratorSnapshotArtifact,
 ): void {
@@ -97,12 +150,12 @@ export function validateRecommendationCandidateGeneratorSnapshotArtifact(
   validateSnapshotIdentity(artifact.snapshot);
   validateGeneratorOptions(artifact.generatorOptions);
 
-  const normalizedPolicies = normalizePolicies(artifact.policies);
-  if (normalizedPolicies.length === 0) {
+  const policies = artifact.policies;
+  if (policies.length === 0) {
     throw new Error('Candidate generator snapshot contains no hero policies.');
   }
   const heroIds = new Set<number>();
-  for (const policy of normalizedPolicies) {
+  for (const policy of policies) {
     if (heroIds.has(policy.heroId)) {
       throw new Error(`Candidate generator snapshot duplicates hero ${policy.heroId}.`);
     }
@@ -125,9 +178,10 @@ export function validateRecommendationCandidateGeneratorSnapshotArtifact(
     itemIds.add(item.itemId);
   }
 
-  const actualPolicySha256 = sha256StableJson(
-    candidateGeneratorPolicyPayload(artifact),
-  );
+  const actualPolicySha256 = sha256StableJson({
+    generatorOptions: artifact.generatorOptions,
+    policies: artifact.policies,
+  });
   if (actualPolicySha256 !== artifact.snapshot.policySha256) {
     throw new Error(
       `Candidate generator policy SHA-256 mismatch: ${actualPolicySha256} versus ` +
@@ -186,28 +240,31 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
   decision: HeroBuildDecisionDatasetV3Row;
   artifact: RecommendationCandidateGeneratorSnapshotArtifact;
 }): RecommendationHistoricalCandidateInput[] {
-  const matchTime = requiredTimestamp(
-    input.decision.matchStartTime,
-    'decision.matchStartTime',
-  );
-  const trainingEnd = requiredTimestamp(
-    input.artifact.snapshot.trainingWindowEnd,
-    'trainingWindowEnd',
-  );
-  if (trainingEnd >= matchTime) {
-    throw new Error(
-      'Candidate generator snapshot training window must end before the replay match.',
-    );
-  }
-
   const policyValue = input.artifact.policies.find(
     (policy) => policy.heroId === input.decision.heroId,
   );
-  if (!policyValue) {
-    return [];
-  }
+  return generateRecommendationHistoricalCandidatesFromPreparedPolicy({
+    decision: input.decision,
+    snapshot: input.artifact.snapshot,
+    generatorOptions: input.artifact.generatorOptions,
+    catalog: input.artifact.catalog,
+    policy: policyValue
+      ? prepareRecommendationSerializedHeroBuildPolicy(policyValue)
+      : undefined,
+  });
+}
 
-  const policy = deserializePolicy(policyValue);
+export function validateRecommendationSerializedHeroBuildPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): void {
+  validateSerializedPolicy(value);
+}
+
+export function prepareRecommendationSerializedHeroBuildPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): RecommendationPreparedHeroBuildPolicy {
+  validateRecommendationSerializedHeroBuildPolicy(value);
+  const policy = deserializePolicy(value);
   const parsedStates = [...policy.statesByKey.values()]
     .map((state) => ({
       state,
@@ -215,12 +272,51 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
     }))
     .filter(
       (
-        value,
-      ): value is {
+        item,
+      ): item is {
         state: HeroBuildPolicyState;
         itemCounts: ReadonlyMap<number, number>;
-      } => value.itemCounts !== undefined,
+      } => item.itemCounts !== undefined,
     );
+  const support = buildHistoricalSupportPolicy(value);
+  return {
+    heroId: value.heroId,
+    policy,
+    parsedStates,
+    supportPolicy: support.policy,
+    supportParsedStates: support.parsedStates,
+  };
+}
+
+export function generateRecommendationHistoricalCandidatesFromPreparedPolicy(input: {
+  decision: HeroBuildDecisionDatasetV3Row;
+  snapshot: RecommendationFrozenCandidateGeneratorSnapshot;
+  generatorOptions: HeroBuildRecommendationOptions;
+  catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+  policy?: RecommendationPreparedHeroBuildPolicy;
+  componentsByParent?: ReadonlyMap<number, number[]>;
+  historicalCandidateLimit?: number;
+}): RecommendationHistoricalCandidateInput[] {
+  const matchTime = requiredTimestamp(
+    input.decision.matchStartTime,
+    'decision.matchStartTime',
+  );
+  const trainingEnd = requiredTimestamp(
+    input.snapshot.trainingWindowEnd,
+    'trainingWindowEnd',
+  );
+  if (trainingEnd >= matchTime) {
+    throw new Error(
+      'Candidate generator snapshot training window must end before the replay match.',
+    );
+  }
+  if (!input.policy) {
+    return [];
+  }
+  if (input.policy.heroId !== input.decision.heroId) {
+    throw new Error('Prepared candidate policy hero does not match the replay decision.');
+  }
+
   const inventory = parseInventoryStateKey(
     input.decision.inventoryBeforeStateKey,
   );
@@ -232,29 +328,203 @@ export function generateRecommendationHistoricalCandidatesFromValidatedSnapshot(
   const itemIds = [...inventory.entries()].flatMap(([itemId, count]) =>
     Array.from({ length: count }, () => itemId),
   );
-  const componentsByParent = new Map<number, number[]>(
-    input.artifact.catalog.items.map((item) => [
-      item.itemId,
-      [...item.componentItemIds],
-    ]),
+  const componentsByParent =
+    input.componentsByParent ??
+    new Map<number, number[]>(
+      input.catalog.items.map((item) => [
+        item.itemId,
+        [...item.componentItemIds],
+      ]),
+    );
+  const historicalCandidateLimit = normalizeHistoricalCandidateLimit(
+    input.historicalCandidateLimit ??
+      Math.max(
+        input.generatorOptions.limit,
+        RECOMMENDATION_HISTORICAL_OFFLINE_CANDIDATE_LIMIT,
+      ),
   );
+  const request = {
+    heroId: input.decision.heroId,
+    itemIds,
+    gameTimeS: input.decision.gameTimeS,
+    limit: historicalCandidateLimit,
+  };
+  const recipeResolver = (parentItemId: number): readonly number[] =>
+    componentsByParent.get(parentItemId) ?? [];
   const response = recommendFromPolicy(
-    {
-      heroId: input.decision.heroId,
-      itemIds,
-      gameTimeS: input.decision.gameTimeS,
-      limit: input.artifact.generatorOptions.limit,
-    },
+    request,
     input.decision.inventoryBeforeStateKey,
-    policy,
-    parsedStates,
-    (parentItemId) => componentsByParent.get(parentItemId) ?? [],
-    normalizeGeneratorOptions(input.artifact.generatorOptions),
+    input.policy.policy,
+    input.policy.parsedStates,
+    recipeResolver,
+    normalizeGeneratorOptions(input.generatorOptions),
   );
-  return candidateActionsFromRecommendationResponse(response);
+  const supportResponse = recommendFromPolicy(
+    request,
+    input.decision.inventoryBeforeStateKey,
+    input.policy.supportPolicy,
+    input.policy.supportParsedStates,
+    recipeResolver,
+    {
+      minExactObservations: 1,
+      maxBackoffDistance: 64,
+      maxBackoffStates: 1,
+      limit: historicalCandidateLimit,
+    },
+  );
+  return mergeHistoricalCandidateActions(
+    candidateActionsFromRecommendationResponse(response),
+    candidateActionsFromRecommendationResponse(supportResponse),
+    historicalCandidateLimit,
+  );
+}
+
+function normalizeHistoricalCandidateLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 2 || value > 512) {
+    throw new Error(
+      'historicalCandidateLimit must be a safe integer between 2 and 512.',
+    );
+  }
+  return value;
+}
+
+function mergeHistoricalCandidateActions(
+  primary: readonly RecommendationHistoricalCandidateInput[],
+  support: readonly RecommendationHistoricalCandidateInput[],
+  limit: number,
+): RecommendationHistoricalCandidateInput[] {
+  const unique = new Map<string, RecommendationHistoricalCandidateInput>();
+  for (const candidate of [...primary, ...support]) {
+    const actionKey = `${candidate.actionType}:${candidate.itemId}`;
+    if (unique.has(actionKey)) {
+      continue;
+    }
+    unique.set(actionKey, {
+      ...candidate,
+      actionKey,
+      rank: unique.size + 1,
+    });
+    if (unique.size >= limit) {
+      break;
+    }
+  }
+  return [...unique.values()];
+}
+
+function buildHistoricalSupportPolicy(
+  value: RecommendationSerializedHeroBuildPolicy,
+): {
+  policy: HeroBuildPolicy;
+  parsedStates: Array<{
+    state: HeroBuildPolicyState;
+    itemCounts: ReadonlyMap<number, number>;
+  }>;
+} {
+  const aggregates = new Map<
+    string,
+    {
+      actionType: HeroBuildPolicyNextAction['actionType'];
+      itemId: number;
+      actionKey: string;
+      count: number;
+      totalGameTimeS: number;
+      afterStateCounts: Map<string, number>;
+    }
+  >();
+  let observationCount = 0;
+  let transitionCount = 0;
+
+  for (const state of value.states) {
+    observationCount += state.observationCount;
+    for (const action of state.nextActions) {
+      const key = `${action.actionType}:${action.itemId}`;
+      const aggregate = aggregates.get(key) ?? {
+        actionType: action.actionType,
+        itemId: action.itemId,
+        actionKey: key,
+        count: 0,
+        totalGameTimeS: 0,
+        afterStateCounts: new Map<string, number>(),
+      };
+      aggregate.count += action.count;
+      aggregate.totalGameTimeS += action.averageGameTimeS * action.count;
+      transitionCount += action.count;
+      for (const afterState of action.afterStates) {
+        aggregate.afterStateCounts.set(
+          afterState.afterStateKey,
+          (aggregate.afterStateCounts.get(afterState.afterStateKey) ?? 0) +
+            afterState.count,
+        );
+      }
+      aggregates.set(key, aggregate);
+    }
+  }
+
+  const nextActions = [...aggregates.values()]
+    .map((aggregate): HeroBuildPolicyNextAction => ({
+      actionType: aggregate.actionType,
+      itemId: aggregate.itemId,
+      actionKey: aggregate.actionKey,
+      count: aggregate.count,
+      probability:
+        transitionCount > 0 ? aggregate.count / transitionCount : 0,
+      averageGameTimeS:
+        aggregate.count > 0
+          ? aggregate.totalGameTimeS / aggregate.count
+          : 0,
+      afterStates: [...aggregate.afterStateCounts.entries()]
+        .map(([afterStateKey, count]) => ({
+          afterStateKey,
+          count,
+          probability:
+            aggregate.count > 0 ? count / aggregate.count : 0,
+        }))
+        .sort(
+          (left, right) =>
+            right.count - left.count ||
+            left.afterStateKey.localeCompare(right.afterStateKey),
+        ),
+    }))
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.actionKey.localeCompare(right.actionKey),
+    );
+  const state: HeroBuildPolicyState = {
+    heroId: value.heroId,
+    stateKey: 'EMPTY',
+    observationCount: Math.max(1, observationCount),
+    nextActionCount: nextActions.length,
+    nextActions,
+  };
+  return {
+    policy: {
+      heroId: value.heroId,
+      playerCount: value.playerCount,
+      stateCount: 1,
+      transitionCount,
+      statesByKey: new Map([[state.stateKey, state]]),
+    },
+    parsedStates: [{ state, itemCounts: new Map<number, number>() }],
+  };
 }
 
 export function createRecommendationCandidateGeneratorSnapshotArtifact(input: {
+  snapshot: Omit<
+    RecommendationFrozenCandidateGeneratorSnapshot,
+    'policySha256' | 'catalogSha256'
+  >;
+  generatorOptions?: Partial<HeroBuildRecommendationOptions>;
+  policies: RecommendationSerializedHeroBuildPolicy[];
+  catalog: RecommendationCandidateGeneratorSnapshotArtifact['catalog'];
+}): RecommendationCandidateGeneratorSnapshotArtifact {
+  return createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies({
+    ...input,
+    policies: normalizePolicies(input.policies),
+  });
+}
+
+export function createRecommendationCandidateGeneratorSnapshotArtifactFromNormalizedPolicies(input: {
   snapshot: Omit<
     RecommendationFrozenCandidateGeneratorSnapshot,
     'policySha256' | 'catalogSha256'
@@ -284,15 +554,16 @@ export function createRecommendationCandidateGeneratorSnapshotArtifact(input: {
         HERO_BUILD_MAX_BACKOFF_STATES,
       limit: input.generatorOptions?.limit ?? 100,
     }),
-    policies: normalizePolicies(input.policies),
+    policies: input.policies,
     catalog: {
       version: input.catalog.version,
       items: normalizeCatalogItems(input.catalog.items),
     },
   } satisfies RecommendationCandidateGeneratorSnapshotArtifact;
-  artifact.snapshot.policySha256 = sha256StableJson(
-    candidateGeneratorPolicyPayload(artifact),
-  );
+  artifact.snapshot.policySha256 = sha256StableJson({
+    generatorOptions: artifact.generatorOptions,
+    policies: artifact.policies,
+  });
   artifact.snapshot.catalogSha256 = sha256StableJson(
     candidateGeneratorCatalogPayload(artifact),
   );

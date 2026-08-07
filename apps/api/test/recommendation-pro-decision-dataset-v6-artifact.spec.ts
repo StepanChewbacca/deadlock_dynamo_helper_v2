@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -84,7 +85,7 @@ describe('Recommendation Dataset V6 artifact', () => {
       writeFile(join(replayDirectory, 'dataset.ndjson'), replayDataset, 'utf8'),
       writeJson(join(replayDirectory, 'manifest.json'), {
         schemaVersion: 1,
-        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
         artifact: {
           fileName: 'dataset.ndjson',
           rowCount: replayRows.length,
@@ -95,7 +96,7 @@ describe('Recommendation Dataset V6 artifact', () => {
       }),
       writeJson(join(replayDirectory, 'audit.json'), {
         schemaVersion: 1,
-        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+        replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
         passed: true,
         trainingArtifactEligible: true,
       }),
@@ -126,10 +127,10 @@ describe('Recommendation Dataset V6 artifact', () => {
       auditPassed: true,
       trainingArtifactEligible: true,
     });
-    const datasetRows = (await readFile(
-      join(outputDirectory, 'dataset.ndjson'),
-      'utf8',
-    ))
+    const datasetRows = gunzipSync(
+      await readFile(join(outputDirectory, 'dataset.ndjson')),
+    )
+      .toString('utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as RecommendationProDecisionDatasetV6Row);
@@ -149,10 +150,14 @@ describe('Recommendation Dataset V6 artifact', () => {
 
     const manifest = service.getManifest();
     expect(manifest).toMatchObject({
-      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_1',
+      datasetVersion: 'RECOMMENDATION_PRO_DECISION_DATASET_V6_2',
       source: {
         kind: 'HISTORICAL_REPLAY',
         sha256: replaySha256,
+      },
+      artifact: {
+        format: 'NDJSON',
+        compression: 'GZIP',
       },
       featureContract: {
         currentGoldAvailable: false,
@@ -309,7 +314,7 @@ function replayRow(
   const catalog = new Map(catalogItems().map((item) => [item.itemId, item]));
   return {
     schemaVersion: 1,
-    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_1',
+    replayVersion: 'RECOMMENDATION_HISTORICAL_PRO_REPLAY_2',
     dataSource: 'PRO_HISTORICAL',
     decisionId,
     matchId: String(matchId),
