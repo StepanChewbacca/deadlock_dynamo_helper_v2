@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-08-05T23:14:17+00:00",
-  "workflowRunId": "31055288620",
-  "implementationSha": "9b702c27210a648b5ef157fd85338713fd705a97",
-  "image": "deadlock-recommendation-v8-training:9b702c27210a648b5ef157fd85338713fd705a97-terminal-outcomes-5000-v2",
-  "runId": "terminal-v2-31055288620-2",
+  "generatedAt": "2026-08-07T20:46:45+00:00",
+  "workflowRunId": "31216039691",
+  "implementationSha": "ef391d50f6dddf27391c215b97399a005f071972",
+  "image": "deadlock-recommendation-v8-training:ef391d50f6dddf27391c215b97399a005f071972-terminal-outcomes-5000-v2",
+  "runId": "terminal-v2-31216039691-1",
   "run": {
-    "runId": "terminal-v2-31055288620-2",
+    "runId": "terminal-v2-31216039691-1",
     "state": "RUNNING",
     "stage": "HISTORICAL_REPLAY",
     "matchLimit": 5000,
-    "implementationSha": "9b702c27210a648b5ef157fd85338713fd705a97",
+    "implementationSha": "ef391d50f6dddf27391c215b97399a005f071972",
     "outputDirectories": {
       "replay": "recommendation-historical-pro-replay-terminal-5000-v2",
       "datasetV6": "recommendation-pro-decision-dataset-v6-terminal-5000-v2",
@@ -23,7 +23,7 @@
     "randomizedCanaryAuthorized": false,
     "observedActionInjected": false,
     "auditThresholdsLowered": false,
-    "trainingRestartedAt": "2026-08-05T23:14:16.135181Z"
+    "trainingRestartedAt": "2026-08-07T20:46:44.652482Z"
   },
   "replayStatus": {
     "state": "RUNNING",
@@ -40,6 +40,6 @@
     "datasetAvailable": false,
     "manifestAvailable": false,
     "auditAvailable": false,
-    "startedAt": "2026-08-05T23:14:14.129Z"
+    "startedAt": "2026-08-07T20:46:42.463Z"
   }
 }
