@@ -1,6 +1,6 @@
 {
   "operation": "APPLY_AUDIT_READY_FALLBACK_AND_RESTART_5000_V4",
-  "state": "REQUESTED",
+  "state": "CONSUMED",
   "attempt": 4,
   "requestedAt": "2026-08-05T20:51:00.000Z",
   "lastFailure": "A second runtime manifest check still compared Dataset V6 against the V6_1 literal; all evaluation lineage checks now use the exported Dataset V6 version constant.",
@@ -19,5 +19,7 @@
   "observedActionInjectionAuthorized": false,
   "productionRankingChanged": false,
   "passiveShadowActivated": false,
-  "randomizedCanaryAuthorized": false
+  "randomizedCanaryAuthorized": false,
+  "completedAt": "2026-08-07T20:42:50+00:00",
+  "validationBaseSha": "90ceb72f0d5f938f8698c85d21566ff6b839e419"
 }
