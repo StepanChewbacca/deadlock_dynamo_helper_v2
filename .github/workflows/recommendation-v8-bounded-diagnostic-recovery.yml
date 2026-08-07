@@ -32,14 +32,15 @@ jobs:
           run_dir="$(readlink -f "$run_root/current")"
           storage='/var/lib/docker/volumes/deadlock_dynamo_helper_deadlock-storage/_data'
           replay="$storage/recommendation-historical-pro-replay-terminal-5000-v2"
+          behavioral="$storage/recommendation-behavioral-v5-terminal-5000-v2"
           report="$RUNNER_TEMP/recommendation-v8-bounded-diagnostic-recovery.txt"
 
           replay_status="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/status)"
           replay_audit="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-historical-pro-replay/audit)"
           dataset_status="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-pro-decision-dataset-v6/status)"
           behavioral_status="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/status)"
-          behavioral_audit="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/audit)"
-          behavioral_evaluation="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/evaluation)"
+          behavioral_audit="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/audit || sudo cat "$behavioral/audit.json")"
+          behavioral_evaluation="$(curl --fail --silent --max-time 30 http://127.0.0.1:3010/deadlock/analysis/recommendation-behavioral-v5-training/evaluation || sudo cat "$behavioral/evaluation.json")"
 
           jq -e '.state == "COMPLETE" and .auditPassed == true' <<<"$replay_status"
           jq -e '.passed == true and .trainingArtifactEligible == true' <<<"$replay_audit"
@@ -84,6 +85,7 @@ jobs:
             sh -lc 'node /app/scripts/run-recommendation-v8-diagnostic-only-pipeline.mjs >> /runner/training.log 2>&1'
 
           recovered=false
+          value_status='{}'
           for attempt in $(seq 1 60); do
             value_status="$(curl --silent --show-error --max-time 15 http://127.0.0.1:3010/deadlock/analysis/recommendation-value-v8-diagnostic/status || true)"
             value_state="$(jq -r '.state // empty' <<<"$value_status" 2>/dev/null || true)"
@@ -130,7 +132,6 @@ jobs:
           } | tee "$report"
 
           test "$recovered" = 'true'
-          sudo docker exec "$container" sh -lc "pgrep -f '[r]un-recommendation-v8-diagnostic-only-pipeline.mjs' >/dev/null || true"
           sudo docker exec "$container" sh -lc "pgrep -f '[m]onitor-recommendation-v8-disk-reserve-v1.sh' >/dev/null"
           test "$(sudo docker inspect --format='{{.State.Running}}' "$container")" = 'true'
           test "$(sudo docker inspect --format='{{.State.OOMKilled}}' "$container")" = 'false'
