@@ -43,11 +43,6 @@ replace_once(
 )
 replace_once(
     SERVICE,
-    "          fileName: PROPENSITY_FILE_NAME,\n          rowCount: predictionRowCount,\n          sha256: await hashFile(this.paths.propensities),\n",
-    "          fileName: PROPENSITY_FILE_NAME,\n          format: 'NDJSON',\n          compression: 'GZIP',\n          rowCount: predictionRowCount,\n          byteLength: (await stat(this.paths.propensities)).size,\n          uncompressedByteLength: propensityUncompressedByteLength,\n          sha256: await hashFile(this.paths.propensities),\n",
-)
-replace_once(
-    SERVICE,
     "            fileName: PROPENSITY_FILE_NAME,\n            sha256: audit.predictions.sha256,\n            byteLength: (await stat(this.paths.propensities)).size,\n            rowCount: predictionRowCount,\n",
     "            fileName: PROPENSITY_FILE_NAME,\n            format: 'NDJSON',\n            compression: 'GZIP',\n            sha256: audit.predictions.sha256,\n            byteLength: (await stat(this.paths.propensities)).size,\n            uncompressedByteLength: propensityUncompressedByteLength,\n            rowCount: predictionRowCount,\n",
 )
